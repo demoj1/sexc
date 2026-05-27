@@ -2,30 +2,40 @@
   "stdio.h"
   "math.h")
 
-(struct QuadrEq (float a) (float b) (float c))
-(struct Roots (float x1) (float x2))
+(struct Roots
+  (float x1)
+  (float x2))
 
-(defn float QuadrEq/disc ((QuadrEq self))
-  (return (- (powf (. self b) 2.0) (* 4.0 (. self a) (. self c)))))
+(struct QuadrEq
+  (float a)
+  (float b)
+  (float c)
 
-(defn Roots QuadrEq/solve ((QuadrEq self))
-  (decl
-    (float denom) (* 2 (. self a))
-    (float d)     (sqrtf (QuadrEq/disc self)))
+  (defun float disc ((QuadrEq self))
+    (return (- (powf (. self b) 2.0) (* 4.0 (. self a) (. self c)))))
 
-  (%evals
-    ($for (row '((x1 +) (x2 -)))
-      ($let ((name ($car row))
-             (op ($car ($cdr row))))
-        `(%decl float ,name
-           (/ (,op (- (. self b)) d) denom)))))
+  (defun Roots solve ((QuadrEq self))
+    (decl
+      (float denom) (* 2 (. self a))
+      (float d)     (sqrtf (QuadrEq/disc self)))
 
-  (return (Roots# (x1 x1) (x2 x2))))
+    (%evals
+      ($for (row '((x1 +) (x2 -)))
+        ($let ((name ($car row))
+               (op ($car ($cdr row))))
+          `(%decl float ,name
+             (/ (,op (- (. self b)) d) denom)))))
+
+    (return (Roots# (x1 x1) (x2 x2)))))
 
 (defn int main ()
   (decl
     (QuadrEq problem) (QuadrEq# (a 5) (b 3) (c -26))
     (Roots root) (QuadrEq/solve problem))
+
+  (%evals
+   ($for (name '("Dmitry" "Vasily"))
+         `(printf "Hello %s\n" ,name)))
 
   (printf "Solve square roots:\nx1 = %f\nx2 = %f\n" (. root x1) (. root x2))
 

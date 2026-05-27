@@ -93,6 +93,7 @@
 
 - В std есть макросы:
   - `(struct Name (type field) ...)` -> `typedef struct ... Name;`
+  - Внутри `struct` можно объявлять методы через `defun`; они автогенерируются как `Name/method`.
   - `(union Name (type field) ...)` -> `typedef union ... Name;`
 - Инициализация структур через sugar `Type#`:
   - `(Roots# (x1 5) (x2 7))` -> `(Roots){ .x1 = 5, .x2 = 7 }`
@@ -106,7 +107,8 @@
   - Параметры в форматах:
     - классический: `((float a) (float b))`
     - групповой: `((float a b c))`.
-- `defun` специально **не используется**.
+- `defun` — алиас `defn`.
+  - Внутри `struct` `defun` автогенерирует namespaced-имя: `StructName/method`.
 
 ## Генерация C идентификаторов
 
@@ -125,3 +127,4 @@
 
 - `examples/hello.sexc` — актуальный demo с `struct`, grouped params, `Type#`, и именами вида `Type/method`.
 - `examples/dot_arrow_alias.sexc` — demo для `.` / `->` и цепочек полей.
+- `examples/struct_methods.sexc` — demo для `defun` внутри `struct` и namespace-функций.

@@ -1,0 +1,17 @@
+(include "stdio.h")
+
+(struct MathOps
+  (int dummy)
+
+  (defun int add ((int l r))
+    (return (+ l r)))
+
+  (defun int mul ((int l r))
+    (return (* l r))))
+
+(defun int sub ((int l r))
+  (return (- l r)))
+
+(defn int main ()
+  (printf "add=%d mul=%d sub=%d\n" (MathOps/add 2 3) (MathOps/mul 4 5) (sub 8 1))
+  (return 0))

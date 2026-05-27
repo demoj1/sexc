@@ -1,0 +1,56 @@
+; std/meta.sexc
+; Generic surface helpers built on top of c-interop macros.
+
+; when
+; (when cond form...)
+; => (%if cond (%block form...))
+(%defmacro when (cond &rest body)
+  `(%if ,cond (%block ,@body)))
+
+; unless
+; (unless cond form...)
+; => (%if (%! cond) (%block form...))
+(%defmacro unless (cond &rest body)
+  `(%if (%! ,cond) (%block ,@body)))
+
+; incf / decf
+; (incf x) => (set x (+ x 1))
+; (decf x) => (set x (- x 1))
+(%defmacro incf (x)
+  `(%set ,x (%+ ,x 1)))
+
+(%defmacro decf (x)
+  `(%set ,x (%- ,x 1)))
+
+; incf-by / decf-by
+; (incf-by x n) => (set x (+ x n))
+; (decf-by x n) => (set x (- x n))
+(%defmacro incf-by (x n)
+  `(%set ,x (%+ ,x ,n)))
+
+(%defmacro decf-by (x n)
+  `(%set ,x (%- ,x ,n)))
+
+; dotimes
+; (dotimes i n form...)
+; => for i in [0, n)
+(%defmacro dotimes (i n &rest body)
+  `(%for (%decl int ,i 0) (%< ,i ,n) (%post-inc ,i) (%block ,@body)))
+
+; for-range
+; (for-range i start stop form...)
+; => for i in [start, stop)
+(%defmacro for-range (i start stop &rest body)
+  `(%for (%decl int ,i ,start) (%< ,i ,stop) (%post-inc ,i) (%block ,@body)))
+
+; repeat
+; (repeat n form...)
+; Repeats body n times without exposing an index variable.
+(%defmacro repeat (n &rest body)
+  `(repeat-expand ,($gensym "repeat_i_") ,n (block ,@body)))
+
+(%defmacro repeat-expand (i n body)
+  `(%for (%decl int ,i 0)
+         (%< ,i ,n)
+         (%post-inc ,i)
+         ,body))

@@ -39,6 +39,10 @@ let expect_list = function
   | Raw.List xs -> xs
   | _ -> fail "macro expected list"
 
+let expect_atom_or_string = function
+  | Raw.Atom s | Raw.Str s -> s
+  | _ -> fail "macro expected atom or string"
+
 let is_evals_splice = function
   | Raw.List [ Raw.Atom tag; Raw.List xs ] when String.equal tag evals_splice_tag -> Some xs
   | _ -> None
@@ -103,6 +107,12 @@ let rec eval_expr ctx env expr =
       | Raw.List _ -> bool_raw false)
   | Raw.List (Raw.Atom "$eq?" :: [ a; b ]) ->
       bool_raw (raw_equal (eval_expr ctx env a) (eval_expr ctx env b))
+  | Raw.List (Raw.Atom "$symcat" :: parts) ->
+      let text =
+        List.map parts ~f:(fun p -> eval_expr ctx env p |> expect_atom_or_string)
+        |> String.concat ~sep:""
+      in
+      Raw.Atom text
   | Raw.List (Raw.Atom "$let" :: Raw.List binds :: body) ->
       let rec bind env = function
         | [] -> env
@@ -189,6 +199,7 @@ let rec eval_expr ctx env expr =
              "null?";
              "atom?";
              "eq?";
+             "symcat";
              "let";
              "for";
              "map";
