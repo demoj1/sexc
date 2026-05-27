@@ -152,11 +152,21 @@
     `(%top-level-splice
        (%typedef (%struct ,name ,@fields) ,name)
        ,@($map
-           ($let ((ret ($car ($cdr it)))
-                  (mname ($car ($cdr ($cdr it))))
-                  (params ($car ($cdr ($cdr ($cdr it)))))
-                  (body ($cdr ($cdr ($cdr ($cdr it))))))
-             `(defn ,ret ,($symcat name "/" mname) ,params ,@body))
+           ($if ($atom? it)
+             ($error "struct method must be a list: (defun ret name params body...)")
+             ($if ($null? ($cdr it))
+               ($error "struct method must include return type")
+               ($if ($null? ($cdr ($cdr it)))
+                 ($error "struct method must include method name")
+                 ($if ($null? ($cdr ($cdr ($cdr it))))
+                   ($error "struct method must include parameter list")
+                   ($let ((ret ($car ($cdr it)))
+                          (mname ($car ($cdr ($cdr it))))
+                          (params ($car ($cdr ($cdr ($cdr it)))))
+                          (body ($cdr ($cdr ($cdr ($cdr it))))))
+                     ($if ($atom? mname)
+                       `(%def-fn ,ret ,($symcat name "/" mname) ,params (%block ,@body))
+                       ($error "struct method name must be an atom")))))))
            methods))))
 
 ; union

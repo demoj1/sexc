@@ -12,9 +12,10 @@
 
 (defn int main ()
   (decl (Player p) (Player# 0))
-  (set (. p location position x) 10.0)
-  (set (. p location position y) 20.0)
+  (set (. p location position x) 10.0
+       (. p location position y) 20.0)
 
   (decl ((%ptr Player) pp) (%addr p))
+
   (printf "%f %f\n" (. p location position x) (. (-> pp location) position y))
   (return 0))
