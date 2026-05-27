@@ -109,11 +109,11 @@
 ; Single pair => (%set lhs value)
 ; Multiple pairs => (%block (%set lhs value) (%set lhs2 value2) ...)
 ; Number of arguments after value/lhs must be even.
-(%defmacro set (value lhs &rest more)
+(%defmacro set (lhs value &rest more)
   (if (null? more)
     `(%set ,lhs ,value)
     (if (null? (cdr more))
-      (error "set expects pairs: (set value lhs [value2 lhs2 ...])")
+      (error "set expects pairs: (set lhs value [lhs2 value2 ...])")
       `(%block
          (%set ,lhs ,value)
          (set ,(car more) ,(car (cdr more)) ,@(cdr (cdr more)))))))
@@ -165,10 +165,10 @@
 (%defmacro % (a b)
   `(%% ,a ,b))
 
-(%defmacro == (a b)
+(%defmacro = (a b)
   `(%== ,a ,b))
 
-(%defmacro != (a b)
+(%defmacro not= (a b)
   `(%!= ,a ,b))
 
 (%defmacro < (a b)
@@ -186,8 +186,14 @@
 (%defmacro && (a b)
   `(%&& ,a ,b))
 
+(%defmacro and (a b)
+  `(&& ,a ,b))
+
 (%defmacro || (a b)
   `(%|| ,a ,b))
+
+(%defmacro or (a b)
+  `(|| ,a ,b))
 
 (%defmacro post-inc (x)
   `(%post-inc ,x))

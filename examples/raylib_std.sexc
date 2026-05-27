@@ -17,45 +17,35 @@
 
   (dotimes i 10
     (decl radius float (cast float (GetRandomValue 10 30)))
-    (set radius (aref radii i))
+    (set (aref radii i) radius)
 
     (set
-      (cast float (GetRandomValue (cast int radius) (- SCREEN_WIDTH (cast int radius)))) (dot (aref positions i) x)
-      (cast float (GetRandomValue (cast int radius) (- SCREEN_HEIGHT (cast int radius)))) (dot (aref positions i) y)
-      (cast float (GetRandomValue -5 5)) (dot (aref velocities i) x)
-      (cast float (GetRandomValue -5 5)) (dot (aref velocities i) y))
+      (dot (aref positions i) x) (cast float (GetRandomValue (cast int radius) (- SCREEN_WIDTH (cast int radius))))
+      (dot (aref positions i) y) (cast float (GetRandomValue (cast int radius) (- SCREEN_HEIGHT (cast int radius))))
+      (dot (aref velocities i) x) (cast float (GetRandomValue -5 5))
+      (dot (aref velocities i) y) (cast float (GetRandomValue -5 5)))
 
-    (cond
-      ((== (dot (aref velocities i) x) 0.0f)
-       (set 1.0f (dot (aref velocities i) x)))
-      (else (nop)))
+    (when (= (dot (aref velocities i) x) 0.0f)
+      (set (dot (aref velocities i) x) 1.0f))
 
-    (cond
-      ((== (dot (aref velocities i) y) 0.0f)
-       (set -1.0f (dot (aref velocities i) y)))
-      (else (nop)))
+    (when (= (dot (aref velocities i) y) 0.0f)
+      (set (dot (aref velocities i) y) -1.0f))
 
-    (set (ColorFromHSV (cast float (* i 36)) 0.85f 0.95f) (aref colors i)))
+    (set (aref colors i) (ColorFromHSV (cast float (* i 36)) 0.85f 0.95f)))
 
   (while (not (WindowShouldClose))
     (dotimes i 10
       (set
-        (+ (dot (aref positions i) x) (dot (aref velocities i) x)) (dot (aref positions i) x)
-        (+ (dot (aref positions i) y) (dot (aref velocities i) y)) (dot (aref positions i) y))
+        (dot (aref positions i) x) (+ (dot (aref positions i) x) (dot (aref velocities i) x))
+        (dot (aref positions i) y) (+ (dot (aref positions i) y) (dot (aref velocities i) y)))
 
-      (cond
-        ((||
-            (<= (- (dot (aref positions i) x) (aref radii i)) 0.0f)
-            (>= (+ (dot (aref positions i) x) (aref radii i)) SCREEN_WIDTH))
-         (set (- 0.0f (dot (aref velocities i) x)) (dot (aref velocities i) x)))
-        (else (nop)))
+      (when (or (<= (- (dot (aref positions i) x) (aref radii i)) 0.0f)
+                (>= (+ (dot (aref positions i) x) (aref radii i)) SCREEN_WIDTH))
+        (set (dot (aref velocities i) x) (- 0.0f (dot (aref velocities i) x))))
 
-      (cond
-        ((||
-            (<= (- (dot (aref positions i) y) (aref radii i)) 0.0f)
-            (>= (+ (dot (aref positions i) y) (aref radii i)) SCREEN_HEIGHT))
-         (set (- 0.0f (dot (aref velocities i) y)) (dot (aref velocities i) y)))
-        (else (nop))))
+      (when (or (<= (- (dot (aref positions i) y) (aref radii i)) 0.0f)
+                (>= (+ (dot (aref positions i) y) (aref radii i)) SCREEN_HEIGHT))
+        (set (dot (aref velocities i) y) (- 0.0f (dot (aref velocities i) y)))))
 
     (begin-frame)
     (clear (ColorFromHSV 0.0f 0.0f 0.12f))

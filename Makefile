@@ -1,4 +1,6 @@
-.PHONY: build run clean
+.PHONY: all build run clean
+
+all: build
 
 _dune_lock_fix:
 	@if [ -f _build/.lock ]; then \
