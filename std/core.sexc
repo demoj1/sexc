@@ -1,52 +1,121 @@
-; Core macro stdlib: syntax sugar over strict %IR intrinsics
+; std/core.sexc
+; Human-friendly macros over strict %IR intrinsics.
+; All control-flow macros auto-wrap their bodies in (%block ...),
+; so callers do not need to write (block ...) manually.
 
+; include
+; (include header)
+; => (%include header)
 (%defmacro include (h)
   `(%include ,h))
 
+; define
+; (define name value)
+; => (%define name value)
 (%defmacro define (name value)
   `(%define ,name ,value))
 
-(%defmacro def-fn (ret name params &rest body)
+; defn
+; (defn ret name params form...)
+; => (%def-fn ret name params (%block form...))
+(%defmacro defn (ret name params &rest body)
   `(%def-fn ,ret ,name ,params (%block ,@body)))
 
-(%defmacro decl (ty name)
-  `(%decl ,ty ,name))
+; decl
+; (decl ty name) OR (decl ty name init)
+; => (%decl ty name) OR (%decl ty name init)
+(%defmacro decl (ty name &rest init)
+  (if (null? init)
+    `(%decl ,ty ,name)
+    (if (null? (cdr init))
+      `(%decl ,ty ,name ,(car init))
+      (error "decl accepts only 2 or 3 arguments"))))
 
-(%defmacro decl-init (ty name init)
-  `(%decl ,ty ,name ,init))
-
+; block
+; (block form...)
+; => (%block form...)
 (%defmacro block (&rest body)
   `(%block ,@body))
 
+; if
+; (if cond then) or (if cond then else)
+; => (%if cond (%block then))
+; => (%if cond (%block then) (%block else))
+; More complex branching should use cond.
 (%defmacro if (cond then &rest else-body)
   (if (null? else-body)
     `(%if ,cond (%block ,then))
-    `(%if ,cond (%block ,then) (%block ,@else-body))))
+    (if (null? (cdr else-body))
+      `(%if ,cond (%block ,then) (%block ,(car else-body)))
+      (error "if accepts only 2 or 3 arguments; use cond for multi-branch logic"))))
 
-(%defmacro if1 (cond &rest then-body)
-  `(%if ,cond (%block ,@then-body)))
+; cond
+; (cond
+;   (test form...)
+;   (test2 form...)
+;   (else form...))
+; Expands into nested %if forms with %block bodies.
+(%defmacro cond (&rest clauses)
+  (if (null? clauses)
+    (error "cond requires at least one clause")
+    `(cond-expand ,@clauses)))
 
+(%defmacro cond-expand (clause &rest rest)
+  (if (null? (cdr clause))
+    (error "cond clause must contain a test and at least one body form")
+    (if (eq? (car clause) else)
+      (if (null? rest)
+        `(%block ,@(cdr clause))
+        (error "else clause must be the last cond clause"))
+      (if (null? rest)
+        `(%if ,(car clause) (%block ,@(cdr clause)))
+        `(%if ,(car clause)
+            (%block ,@(cdr clause))
+            (cond-expand ,@rest))))))
+
+; while
+; (while cond form...)
+; => (%while cond (%block form...))
 (%defmacro while (cond &rest body)
   `(%while ,cond (%block ,@body)))
 
+; for
+; (for init cond step form...)
+; => (%for init cond step (%block form...))
 (%defmacro for (init cond step &rest body)
   `(%for ,init ,cond ,step (%block ,@body)))
 
+; return
+; (return expr)
+; => (%return expr)
 (%defmacro return (expr)
   `(%return ,expr))
 
+; set
+; (set lhs rhs)
+; => (%set lhs rhs)
 (%defmacro set (lhs rhs)
   `(%set ,lhs ,rhs))
 
+; cast
+; (cast ty expr)
+; => (%cast ty expr)
 (%defmacro cast (ty expr)
   `(%cast ,ty ,expr))
 
+; sizeof-type
+; (sizeof-type ty)
+; => (%sizeof-type ty)
 (%defmacro sizeof-type (ty)
   `(%sizeof-type ,ty))
 
+; sizeof-expr
+; (sizeof-expr expr)
+; => (%sizeof-expr expr)
 (%defmacro sizeof-expr (expr)
   `(%sizeof-expr ,expr))
 
+; aref / dot / arrow helpers
 (%defmacro aref (arr idx)
   `(%aref ,arr ,idx))
 
@@ -56,6 +125,7 @@
 (%defmacro arrow (ptr field)
   `(%arrow ,ptr ,field))
 
+; Operator wrappers
 (%defmacro not (x)
   `(%! ,x))
 
@@ -104,28 +174,46 @@
 (%defmacro nop ()
   `(%nop))
 
-; Convenience macros
+; Convenience control-flow and mutation helpers
 
+; when
+; (when cond form...)
+; => (%if cond (%block form...))
 (%defmacro when (cond &rest body)
   `(%if ,cond (%block ,@body)))
 
+; unless
+; (unless cond form...)
+; => (%if (%! cond) (%block form...))
 (%defmacro unless (cond &rest body)
   `(%if (%! ,cond) (%block ,@body)))
 
+; incf / decf
+; (incf x) => (set x (+ x 1))
+; (decf x) => (set x (- x 1))
 (%defmacro incf (x)
   `(%set ,x (%+ ,x 1)))
 
 (%defmacro decf (x)
   `(%set ,x (%- ,x 1)))
 
+; incf-by / decf-by
+; (incf-by x n) => (set x (+ x n))
+; (decf-by x n) => (set x (- x n))
 (%defmacro incf-by (x n)
   `(%set ,x (%+ ,x ,n)))
 
 (%defmacro decf-by (x n)
   `(%set ,x (%- ,x ,n)))
 
+; dotimes
+; (dotimes i n form...)
+; => for i in [0, n)
 (%defmacro dotimes (i n &rest body)
   `(%for (%decl int ,i 0) (%< ,i ,n) (%post-inc ,i) (%block ,@body)))
 
+; for-range
+; (for-range i start stop form...)
+; => for i in [start, stop)
 (%defmacro for-range (i start stop &rest body)
   `(%for (%decl int ,i ,start) (%< ,i ,stop) (%post-inc ,i) (%block ,@body)))

@@ -93,6 +93,13 @@ let rec eval_expr ctx env expr =
       | Raw.List _ -> bool_raw false)
   | Raw.List (Raw.Atom "eq?" :: [ a; b ]) ->
       bool_raw (raw_equal (eval_expr ctx env a) (eval_expr ctx env b))
+  | Raw.List (Raw.Atom "error" :: [ msg ]) ->
+      let text =
+        match eval_expr ctx env msg with
+        | Raw.Atom s | Raw.Str s -> s
+        | _ -> "macro error"
+      in
+      fail text
   | Raw.List (Raw.Atom "gensym" :: []) -> gensym ctx "__g"
   | Raw.List (Raw.Atom "gensym" :: [ prefix ]) ->
       let p =

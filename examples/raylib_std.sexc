@@ -6,7 +6,7 @@
 (define SCREEN_WIDTH 960)
 (define SCREEN_HEIGHT 640)
 
-(def-fn int main ()
+(defn int main ()
   (InitWindow SCREEN_WIDTH SCREEN_HEIGHT "SexC std macros: bouncing circles")
   (SetTargetFPS 60)
 
@@ -15,8 +15,8 @@
   (decl (%array float 10) radii)
   (decl (%array Color 10) colors)
 
-  (for (decl-init int i 0) (< i 10) (post-inc i)
-    (decl-init float radius (cast float (GetRandomValue 10 30)))
+  (for (decl int i 0) (< i 10) (post-inc i)
+    (decl float radius (cast float (GetRandomValue 10 30)))
     (set (aref radii i) radius)
 
     (set (dot (aref positions i) x)
@@ -29,29 +29,29 @@
     (set (dot (aref velocities i) y)
       (cast float (GetRandomValue -5 5)))
 
-    (if1 (== (dot (aref velocities i) x) 0.0f)
+    (if (== (dot (aref velocities i) x) 0.0f)
       (set (dot (aref velocities i) x) 1.0f))
-    (if1 (== (dot (aref velocities i) y) 0.0f)
+    (if (== (dot (aref velocities i) y) 0.0f)
       (set (dot (aref velocities i) y) -1.0f))
 
     (set (aref colors i)
       (ColorFromHSV (cast float (* i 36)) 0.85f 0.95f)))
 
   (while (not (WindowShouldClose))
-    (for (decl-init int i 0) (< i 10) (post-inc i)
+    (for (decl int i 0) (< i 10) (post-inc i)
       (set (dot (aref positions i) x)
         (+ (dot (aref positions i) x) (dot (aref velocities i) x)))
       (set (dot (aref positions i) y)
         (+ (dot (aref positions i) y) (dot (aref velocities i) y)))
 
-      (if1
+      (if
         (||
           (<= (- (dot (aref positions i) x) (aref radii i)) 0.0f)
           (>= (+ (dot (aref positions i) x) (aref radii i)) SCREEN_WIDTH))
         (set (dot (aref velocities i) x)
           (- 0.0f (dot (aref velocities i) x))))
 
-      (if1
+      (if
         (||
           (<= (- (dot (aref positions i) y) (aref radii i)) 0.0f)
           (>= (+ (dot (aref positions i) y) (aref radii i)) SCREEN_HEIGHT))
@@ -61,7 +61,7 @@
     (begin-frame)
     (clear (ColorFromHSV 0.0f 0.0f 0.12f))
 
-    (for (decl-init int i 0) (< i 10) (post-inc i)
+    (for (decl int i 0) (< i 10) (post-inc i)
       (circle (aref positions i) (aref radii i) (aref colors i)))
 
     (DrawText "10 bouncing circles (SexC std)" 20 20 20 RAYWHITE)
