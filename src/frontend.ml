@@ -44,6 +44,11 @@ and expr =
   | EIndex of expr * expr
   | EMember of expr * string
   | EPtrMember of expr * string
+  | ECompoundLiteral of ty * compound_init list
+
+and compound_init =
+  | InitExpr of expr
+  | InitField of string * expr
 
 and for_init =
   | FNone
@@ -68,6 +73,7 @@ and stmt =
   | SGoto of string
   | SLabel of string
   | SDecl of decl
+  | SDeclMany of decl list
   | SExpr of expr
 
 type param = {
@@ -188,6 +194,13 @@ let ensure_arity_between name args low high =
 
 let is_intrinsic name = String.is_prefix name ~prefix:"%"
 
+let parse_type_hash_name s =
+  if String.is_suffix s ~suffix:"#" then
+    let n = String.length s in
+    if n = 1 then fail "Type# initializer requires a type name before '#'"
+    else Some (String.sub s ~pos:0 ~len:(n - 1))
+  else None
+
 let c_binary_op = function
   | "%+" -> "+"
   | "%-" -> "-"
@@ -223,10 +236,28 @@ let rec parse_expr raw =
   | Raw.List (head :: rest) -> (
       match head with
       | Raw.Atom h when is_intrinsic h -> parse_intrinsic_expr h rest
+      | Raw.Atom h -> (
+          match parse_type_hash_name h with
+          | Some ty_name -> parse_type_hash_init ty_name rest
+          | None -> ECall (parse_expr head, List.map rest ~f:parse_expr))
       | _ -> ECall (parse_expr head, List.map rest ~f:parse_expr))
+
+and parse_type_hash_init ty_name args =
+  let ty = TNamed ty_name in
+  match args with
+  | [ Raw.Atom "0" ] -> ECompoundLiteral (ty, [ InitExpr (EAtom "0") ])
+  | [ _ ] -> failf "%s# supports single-argument form only as zero-init: (%s# 0)" ty_name ty_name
+  | [] -> failf "%s# requires initializers: either (%s# 0) or (%s# (field value) ...)" ty_name ty_name ty_name
+  | _ ->
+      let parse_field_init = function
+        | Raw.List [ Raw.Atom field; value ] -> InitField (field, parse_expr value)
+        | _ -> failf "%s# designated init expects pairs like (field value)" ty_name
+      in
+      ECompoundLiteral (ty, List.map args ~f:parse_field_init)
 
 and parse_intrinsic_expr h args =
   match h with
+  | "%top-level-splice" -> fail "%top-level-splice is allowed only at top-level"
   | "%!" | "%~" ->
       ensure_arity h args 1;
       EUnary (String.drop_prefix h 1, parse_expr (List.hd_exn args))
@@ -304,6 +335,21 @@ let parse_decl args =
 let rec parse_stmt_or_decl raw =
   match raw with
   | Raw.List (Raw.Atom "%decl" :: args) -> SDecl (parse_decl args)
+  | Raw.List (Raw.Atom "%decl-many" :: forms) ->
+      let parse_one = function
+        | Raw.List (Raw.Atom "%decl" :: args) -> parse_decl args
+        | Raw.List (Raw.Atom "%decl-many" :: _) ->
+            fail "%decl-many cannot be nested as a declaration item"
+        | Raw.List (Raw.Atom "decl" :: _) -> fail "%decl-many contains unexpanded decl macro"
+        | _ -> fail "%decl-many expects only (%decl type name init) forms"
+      in
+      let rec flatten acc = function
+        | [] -> List.rev acc
+        | Raw.List (Raw.Atom "%decl-many" :: inner) :: tl -> flatten (List.rev_append (flatten [] inner) acc) tl
+        | x :: tl -> flatten (parse_one x :: acc) tl
+      in
+      if List.is_empty forms then fail "%decl-many requires at least one declaration"
+      else SDeclMany (flatten [] forms)
   | _ -> parse_stmt raw
 
 and parse_switch_clause = function
@@ -351,8 +397,16 @@ let parse_params = function
       let rec loop acc varargs = function
         | [] -> (List.rev acc, varargs)
         | Raw.Atom "..." :: tl -> loop acc true tl
-        | Raw.List [ ty_s; Raw.Atom name ] :: tl ->
-            loop ({ p_ty = parse_type ty_s; p_name = name } :: acc) varargs tl
+        | Raw.List (ty_s :: names) :: tl ->
+            if List.is_empty names then fail "Function parameter group requires at least one name"
+            else
+              let ty = parse_type ty_s in
+              let group_params =
+                List.map names ~f:(function
+                  | Raw.Atom name -> { p_ty = ty; p_name = name }
+                  | _ -> fail "Function parameter name must be an atom")
+              in
+              loop (List.rev_append group_params acc) varargs tl
         | _ -> fail "Invalid function parameter list"
       in
       loop [] false xs

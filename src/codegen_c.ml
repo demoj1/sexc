@@ -2,6 +2,54 @@ open Core
 open Common
 open Frontend
 
+let is_ascii_letter c =
+  Char.(c >= 'a' && c <= 'z') || Char.(c >= 'A' && c <= 'Z')
+
+let is_digit c = Char.(c >= '0' && c <= '9')
+
+let is_ident_start c = is_ascii_letter c || Char.equal c '_'
+
+let is_ident_continue c = is_ident_start c || is_digit c
+
+let is_c_number_char = function
+  | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' | 'x' | 'X' | 'p' | 'P' | '.' | '+' | '-' | 'u' | 'U'
+  | 'l' | 'L' -> true
+  | _ -> false
+
+let is_number_literal s =
+  let n = String.length s in
+  if n = 0 then false
+  else
+    let start =
+      if n > 1 && (Char.equal s.[0] '+' || Char.equal s.[0] '-') then 1 else 0
+    in
+    if start >= n then false
+    else
+      let has_digit = ref false in
+      let ok =
+        String.for_alli s ~f:(fun i c ->
+            if i < start then true
+            else (
+              if Char.(c >= '0' && c <= '9') then has_digit := true;
+              is_c_number_char c))
+      in
+      ok && !has_digit
+
+let mangle_ident raw =
+  if String.is_empty raw then raw
+  else
+    let b = Buffer.create (String.length raw + 16) in
+    String.iter raw ~f:(fun c ->
+        if is_ident_continue c then Buffer.add_char b c
+        else Buffer.add_string b (Printf.sprintf "_u%04X_" (Char.to_int c)));
+    let out = Buffer.contents b in
+    if String.is_empty out then "sx_"
+    else
+      let first = out.[0] in
+      if is_ident_start first then out else "sx_" ^ out
+
+let atom_to_c_token a = if is_number_literal a then a else mangle_ident a
+
 let storage_to_c = function
   | Extern -> "extern"
   | Static -> "static"
@@ -16,22 +64,22 @@ let qual_to_c = function
 
 let rec emit_type_base = function
   | TBuiltin s -> s
-  | TNamed s -> s
-  | TStruct (name, None) -> "struct " ^ name
-  | TUnion (name, None) -> "union " ^ name
-  | TEnum name -> "enum " ^ name
+  | TNamed s -> mangle_ident s
+  | TStruct (name, None) -> "struct " ^ mangle_ident name
+  | TUnion (name, None) -> "union " ^ mangle_ident name
+  | TEnum name -> "enum " ^ mangle_ident name
   | TStruct (name, Some fields) ->
       let body =
-        List.map fields ~f:(fun f -> "  " ^ emit_decl_of_type f.f_ty f.f_name ^ ";")
+        List.map fields ~f:(fun f -> "  " ^ emit_decl_of_type f.f_ty (mangle_ident f.f_name) ^ ";")
         |> String.concat ~sep:"\n"
       in
-      "struct " ^ name ^ " {\n" ^ body ^ "\n}"
+      "struct " ^ mangle_ident name ^ " {\n" ^ body ^ "\n}"
   | TUnion (name, Some fields) ->
       let body =
-        List.map fields ~f:(fun f -> "  " ^ emit_decl_of_type f.f_ty f.f_name ^ ";")
+        List.map fields ~f:(fun f -> "  " ^ emit_decl_of_type f.f_ty (mangle_ident f.f_name) ^ ";")
         |> String.concat ~sep:"\n"
       in
-      "union " ^ name ^ " {\n" ^ body ^ "\n}"
+      "union " ^ mangle_ident name ^ " {\n" ^ body ^ "\n}"
   | _ -> fail "emit_type_base received non-base type"
 
 and emit_decl_of_type tyv name =
@@ -72,7 +120,7 @@ let emit_decl_signature d =
     if List.is_empty d.d_storage then ""
     else (List.map d.d_storage ~f:storage_to_c |> String.concat ~sep:" ") ^ " "
   in
-  stor ^ emit_decl_of_type d.d_ty d.d_name
+  stor ^ emit_decl_of_type d.d_ty (mangle_ident d.d_name)
 
 let c_escape_string s =
   let b = Buffer.create (String.length s + 8) in
@@ -101,14 +149,14 @@ let precedence_of_expr = function
   | ENary (("*" | "/" | "%"), _) -> 13
   | ENary _ -> 12
   | EUnary _ | ECast _ | ESizeofType _ | ESizeofExpr _ -> 14
-  | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ -> 15
+  | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ | ECompoundLiteral _ -> 15
   | EAtom _ | EString _ -> 16
 
 let rec emit_expr ?(ctx = 0) e =
   let p = precedence_of_expr e in
   let body =
     match e with
-    | EAtom a -> a
+    | EAtom a -> atom_to_c_token a
     | EString s -> "\"" ^ c_escape_string s ^ "\""
     | EUnary (op, x) -> op ^ emit_expr ~ctx:p x
     | EPostfix (op, x) -> emit_expr ~ctx:p x ^ op
@@ -123,8 +171,16 @@ let rec emit_expr ?(ctx = 0) e =
         emit_expr ~ctx:p c ^ " ? " ^ emit_expr ~ctx:p t ^ " : " ^ emit_expr ~ctx:p f
     | EComma xs -> List.map xs ~f:(emit_expr ~ctx:p) |> String.concat ~sep:", "
     | EIndex (a, i) -> emit_expr ~ctx:p a ^ "[" ^ emit_expr i ^ "]"
-    | EMember (x, f) -> emit_expr ~ctx:p x ^ "." ^ f
-    | EPtrMember (x, f) -> emit_expr ~ctx:p x ^ "->" ^ f
+    | EMember (x, f) -> emit_expr ~ctx:p x ^ "." ^ mangle_ident f
+    | EPtrMember (x, f) -> emit_expr ~ctx:p x ^ "->" ^ mangle_ident f
+    | ECompoundLiteral (tyv, inits) ->
+        let emit_init = function
+          | InitExpr x -> emit_expr x
+          | InitField (field, value) -> "." ^ mangle_ident field ^ " = " ^ emit_expr value
+        in
+        "(" ^ emit_decl_of_type tyv "" ^ "){ "
+        ^ (List.map inits ~f:emit_init |> String.concat ~sep:", ")
+        ^ " }"
     | ECall (callee, args) ->
         emit_expr ~ctx:p callee ^ "(" ^ (List.map args ~f:emit_expr |> String.concat ~sep:", ") ^ ")"
   in
@@ -183,12 +239,15 @@ let rec emit_stmt ?(lvl = 0) s =
   | SContinue -> i ^ "continue;"
   | SReturn None -> i ^ "return;"
   | SReturn (Some e) -> i ^ "return " ^ emit_expr e ^ ";"
-  | SGoto lbl -> i ^ "goto " ^ lbl ^ ";"
-  | SLabel lbl -> i ^ lbl ^ ":"
+  | SGoto lbl -> i ^ "goto " ^ mangle_ident lbl ^ ";"
+  | SLabel lbl -> i ^ mangle_ident lbl ^ ":"
   | SDecl d -> i ^ emit_decl_stmt d
+  | SDeclMany ds ->
+      List.map ds ~f:(fun d -> i ^ emit_decl_stmt d)
+      |> String.concat ~sep:"\n"
   | SExpr e -> i ^ emit_expr e ^ ";"
 
-let emit_param p = emit_decl_of_type p.p_ty p.p_name
+let emit_param p = emit_decl_of_type p.p_ty (mangle_ident p.p_name)
 
 let emit_fn_sig ret name params varargs =
   let args =
@@ -196,7 +255,7 @@ let emit_fn_sig ret name params varargs =
     let ps = if List.is_empty ps then [ "void" ] else ps in
     if varargs then ps @ [ "..." ] else ps
   in
-  emit_decl_of_type ret (name ^ "(" ^ String.concat ~sep:", " args ^ ")")
+  emit_decl_of_type ret (mangle_ident name ^ "(" ^ String.concat ~sep:", " args ^ ")")
 
 let emit_top = function
   | TInclude (IncludeAngle a) -> "#include " ^ a
@@ -206,11 +265,12 @@ let emit_top = function
           | IncludeAngle a -> "#include " ^ a
           | IncludeQuote s -> "#include \"" ^ s ^ "\"")
       |> String.concat ~sep:"\n"
-  | TDefine (name, body) -> "#define " ^ name ^ " " ^ emit_expr body
+  | TDefine (name, body) -> "#define " ^ mangle_ident name ^ " " ^ emit_expr body
   | TDefineMacro (name, params, body) ->
-      "#define " ^ name ^ "(" ^ String.concat ~sep:"," params ^ ") " ^ emit_expr body
-  | TIfdef (sym, body) -> "#ifdef " ^ sym ^ "\n" ^ emit_stmt body ^ "\n#endif"
-  | TTypedef (tyv, name) -> "typedef " ^ emit_decl_of_type tyv name ^ ";"
+      "#define " ^ mangle_ident name ^ "(" ^ String.concat ~sep:"," (List.map params ~f:mangle_ident) ^ ") "
+      ^ emit_expr body
+  | TIfdef (sym, body) -> "#ifdef " ^ mangle_ident sym ^ "\n" ^ emit_stmt body ^ "\n#endif"
+  | TTypedef (tyv, name) -> "typedef " ^ emit_decl_of_type tyv (mangle_ident name) ^ ";"
   | TDeclFn (ret, name, params, varargs) -> emit_fn_sig ret name params varargs ^ ";"
   | TDefFn (ret, name, params, varargs, body) -> emit_fn_sig ret name params varargs ^ "\n" ^ emit_stmt body
   | TDeclTop d -> emit_decl_stmt d

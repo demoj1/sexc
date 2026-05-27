@@ -24,25 +24,25 @@
   `(%def-fn ,ret ,name ,params (%block ,@body)))
 
 ; decl
-; (decl name ty)
-; (decl name ty init)
-; (decl name ty init name2 init2 ...)
-; Multiple declarations require (name init) pairs.
-(%defmacro decl (name ty &rest init)
-  (if (null? init)
-    `(%decl ,ty ,name)
-    (if (null? (cdr init))
-      `(%decl ,ty ,name ,(car init))
-      `(decl-many ,ty ,name ,(car init) ,@(cdr init)))))
-
-(%defmacro decl-many (ty name init &rest rest)
-  (if (null? rest)
-    `(%decl ,ty ,name ,init)
-    (if (null? (cdr rest))
-      (error "decl multiple mode expects pairs: name init")
-      `(%block
-         (%decl ,ty ,name ,init)
-         (decl-many ,ty ,(car rest) ,(car (cdr rest)) ,@(cdr (cdr rest)))))))
+; (decl (type name) init ...)
+; Initializer is required for each declaration.
+; Multiple pairs expand sequentially (let*-style).
+(%defmacro decl (binding init &rest rest)
+  (if (atom? binding)
+    (error "decl binding must be (type name)")
+    (if (null? (cdr binding))
+      (error "decl binding must be (type name)")
+      (if (null? (cdr (cdr binding)))
+        (if (atom? (car (cdr binding)))
+          (if (null? rest)
+            `(%decl ,(car binding) ,(car (cdr binding)) ,init)
+            (if (null? (cdr rest))
+              (error "decl expects pairs: (type name) init")
+              `(%decl-many
+                 (%decl ,(car binding) ,(car (cdr binding)) ,init)
+                 (decl ,@rest))))
+          (error "decl variable name must be an atom"))
+        (error "decl binding must contain exactly two items: (type name)")))))
 
 ; block
 ; (block form...)
@@ -124,6 +124,18 @@
 (%defmacro cast (ty expr)
   `(%cast ,ty ,expr))
 
+; struct
+; (struct Name (type field) ...)
+; => typedef struct Name { ... } Name;
+(%defmacro struct (name &rest fields)
+  `(%typedef (%struct ,name ,@fields) ,name))
+
+; union
+; (union Name (type field) ...)
+; => typedef union Name { ... } Name;
+(%defmacro union (name &rest fields)
+  `(%typedef (%union ,name ,@fields) ,name))
+
 ; sizeof-type
 ; (sizeof-type ty)
 ; => (%sizeof-type ty)
@@ -140,30 +152,55 @@
 (%defmacro aref (arr idx)
   `(%aref ,arr ,idx))
 
-(%defmacro dot (obj field)
-  `(%dot ,obj ,field))
+(%defmacro dot (obj field &rest fields)
+  (if (null? fields)
+    `(%dot ,obj ,field)
+    `(dot (%dot ,obj ,field) ,@fields)))
 
-(%defmacro arrow (ptr field)
-  `(%arrow ,ptr ,field))
+(%defmacro arrow (ptr field &rest fields)
+  (if (null? fields)
+    `(%arrow ,ptr ,field)
+    `(arrow (%arrow ,ptr ,field) ,@fields)))
+
+; Clojure-style aliases:
+; (. obj a b c) => (%dot (%dot (%dot obj a) b) c)
+; (-> ptr a b c) => (%arrow (%arrow (%arrow ptr a) b) c)
+(%defmacro . (obj field &rest fields)
+  `(dot ,obj ,field ,@fields))
+
+(%defmacro -> (ptr field &rest fields)
+  `(arrow ,ptr ,field ,@fields))
 
 ; Operator wrappers
 (%defmacro not (x)
   `(%! ,x))
 
-(%defmacro + (a b)
-  `(%+ ,a ,b))
+; (+ a b c ...)
+; n-ary arithmetic, at least 2 args
+(%defmacro + (a b &rest rest)
+  `(%+ ,a ,b ,@rest))
 
-(%defmacro - (a b)
-  `(%- ,a ,b))
+; (- a) or (- a b c ...)
+; unary minus expands to (0 - a)
+(%defmacro - (a &rest rest)
+  (if (null? rest)
+    `(%- 0 ,a)
+    `(%- ,a ,@rest)))
 
-(%defmacro * (a b)
-  `(%* ,a ,b))
+; (* a b c ...)
+; n-ary arithmetic, at least 2 args
+(%defmacro * (a b &rest rest)
+  `(%* ,a ,b ,@rest))
 
-(%defmacro / (a b)
-  `(%/ ,a ,b))
+; (/ a b c ...)
+; n-ary arithmetic, at least 2 args
+(%defmacro / (a b &rest rest)
+  `(%/ ,a ,b ,@rest))
 
-(%defmacro % (a b)
-  `(%% ,a ,b))
+; (% a b c ...)
+; n-ary arithmetic, at least 2 args
+(%defmacro % (a b &rest rest)
+  `(%% ,a ,b ,@rest))
 
 (%defmacro = (a b)
   `(%== ,a ,b))
@@ -183,17 +220,25 @@
 (%defmacro >= (a b)
   `(%>= ,a ,b))
 
-(%defmacro && (a b)
-  `(%&& ,a ,b))
+; (&& a b c ...)
+; n-ary logical and (short-circuit in backend IR)
+(%defmacro && (a b &rest rest)
+  `(%&& ,a ,b ,@rest))
 
-(%defmacro and (a b)
-  `(&& ,a ,b))
+; (and a b c ...)
+; Lisp-style alias for &&
+(%defmacro and (a b &rest rest)
+  `(%&& ,a ,b ,@rest))
 
-(%defmacro || (a b)
-  `(%|| ,a ,b))
+; (|| a b c ...)
+; n-ary logical or (short-circuit in backend IR)
+(%defmacro || (a b &rest rest)
+  `(%|| ,a ,b ,@rest))
 
-(%defmacro or (a b)
-  `(|| ,a ,b))
+; (or a b c ...)
+; Lisp-style alias for ||
+(%defmacro or (a b &rest rest)
+  `(%|| ,a ,b ,@rest))
 
 (%defmacro post-inc (x)
   `(%post-inc ,x))

@@ -1,7 +1,8 @@
 (%include "raylib.h")
 
-(%define SCREEN_WIDTH 960)
-(%define SCREEN_HEIGHT 640)
+(%top-level-splice
+  (%define SCREEN_WIDTH 960)
+  (%define SCREEN_HEIGHT 640))
 
 (%def-fn int main ()
   (%block

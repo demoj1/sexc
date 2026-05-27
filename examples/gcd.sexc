@@ -1,15 +1,14 @@
-(%include <stdio.h>)
+(%import "../std/core.sexc")
 
-(%def-fn int gcd ((int a) (int b))
-  (%block
-    (%while (%!= b 0)
-      (%block
-        (%decl int t b)
-        (%set b (%% a b))
-        (%set a t)))
-    (%return a)))
+(include "stdio.h")
 
-(%def-fn int main ()
-  (%block
-    (printf "GCD: %d\n" (gcd 48 18))
-    (%return 0)))
+(defn int gcd ((int a b))
+  (while (not= b 0)
+    (decl (int t) b)
+    (set b (% a b))
+    (set a t))
+  (return a))
+
+(defn int main ()
+  (printf "GCD: %d\n" (gcd 48 18))
+  (return 0))

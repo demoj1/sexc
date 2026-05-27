@@ -24,9 +24,15 @@ let rec load_forms_from_file ~visited path =
       | None -> [ form ])
 
 let compile_forms forms =
+  let rec flatten_top_forms xs = List.concat_map xs ~f:flatten_top_form
+  and flatten_top_form = function
+    | Raw.List (Raw.Atom "%top-level-splice" :: inner) -> flatten_top_forms inner
+    | other -> [ other ]
+  in
   let mctx, non_macro = Macro.collect forms in
   let expanded = Macro.expand_program mctx non_macro in
   expanded
+  |> flatten_top_forms
   |> List.map ~f:Frontend.parse_top
   |> List.map ~f:Codegen_c.emit_top
   |> String.concat ~sep:"\n\n"
