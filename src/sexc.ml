@@ -65,6 +65,9 @@ let () =
         let status = run_with_temp_c c cmd in
         if status <> 0 then exit status
   with
+  | Sexc_diagnostic d ->
+      prerr_endline (render_diagnostic d);
+      exit 1
   | Sexc_error msg ->
       prerr_endline ("error: " ^ msg);
       usage ();

@@ -15,7 +15,7 @@ let rec load_forms_from_file ~visited path =
   if Set.mem visited abs then failf "Cyclic %%import detected: %s" abs;
   let visited = Set.add visited abs in
   let source = In_channel.read_all abs in
-  let forms = Reader.parse_many source in
+  let forms = Reader.parse_many ~file:abs source in
   List.concat_map forms ~f:(fun form ->
       match extract_import_target form with
       | Some rel ->
@@ -32,7 +32,7 @@ let compile_forms forms =
   |> String.concat ~sep:"\n\n"
 
 let compile_source source =
-  let forms = Reader.parse_many source in
+  let forms = Reader.parse_many ~file:"<memory>" source in
   compile_forms forms
 
 let compile_file path =

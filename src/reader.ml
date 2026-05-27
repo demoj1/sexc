@@ -2,12 +2,13 @@ open Core
 open Common
 
 type state = {
+  file : string;
   src : string;
   len : int;
   mutable i : int;
 }
 
-let create src = { src; len = String.length src; i = 0 }
+let create ~file src = { file; src; len = String.length src; i = 0 }
 
 let at_end st = st.i >= st.len
 
@@ -16,7 +17,8 @@ let peek st = if at_end st then None else Some st.src.[st.i]
 let bump st =
   if not (at_end st) then st.i <- st.i + 1
 
-let error st msg = failf "Parse error at offset %d: %s" st.i msg
+let error st msg =
+  fail_diag ~phase:"reader" ~file:st.file ~source:st.src ~start_off:st.i msg
 
 let is_ws = function
   | ' ' | '\t' | '\n' | '\r' -> true
@@ -131,8 +133,8 @@ and parse_list st =
   in
   loop []
 
-let parse_many src =
-  let st = create src in
+let parse_many ~file src =
+  let st = create ~file src in
   let rec loop acc =
     skip_ws_and_comments st;
     if at_end st then List.rev acc
