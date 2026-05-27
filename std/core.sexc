@@ -136,6 +136,11 @@
 (%defmacro union (name &rest fields)
   `(%typedef (%union ,name ,@fields) ,name))
 
+; zero-init
+; (zero-init) => {0}
+(%defmacro zero-init ()
+  `(%raw "{0}"))
+
 ; sizeof-type
 ; (sizeof-type ty)
 ; => (%sizeof-type ty)
@@ -146,11 +151,11 @@
 ; (sizeof-expr expr)
 ; => (%sizeof-expr expr)
 (%defmacro sizeof-expr (expr)
-  `(%sizeof-expr ,expr))
+  `(%raw "sizeof(" ,expr ")"))
 
 ; aref / dot / arrow helpers
 (%defmacro aref (arr idx)
-  `(%aref ,arr ,idx))
+  `(%raw "(" ,arr ")[" ,idx "]"))
 
 (%defmacro dot (obj field &rest fields)
   (if (null? fields)
@@ -173,7 +178,7 @@
 
 ; Operator wrappers
 (%defmacro not (x)
-  `(%! ,x))
+  `(%raw "!(" ,x ")"))
 
 ; (+ a b c ...)
 ; n-ary arithmetic, at least 2 args
@@ -241,7 +246,7 @@
   `(%|| ,a ,b ,@rest))
 
 (%defmacro post-inc (x)
-  `(%post-inc ,x))
+  `(%raw "(" ,x ")++"))
 
 (%defmacro nop ()
   `(%nop))
