@@ -10,60 +10,57 @@
   (InitWindow SCREEN_WIDTH SCREEN_HEIGHT "SexC std macros: bouncing circles")
   (SetTargetFPS 60)
 
-  (decl (%array Vector2 10) positions)
-  (decl (%array Vector2 10) velocities)
-  (decl (%array float 10) radii)
-  (decl (%array Color 10) colors)
+  (decl positions (%array Vector2 10))
+  (decl velocities (%array Vector2 10))
+  (decl radii (%array float 10))
+  (decl colors (%array Color 10))
 
-  (for (decl int i 0) (< i 10) (post-inc i)
-    (decl float radius (cast float (GetRandomValue 10 30)))
-    (set (aref radii i) radius)
+  (dotimes i 10
+    (decl radius float (cast float (GetRandomValue 10 30)))
+    (set radius (aref radii i))
 
-    (set (dot (aref positions i) x)
-      (cast float (GetRandomValue (cast int radius) (- SCREEN_WIDTH (cast int radius)))))
-    (set (dot (aref positions i) y)
-      (cast float (GetRandomValue (cast int radius) (- SCREEN_HEIGHT (cast int radius)))))
+    (set
+      (cast float (GetRandomValue (cast int radius) (- SCREEN_WIDTH (cast int radius)))) (dot (aref positions i) x)
+      (cast float (GetRandomValue (cast int radius) (- SCREEN_HEIGHT (cast int radius)))) (dot (aref positions i) y)
+      (cast float (GetRandomValue -5 5)) (dot (aref velocities i) x)
+      (cast float (GetRandomValue -5 5)) (dot (aref velocities i) y))
 
-    (set (dot (aref velocities i) x)
-      (cast float (GetRandomValue -5 5)))
-    (set (dot (aref velocities i) y)
-      (cast float (GetRandomValue -5 5)))
+    (cond
+      ((== (dot (aref velocities i) x) 0.0f)
+       (set 1.0f (dot (aref velocities i) x)))
+      (else (nop)))
 
-    (if (== (dot (aref velocities i) x) 0.0f)
-      (set (dot (aref velocities i) x) 1.0f))
-    (if (== (dot (aref velocities i) y) 0.0f)
-      (set (dot (aref velocities i) y) -1.0f))
+    (cond
+      ((== (dot (aref velocities i) y) 0.0f)
+       (set -1.0f (dot (aref velocities i) y)))
+      (else (nop)))
 
-    (set (aref colors i)
-      (ColorFromHSV (cast float (* i 36)) 0.85f 0.95f)))
+    (set (ColorFromHSV (cast float (* i 36)) 0.85f 0.95f) (aref colors i)))
 
   (while (not (WindowShouldClose))
-    (for (decl int i 0) (< i 10) (post-inc i)
-      (set (dot (aref positions i) x)
-        (+ (dot (aref positions i) x) (dot (aref velocities i) x)))
-      (set (dot (aref positions i) y)
-        (+ (dot (aref positions i) y) (dot (aref velocities i) y)))
+    (dotimes i 10
+      (set
+        (+ (dot (aref positions i) x) (dot (aref velocities i) x)) (dot (aref positions i) x)
+        (+ (dot (aref positions i) y) (dot (aref velocities i) y)) (dot (aref positions i) y))
 
-      (if
-        (||
-          (<= (- (dot (aref positions i) x) (aref radii i)) 0.0f)
-          (>= (+ (dot (aref positions i) x) (aref radii i)) SCREEN_WIDTH))
-        (set (dot (aref velocities i) x)
-          (- 0.0f (dot (aref velocities i) x))))
+      (cond
+        ((||
+            (<= (- (dot (aref positions i) x) (aref radii i)) 0.0f)
+            (>= (+ (dot (aref positions i) x) (aref radii i)) SCREEN_WIDTH))
+         (set (- 0.0f (dot (aref velocities i) x)) (dot (aref velocities i) x)))
+        (else (nop)))
 
-      (if
-        (||
-          (<= (- (dot (aref positions i) y) (aref radii i)) 0.0f)
-          (>= (+ (dot (aref positions i) y) (aref radii i)) SCREEN_HEIGHT))
-        (set (dot (aref velocities i) y)
-          (- 0.0f (dot (aref velocities i) y)))))
+      (cond
+        ((||
+            (<= (- (dot (aref positions i) y) (aref radii i)) 0.0f)
+            (>= (+ (dot (aref positions i) y) (aref radii i)) SCREEN_HEIGHT))
+         (set (- 0.0f (dot (aref velocities i) y)) (dot (aref velocities i) y)))
+        (else (nop))))
 
     (begin-frame)
     (clear (ColorFromHSV 0.0f 0.0f 0.12f))
-
-    (for (decl int i 0) (< i 10) (post-inc i)
+    (dotimes i 10
       (circle (aref positions i) (aref radii i) (aref colors i)))
-
     (DrawText "10 bouncing circles (SexC std)" 20 20 20 RAYWHITE)
     (end-frame))
 

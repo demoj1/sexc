@@ -13,14 +13,18 @@ _dune_lock_fix:
 	fi
 
 build: _dune_lock_fix
-	opam exec -- dune build
+	opam exec -- dune build ./src/sexc.exe
+	rm -f ./sexc
+	cp _build/default/src/sexc.exe ./sexc
+	chmod 755 ./sexc
 
-run: _dune_lock_fix
+run: build
 	@if [ -z "$(FILE)" ]; then \
 		echo "Usage: make run FILE=path/to/input.sexc"; \
 		exit 1; \
 	fi
-	opam exec -- dune exec ./sexc.exe -- "$(FILE)"
+	./sexc "$(FILE)"
 
 clean:
 	opam exec -- dune clean
+	rm -f ./sexc

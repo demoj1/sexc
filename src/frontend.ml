@@ -81,6 +81,7 @@ type include_arg =
 
 type top =
   | TInclude of include_arg
+  | TIncludes of include_arg list
   | TDefine of string * expr
   | TDefineMacro of string * string list * expr
   | TIfdef of string * stmt
@@ -365,7 +366,10 @@ let parse_include_arg = function
 
 let parse_top raw =
   match raw with
-  | Raw.List (Raw.Atom "%include" :: [ arg ]) -> TInclude (parse_include_arg arg)
+  | Raw.List (Raw.Atom "%include" :: args) ->
+      if List.is_empty args then fail "%include requires at least one argument"
+      else if List.length args = 1 then TInclude (parse_include_arg (List.hd_exn args))
+      else TIncludes (List.map args ~f:parse_include_arg)
   | Raw.List (Raw.Atom "%define" :: [ Raw.Atom name; body ]) -> TDefine (name, parse_expr body)
   | Raw.List (Raw.Atom "%define-macro" :: [ Raw.List (Raw.Atom name :: params); body ]) ->
       let param_names = List.map params ~f:expect_atom in

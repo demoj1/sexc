@@ -201,6 +201,11 @@ let emit_fn_sig ret name params varargs =
 let emit_top = function
   | TInclude (IncludeAngle a) -> "#include " ^ a
   | TInclude (IncludeQuote s) -> "#include \"" ^ s ^ "\""
+  | TIncludes xs ->
+      List.map xs ~f:(function
+          | IncludeAngle a -> "#include " ^ a
+          | IncludeQuote s -> "#include \"" ^ s ^ "\"")
+      |> String.concat ~sep:"\n"
   | TDefine (name, body) -> "#define " ^ name ^ " " ^ emit_expr body
   | TDefineMacro (name, params, body) ->
       "#define " ^ name ^ "(" ^ String.concat ~sep:"," params ^ ") " ^ emit_expr body

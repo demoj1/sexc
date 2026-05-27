@@ -4,10 +4,12 @@
 ; so callers do not need to write (block ...) manually.
 
 ; include
-; (include header)
-; => (%include header)
-(%defmacro include (h)
-  `(%include ,h))
+; (include header...)
+; => (%include h1) or (%include h1 h2 ...)
+(%defmacro include (&rest headers)
+  (if (null? headers)
+    (error "include requires at least one header")
+    `(%include ,@headers)))
 
 ; define
 ; (define name value)
@@ -22,14 +24,25 @@
   `(%def-fn ,ret ,name ,params (%block ,@body)))
 
 ; decl
-; (decl ty name) OR (decl ty name init)
-; => (%decl ty name) OR (%decl ty name init)
-(%defmacro decl (ty name &rest init)
+; (decl name ty)
+; (decl name ty init)
+; (decl name ty init name2 init2 ...)
+; Multiple declarations require (name init) pairs.
+(%defmacro decl (name ty &rest init)
   (if (null? init)
     `(%decl ,ty ,name)
     (if (null? (cdr init))
       `(%decl ,ty ,name ,(car init))
-      (error "decl accepts only 2 or 3 arguments"))))
+      `(decl-many ,ty ,name ,(car init) ,@(cdr init)))))
+
+(%defmacro decl-many (ty name init &rest rest)
+  (if (null? rest)
+    `(%decl ,ty ,name ,init)
+    (if (null? (cdr rest))
+      (error "decl multiple mode expects pairs: name init")
+      `(%block
+         (%decl ,ty ,name ,init)
+         (decl-many ,ty ,(car rest) ,(car (cdr rest)) ,@(cdr (cdr rest)))))))
 
 ; block
 ; (block form...)
@@ -92,10 +105,18 @@
   `(%return ,expr))
 
 ; set
-; (set lhs rhs)
-; => (%set lhs rhs)
-(%defmacro set (lhs rhs)
-  `(%set ,lhs ,rhs))
+; (set value lhs [value2 lhs2 ...])
+; Single pair => (%set lhs value)
+; Multiple pairs => (%block (%set lhs value) (%set lhs2 value2) ...)
+; Number of arguments after value/lhs must be even.
+(%defmacro set (value lhs &rest more)
+  (if (null? more)
+    `(%set ,lhs ,value)
+    (if (null? (cdr more))
+      (error "set expects pairs: (set value lhs [value2 lhs2 ...])")
+      `(%block
+         (%set ,lhs ,value)
+         (set ,(car more) ,(car (cdr more)) ,@(cdr (cdr more)))))))
 
 ; cast
 ; (cast ty expr)
@@ -217,3 +238,15 @@
 ; => for i in [start, stop)
 (%defmacro for-range (i start stop &rest body)
   `(%for (%decl int ,i ,start) (%< ,i ,stop) (%post-inc ,i) (%block ,@body)))
+
+; repeat
+; (repeat n form...)
+; Repeats body n times without exposing an index variable.
+(%defmacro repeat (n &rest body)
+  `(repeat-expand ,(gensym "repeat_i_") ,n (block ,@body)))
+
+(%defmacro repeat-expand (i n body)
+  `(%for (%decl int ,i 0)
+         (%< ,i ,n)
+         (%post-inc ,i)
+         ,body))
