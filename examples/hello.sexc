@@ -1,17 +1,14 @@
-(%import "../std/core.sexc")
-
 (include
   "stdio.h"
   "math.h")
 
 (struct QuadrEq (float a) (float b) (float c))
-
 (struct Roots (float x1) (float x2))
 
 (defn float QuadrEq/disc ((QuadrEq self))
   (return (- (powf (. self b) 2.0) (* 4.0 (. self a) (. self c)))))
 
-(defn Roots QuadrEq/solve ((QuadrEq seАlf))
+(defn Roots QuadrEq/solve ((QuadrEq self))
   (decl
     (float denom) (* 2 (. self a))
     (float d)     (sqrtf (QuadrEq/disc self))

@@ -1,5 +1,3 @@
-(%import "../std/core.sexc")
-
 (include "stdio.h")
 
 (defn int gcd ((int a b))

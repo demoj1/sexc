@@ -1,5 +1,3 @@
-(%import "../std/core.sexc")
-
 (include "stdio.h")
 
 (%defmacro banner-defines ()

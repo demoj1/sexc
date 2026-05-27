@@ -15,6 +15,9 @@
 - `make build` собирает `./src/sexc.exe` и копирует бинарник в корень как `./sexc`.
 - `make run FILE=...` использует `./sexc`.
 - В `Makefile` есть авто-очистка битого/stale `_build/.lock`.
+- `std/core.sexc` вшивается в бинарь на этапе сборки (`tools/embed_prelude.py` + `src/dune`).
+- Prelude подключается автоматически для каждого файла; флаг `--no-prelude` отключает автоподключение.
+- Явный `%import "../std/core.sexc"` по-прежнему допустим, но уже не обязателен.
 
 ## CLI фича `-C`
 

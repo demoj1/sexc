@@ -1,6 +1,10 @@
 open Core
 open Common
 
+let embedded_core_file = "<embedded:core>"
+
+let is_core_import_target rel = String.equal (Stdlib.Filename.basename rel) "core.sexc"
+
 let resolve_import ~from_file rel =
   let base = Filename.dirname from_file in
   Filename.concat base rel
@@ -10,7 +14,7 @@ let extract_import_target = function
   | Raw.List [ Raw.Atom "%import"; Raw.Atom p ] -> Some p
   | _ -> None
 
-let rec load_forms_from_file ~visited path =
+let rec load_forms_from_file ~visited ~use_prelude path =
   let abs = path in
   if Set.mem visited abs then failf "Cyclic %%import detected: %s" abs;
   let visited = Set.add visited abs in
@@ -19,17 +23,22 @@ let rec load_forms_from_file ~visited path =
   List.concat_map forms ~f:(fun form ->
       match extract_import_target form with
       | Some rel ->
-          let imported = resolve_import ~from_file:abs rel in
-          load_forms_from_file ~visited imported
+          if use_prelude && is_core_import_target rel then []
+          else
+            let imported = resolve_import ~from_file:abs rel in
+            load_forms_from_file ~visited ~use_prelude imported
       | None -> [ form ])
 
-let compile_forms forms =
+let compile_forms ?(use_prelude = true) forms =
   let rec flatten_top_forms xs = List.concat_map xs ~f:flatten_top_form
   and flatten_top_form = function
     | Raw.List (Raw.Atom "%top-level-splice" :: inner) -> flatten_top_forms inner
     | other -> [ other ]
   in
-  let mctx, non_macro = Macro.collect forms in
+  let prelude_forms =
+    if use_prelude then Reader.parse_many ~file:embedded_core_file Embedded_prelude.core_source else []
+  in
+  let mctx, non_macro = Macro.collect (prelude_forms @ forms) in
   let expanded = Macro.expand_program mctx non_macro in
   expanded
   |> flatten_top_forms
@@ -37,10 +46,10 @@ let compile_forms forms =
   |> List.map ~f:Codegen_c.emit_top
   |> String.concat ~sep:"\n\n"
 
-let compile_source source =
+let compile_source ?(use_prelude = true) source =
   let forms = Reader.parse_many ~file:"<memory>" source in
-  compile_forms forms
+  compile_forms ~use_prelude forms
 
-let compile_file path =
-  let forms = load_forms_from_file ~visited:String.Set.empty path in
-  compile_forms forms
+let compile_file ?(use_prelude = true) path =
+  let forms = load_forms_from_file ~visited:String.Set.empty ~use_prelude path in
+  compile_forms ~use_prelude forms

@@ -3,22 +3,30 @@ open Common
 
 let usage () =
   prerr_endline "Usage:";
-  prerr_endline "  sexc <input.sexc>";
-  prerr_endline "  sexc <input.sexc> -C <command...>";
+  prerr_endline "  sexc [--no-prelude] <input.sexc>";
+  prerr_endline "  sexc [--no-prelude] <input.sexc> -C <command...>";
+  prerr_endline "";
+  prerr_endline "By default, std/core.sexc is embedded and auto-loaded (implicit prelude).";
+  prerr_endline "Use --no-prelude to disable auto prelude.";
   prerr_endline "";
   prerr_endline "When -C is used, token '%' is replaced with a temporary generated C file.";
   prerr_endline "Example:";
   prerr_endline "  sexc examples/raylib_std.sexc -C gcc % -lraylib -o raylib-example"
 
 let split_compile_command args =
-  match args with
+  let rec parse_flags use_prelude = function
+    | "--no-prelude" :: tl -> parse_flags false tl
+    | rest -> (use_prelude, rest)
+  in
+  let use_prelude, rest = parse_flags true args in
+  match rest with
   | [] -> fail "missing input file"
-  | input :: rest -> (
-      match rest with
-      | [] -> (input, None)
-      | "-C" :: cmd when not (List.is_empty cmd) -> (input, Some cmd)
+  | input :: tail -> (
+      match tail with
+      | [] -> (use_prelude, input, None)
+      | "-C" :: cmd when not (List.is_empty cmd) -> (use_prelude, input, Some cmd)
       | "-C" :: [] -> fail "-C requires a command"
-      | _ -> fail "unsupported arguments; expected optional '-C <command...>'")
+      | _ -> fail "unsupported arguments; expected optional '--no-prelude' and '-C <command...>'")
 
 let replace_placeholder cmd tmp_c_path =
   let replaced =
@@ -55,8 +63,8 @@ let () =
   let argv = Sys.get_argv () in
   let args = Array.to_list argv |> List.tl_exn in
   try
-    let input_path, compile_cmd = split_compile_command args in
-    let c = Compiler.compile_file input_path in
+    let use_prelude, input_path, compile_cmd = split_compile_command args in
+    let c = Compiler.compile_file ~use_prelude input_path in
     match compile_cmd with
     | None ->
         Out_channel.output_string stdout c;
