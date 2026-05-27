@@ -14,6 +14,8 @@ type ctx = {
   mutable gensym_counter : int;
 }
 
+let evals_splice_tag = "__sexc_internal_evals_splice__"
+
 let bool_raw b = if b then Raw.Atom "t" else Raw.Atom "nil"
 
 let is_falsey = function
@@ -37,6 +39,10 @@ let expect_list = function
   | Raw.List xs -> xs
   | _ -> fail "macro expected list"
 
+let is_evals_splice = function
+  | Raw.List [ Raw.Atom tag; Raw.List xs ] when String.equal tag evals_splice_tag -> Some xs
+  | _ -> None
+
 let with_bound env names values =
   List.fold2_exn names values ~init:env ~f:(fun acc n v -> Map.set acc ~key:n ~data:v)
 
@@ -50,6 +56,8 @@ let rec eval_expr ctx env expr =
   | Raw.Atom a -> Option.value (Map.find env a) ~default:expr
   | Raw.Str _ -> expr
   | Raw.List [] -> Raw.List []
+  | Raw.List (Raw.Atom "quote" :: [ body ]) -> body
+  | Raw.List (Raw.Atom "quote" :: _) -> fail "quote expects exactly one argument"
   | Raw.List (Raw.Atom "quasiquote" :: [ body ]) -> eval_quasiquote ctx env ~depth:1 body
   | Raw.List (Raw.Atom "if" :: [ cond; yes; no ]) ->
       if is_falsey (eval_expr ctx env cond) then eval_expr ctx env no else eval_expr ctx env yes
@@ -93,6 +101,32 @@ let rec eval_expr ctx env expr =
       | Raw.List _ -> bool_raw false)
   | Raw.List (Raw.Atom "eq?" :: [ a; b ]) ->
       bool_raw (raw_equal (eval_expr ctx env a) (eval_expr ctx env b))
+  | Raw.List (Raw.Atom "$--map" :: [ mapper; xs ]) ->
+      let values = expect_list (eval_expr ctx env xs) in
+      Raw.List
+        (List.map values ~f:(fun v ->
+             let env = Map.set env ~key:"it" ~data:v in
+             eval_expr ctx env mapper))
+  | Raw.List (Raw.Atom "$--filter" :: [ pred; xs ]) ->
+      let values = expect_list (eval_expr ctx env xs) in
+      Raw.List
+        (List.filter values ~f:(fun v ->
+             let env = Map.set env ~key:"it" ~data:v in
+             not (is_falsey (eval_expr ctx env pred))))
+  | Raw.List (Raw.Atom "$--reduce" :: [ reducer; init; xs ]) ->
+      let values = expect_list (eval_expr ctx env xs) in
+      let acc0 = eval_expr ctx env init in
+      List.fold values ~init:acc0 ~f:(fun acc v ->
+          let env = Map.set env ~key:"it" ~data:v |> Map.set ~key:"acc" ~data:acc in
+          eval_expr ctx env reducer)
+  | Raw.List (Raw.Atom "$dolist" :: [ Raw.List [ Raw.Atom var; xs ]; body ]) ->
+      let values = expect_list (eval_expr ctx env xs) in
+      Raw.List
+        (List.map values ~f:(fun v ->
+             let env = Map.set env ~key:var ~data:v in
+             eval_expr ctx env body))
+  | Raw.List (Raw.Atom "$dolist" :: _) ->
+      fail "$dolist expects ($dolist (var list-expr) body)"
   | Raw.List (Raw.Atom "error" :: [ msg ]) ->
       let text =
         match eval_expr ctx env msg with
@@ -183,20 +217,59 @@ let apply ctx depth m args =
     failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
   expanded
 
-let rec expand_one ctx ~depth raw =
+let rec expand_eval_form_for_arg ctx ~depth = function
+  | Raw.List (Raw.Atom "%eval" :: [ expr ]) ->
+      let out = eval_expr ctx String.Map.empty expr in
+      [ expand_one ctx ~depth:(depth + 1) out ]
+  | Raw.List (Raw.Atom "%eval" :: _) -> fail "%eval expects exactly one argument"
+  | Raw.List (Raw.Atom "%evals" :: [ expr ]) ->
+      let out = eval_expr ctx String.Map.empty expr in
+      let items = expect_list out in
+      List.map items ~f:(fun item -> expand_one ctx ~depth:(depth + 1) item)
+  | Raw.List (Raw.Atom "%evals" :: _) -> fail "%evals expects exactly one argument"
+  | other -> [ other ]
+
+and expand_eval_args_for_macro ctx ~depth xs =
+  List.concat_map xs ~f:(fun x -> expand_eval_form_for_arg ctx ~depth x)
+
+and expand_one ctx ~depth raw =
   if depth > ctx.max_depth then failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
   match raw with
   | Raw.Atom _ | Raw.Str _ -> raw
   | Raw.List [] -> raw
+  | Raw.List (Raw.Atom "quote" :: _) -> raw
   | Raw.List (Raw.Atom "quasiquote" :: _) -> raw
+  | Raw.List (Raw.Atom "%eval" :: [ expr ]) ->
+      let out = eval_expr ctx String.Map.empty expr in
+      expand_one ctx ~depth:(depth + 1) out
+  | Raw.List (Raw.Atom "%eval" :: _) ->
+      fail "%eval expects exactly one argument"
+  | Raw.List (Raw.Atom "%evals" :: [ expr ]) ->
+      let out = eval_expr ctx String.Map.empty expr in
+      let items = expect_list out in
+      let items = List.map items ~f:(fun item -> expand_one ctx ~depth:(depth + 1) item) in
+      Raw.List [ Raw.Atom evals_splice_tag; Raw.List items ]
+  | Raw.List (Raw.Atom "%evals" :: _) ->
+      fail "%evals expects exactly one argument"
   | Raw.List (Raw.Atom head :: args) -> (
       match Map.find ctx.defs head with
       | Some m ->
+          let args = expand_eval_args_for_macro ctx ~depth args in
           let out = apply ctx (depth + 1) m args in
           expand_one ctx ~depth:(depth + 1) out
-      | None ->
-          Raw.List
-            (Raw.Atom head :: List.map args ~f:(fun x -> expand_one ctx ~depth:(depth + 1) x)))
-  | Raw.List xs -> Raw.List (List.map xs ~f:(fun x -> expand_one ctx ~depth:(depth + 1) x))
+      | None -> Raw.List (Raw.Atom head :: expand_list_items ctx ~depth args))
+  | Raw.List xs -> Raw.List (expand_list_items ctx ~depth xs)
 
-let expand_program ctx forms = List.map forms ~f:(fun x -> expand_one ctx ~depth:0 x)
+and expand_list_items ctx ~depth xs =
+  List.concat_map xs ~f:(fun x ->
+      let expanded = expand_one ctx ~depth:(depth + 1) x in
+      match is_evals_splice expanded with
+      | Some items -> items
+      | None -> [ expanded ])
+
+let expand_program ctx forms =
+  List.concat_map forms ~f:(fun x ->
+      let out = expand_one ctx ~depth:0 x in
+      match is_evals_splice out with
+      | Some items -> items
+      | None -> [ out ])

@@ -82,7 +82,7 @@ let parse_string st =
   loop ()
 
 let is_atom_delim = function
-  | '(' | ')' | '"' | ';' | '`' | ',' | ' ' | '\t' | '\n' | '\r' -> true
+  | '(' | ')' | '"' | ';' | '\'' | '`' | ',' | ' ' | '\t' | '\n' | '\r' -> true
   | _ -> false
 
 let parse_atom st =
@@ -97,6 +97,9 @@ let rec parse_one st =
   skip_ws_and_comments st;
   match peek st with
   | None -> error st "unexpected end of input"
+  | Some '\'' ->
+      bump st;
+      Raw.List [ Raw.Atom "quote"; parse_one st ]
   | Some '`' ->
       bump st;
       Raw.List [ Raw.Atom "quasiquote"; parse_one st ]

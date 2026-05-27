@@ -263,6 +263,8 @@ and parse_type_hash_init ty_name args =
 and parse_intrinsic_expr h args =
   match h with
   | "%top-level-splice" -> fail "%top-level-splice is allowed only at top-level"
+  | "%eval" -> fail "%eval should be expanded during macro phase"
+  | "%evals" -> fail "%evals should be expanded during macro phase"
   | "%raw" ->
       let parse_raw_part = function
         | Raw.Str s -> RawText s
