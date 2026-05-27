@@ -1,0 +1,30 @@
+(%import "../std/core.sexc")
+
+(include
+  "stdio.h"
+  "math.h")
+
+(struct QuadrEq (float a) (float b) (float c))
+
+(struct Roots (float x1) (float x2))
+
+(defn float QuadrEq/disc ((QuadrEq self))
+  (return (- (powf (. self b) 2.0) (* 4.0 (. self a) (. self c)))))
+
+(defn Roots QuadrEq/solve ((QuadrEq seАlf))
+  (decl
+    (float denom) (* 2 (. self a))
+    (float d)     (sqrtf (QuadrEq/disc self))
+    (float x1)    (/ (+ (- (. self b)) d) denom)
+    (float x2)    (/ (- (- (. self b)) d) denom))
+
+  (return (Roots# (x1 x1) (x2 x2))))
+
+(defn int main ()
+  (decl
+    (QuadrEq problem) (QuadrEq# (a 5) (b 3) (c -26))
+    (Roots root) (QuadrEq/solve problem))
+
+  (printf "Solve square roots:\nx1 = %f\nx2 = %f\n" (. root x1) (. root x2))
+
+  (return 0))
