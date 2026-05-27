@@ -58,33 +58,35 @@ let rec eval_expr ctx env expr =
   | Raw.List [] -> Raw.List []
   | Raw.List (Raw.Atom "quote" :: [ body ]) -> body
   | Raw.List (Raw.Atom "quote" :: _) -> fail "quote expects exactly one argument"
+  | Raw.List (Raw.Atom "$quote" :: [ body ]) -> body
+  | Raw.List (Raw.Atom "$quote" :: _) -> fail "$quote expects exactly one argument"
   | Raw.List (Raw.Atom "quasiquote" :: [ body ]) -> eval_quasiquote ctx env ~depth:1 body
-  | Raw.List (Raw.Atom "if" :: [ cond; yes; no ]) ->
+  | Raw.List (Raw.Atom "$if" :: [ cond; yes; no ]) ->
       if is_falsey (eval_expr ctx env cond) then eval_expr ctx env no else eval_expr ctx env yes
-  | Raw.List (Raw.Atom "if" :: [ cond; yes ]) ->
+  | Raw.List (Raw.Atom "$if" :: [ cond; yes ]) ->
       if is_falsey (eval_expr ctx env cond) then Raw.Atom "nil" else eval_expr ctx env yes
-  | Raw.List (Raw.Atom "list" :: args) -> Raw.List (List.map args ~f:(eval_expr ctx env))
-  | Raw.List (Raw.Atom "cons" :: [ hd; tl ]) ->
+  | Raw.List (Raw.Atom "$list" :: args) -> Raw.List (List.map args ~f:(eval_expr ctx env))
+  | Raw.List (Raw.Atom "$cons" :: [ hd; tl ]) ->
       let h = eval_expr ctx env hd in
       let t = expect_list (eval_expr ctx env tl) in
       Raw.List (h :: t)
-  | Raw.List (Raw.Atom "append" :: args) ->
+  | Raw.List (Raw.Atom "$append" :: args) ->
       let elems = List.concat_map args ~f:(fun a -> expect_list (eval_expr ctx env a)) in
       Raw.List elems
-  | Raw.List (Raw.Atom "car" :: [ x ]) -> (
+  | Raw.List (Raw.Atom "$car" :: [ x ]) -> (
       match expect_list (eval_expr ctx env x) with
       | h :: _ -> h
       | [] -> Raw.Atom "nil")
-  | Raw.List (Raw.Atom "cdr" :: [ x ]) -> (
+  | Raw.List (Raw.Atom "$cdr" :: [ x ]) -> (
       match expect_list (eval_expr ctx env x) with
       | _ :: tl -> Raw.List tl
       | [] -> Raw.List [])
-  | Raw.List (Raw.Atom "length" :: [ x ]) ->
+  | Raw.List (Raw.Atom "$length" :: [ x ]) ->
       let len = List.length (expect_list (eval_expr ctx env x)) in
       Raw.Atom (Int.to_string len)
-  | Raw.List (Raw.Atom "reverse" :: [ x ]) ->
+  | Raw.List (Raw.Atom "$reverse" :: [ x ]) ->
       Raw.List (List.rev (expect_list (eval_expr ctx env x)))
-  | Raw.List (Raw.Atom "nth" :: [ xs; idx ]) ->
+  | Raw.List (Raw.Atom "$nth" :: [ xs; idx ]) ->
       let arr = expect_list (eval_expr ctx env xs) in
       let i =
         match eval_expr ctx env idx with
@@ -94,12 +96,12 @@ let rec eval_expr ctx env expr =
       (match List.nth arr i with
       | Some v -> v
       | None -> Raw.Atom "nil")
-  | Raw.List (Raw.Atom "null?" :: [ x ]) -> bool_raw (is_falsey (eval_expr ctx env x))
-  | Raw.List (Raw.Atom "atom?" :: [ x ]) -> (
+  | Raw.List (Raw.Atom "$null?" :: [ x ]) -> bool_raw (is_falsey (eval_expr ctx env x))
+  | Raw.List (Raw.Atom "$atom?" :: [ x ]) -> (
       match eval_expr ctx env x with
       | Raw.Atom _ | Raw.Str _ -> bool_raw true
       | Raw.List _ -> bool_raw false)
-  | Raw.List (Raw.Atom "eq?" :: [ a; b ]) ->
+  | Raw.List (Raw.Atom "$eq?" :: [ a; b ]) ->
       bool_raw (raw_equal (eval_expr ctx env a) (eval_expr ctx env b))
   | Raw.List (Raw.Atom "$--map" :: [ mapper; xs ]) ->
       let values = expect_list (eval_expr ctx env xs) in
@@ -127,21 +129,41 @@ let rec eval_expr ctx env expr =
              eval_expr ctx env body))
   | Raw.List (Raw.Atom "$dolist" :: _) ->
       fail "$dolist expects ($dolist (var list-expr) body)"
-  | Raw.List (Raw.Atom "error" :: [ msg ]) ->
+  | Raw.List (Raw.Atom "$error" :: [ msg ]) ->
       let text =
         match eval_expr ctx env msg with
         | Raw.Atom s | Raw.Str s -> s
         | _ -> "macro error"
       in
       fail text
-  | Raw.List (Raw.Atom "gensym" :: []) -> gensym ctx "__g"
-  | Raw.List (Raw.Atom "gensym" :: [ prefix ]) ->
+  | Raw.List (Raw.Atom "$gensym" :: []) -> gensym ctx "__g"
+  | Raw.List (Raw.Atom "$gensym" :: [ prefix ]) ->
       let p =
         match eval_expr ctx env prefix with
         | Raw.Atom s | Raw.Str s -> s
         | _ -> fail "gensym prefix must evaluate to atom or string"
       in
       gensym ctx p
+  | Raw.List (Raw.Atom legacy :: _)
+    when List.mem
+           [
+             "if";
+             "list";
+             "cons";
+             "append";
+             "car";
+             "cdr";
+             "length";
+             "reverse";
+             "nth";
+             "null?";
+             "atom?";
+             "eq?";
+             "error";
+             "gensym";
+           ]
+           legacy ~equal:String.equal ->
+      failf "Legacy meta builtin '%s' is not allowed; use '$%s'" legacy legacy
   | Raw.List xs -> Raw.List (List.map xs ~f:(eval_expr ctx env))
 
 and eval_quasiquote ctx env ~depth expr =

@@ -3,7 +3,10 @@ open Common
 
 let embedded_core_file = "<embedded:core>"
 
-let is_core_import_target rel = String.equal (Stdlib.Filename.basename rel) "core.sexc"
+let is_prelude_import_target rel =
+  match Stdlib.Filename.basename rel with
+  | "core.sexc" | "c-interop.sexc" | "meta.sexc" -> true
+  | _ -> false
 
 let resolve_import ~from_file rel =
   let base = Filename.dirname from_file in
@@ -23,7 +26,7 @@ let rec load_forms_from_file ~visited ~use_prelude path =
   List.concat_map forms ~f:(fun form ->
       match extract_import_target form with
       | Some rel ->
-          if use_prelude && is_core_import_target rel then []
+          if use_prelude && is_prelude_import_target rel then []
           else
             let imported = resolve_import ~from_file:abs rel in
             load_forms_from_file ~visited ~use_prelude imported

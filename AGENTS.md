@@ -6,7 +6,7 @@
 
 - OCaml исходники лежат в `src/`.
 - Основной CLI: `src/sexc.ml`.
-- Макросная stdlib: `std/core.sexc`.
+- Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`.
 - Примеры: `examples/`.
 
 ## Сборка и запуск
@@ -15,7 +15,7 @@
 - `make build` собирает `./src/sexc.exe` и копирует бинарник в корень как `./sexc`.
 - `make run FILE=...` использует `./sexc`.
 - В `Makefile` есть авто-очистка битого/stale `_build/.lock`.
-- `std/core.sexc` вшивается в бинарь на этапе сборки (`tools/embed_prelude.py` + `src/dune`).
+- Prelude вшивается в бинарь на этапе сборки (`tools/embed_prelude.py` + `src/dune`), начиная с `std/core.sexc` и его `%import`-цепочки.
 - Prelude подключается автоматически для каждого файла; флаг `--no-prelude` отключает автоподключение.
 - Явный `%import "../std/core.sexc"` по-прежнему допустим, но уже не обязателен.
 
@@ -74,6 +74,13 @@
 - Для `%eval` доступны meta-операторы в macro-eval:
   - `$--map`, `$--filter`, `$--reduce`, `$dolist`.
 - Reader поддерживает quote-сахар: `'x` -> `(quote x)`.
+
+## Именование уровней (строго)
+
+- `%...` — системные/IR формы компилятора.
+- `$...` — compile-time meta builtins (доступны в `%defmacro`, `%eval`, `%evals`).
+- Имена без `%` и без `$` — только surface DSL (объявлены в prelude-файлах `std/c-interop.sexc` и `std/meta.sexc`).
+- Legacy meta-имена без `$` (`car`, `cdr`, `null?`, `if`, ...) запрещены.
 
 ## Полезные sugar-макросы
 
