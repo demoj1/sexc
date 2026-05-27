@@ -31,6 +31,7 @@ type decl = {
 and expr =
   | EAtom of string
   | EString of string
+  | ERaw of raw_part list
   | ECall of expr * expr list
   | EUnary of string * expr
   | EPostfix of string * expr
@@ -49,6 +50,10 @@ and expr =
 and compound_init =
   | InitExpr of expr
   | InitField of string * expr
+
+and raw_part =
+  | RawText of string
+  | RawExpr of expr
 
 and for_init =
   | FNone
@@ -258,6 +263,12 @@ and parse_type_hash_init ty_name args =
 and parse_intrinsic_expr h args =
   match h with
   | "%top-level-splice" -> fail "%top-level-splice is allowed only at top-level"
+  | "%raw" ->
+      let parse_raw_part = function
+        | Raw.Str s -> RawText s
+        | other -> RawExpr (parse_expr other)
+      in
+      ERaw (List.map args ~f:parse_raw_part)
   | "%!" | "%~" ->
       ensure_arity h args 1;
       EUnary (String.drop_prefix h 1, parse_expr (List.hd_exn args))

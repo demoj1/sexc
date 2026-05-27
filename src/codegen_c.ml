@@ -150,7 +150,7 @@ let precedence_of_expr = function
   | ENary _ -> 12
   | EUnary _ | ECast _ | ESizeofType _ | ESizeofExpr _ -> 14
   | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ | ECompoundLiteral _ -> 15
-  | EAtom _ | EString _ -> 16
+  | EAtom _ | EString _ | ERaw _ -> 16
 
 let rec emit_expr ?(ctx = 0) e =
   let p = precedence_of_expr e in
@@ -158,6 +158,12 @@ let rec emit_expr ?(ctx = 0) e =
     match e with
     | EAtom a -> atom_to_c_token a
     | EString s -> "\"" ^ c_escape_string s ^ "\""
+    | ERaw parts ->
+        let emit_part = function
+          | RawText s -> s
+          | RawExpr x -> emit_expr x
+        in
+        List.map parts ~f:emit_part |> String.concat ~sep:""
     | EUnary (op, x) -> op ^ emit_expr ~ctx:p x
     | EPostfix (op, x) -> emit_expr ~ctx:p x ^ op
     | ENary (op, xs) ->
