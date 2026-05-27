@@ -11,9 +11,14 @@
 (defn Roots QuadrEq/solve ((QuadrEq self))
   (decl
     (float denom) (* 2 (. self a))
-    (float d)     (sqrtf (QuadrEq/disc self))
-    (float x1)    (/ (+ (- (. self b)) d) denom)
-    (float x2)    (/ (- (- (. self b)) d) denom))
+    (float d)     (sqrtf (QuadrEq/disc self)))
+
+  (%evals
+    ($for (row '((x1 +) (x2 -)))
+      ($let ((name ($car row))
+             (op ($car ($cdr row))))
+        `(%decl float ,name
+           (/ (,op (- (. self b)) d) denom)))))
 
   (return (Roots# (x1 x1) (x2 x2))))
 

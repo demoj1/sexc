@@ -103,6 +103,36 @@ let rec eval_expr ctx env expr =
       | Raw.List _ -> bool_raw false)
   | Raw.List (Raw.Atom "$eq?" :: [ a; b ]) ->
       bool_raw (raw_equal (eval_expr ctx env a) (eval_expr ctx env b))
+  | Raw.List (Raw.Atom "$let" :: Raw.List binds :: body) ->
+      let rec bind env = function
+        | [] -> env
+        | Raw.List [ Raw.Atom name; value_expr ] :: tl ->
+            let value = eval_expr ctx env value_expr in
+            bind (Map.set env ~key:name ~data:value) tl
+        | _ -> fail "$let bindings must be pairs: ((name expr) ...)"
+      in
+      let env = bind env binds in
+      let rec eval_last = function
+        | [] -> Raw.Atom "nil"
+        | [ x ] -> eval_expr ctx env x
+        | x :: tl ->
+            ignore (eval_expr ctx env x);
+            eval_last tl
+      in
+      eval_last body
+  | Raw.List (Raw.Atom "$for" :: [ Raw.List [ Raw.Atom var; xs ]; body ]) ->
+      let values = expect_list (eval_expr ctx env xs) in
+      Raw.List
+        (List.map values ~f:(fun v ->
+             let env = Map.set env ~key:var ~data:v |> Map.set ~key:"it" ~data:v in
+             eval_expr ctx env body))
+  | Raw.List (Raw.Atom "$for" :: _) ->
+      fail "$for expects ($for (var list-expr) body)"
+  | Raw.List (Raw.Atom "$map" :: args) -> eval_expr ctx env (Raw.List (Raw.Atom "$--map" :: args))
+  | Raw.List (Raw.Atom "$filter" :: args) ->
+      eval_expr ctx env (Raw.List (Raw.Atom "$--filter" :: args))
+  | Raw.List (Raw.Atom "$reduce" :: args) ->
+      eval_expr ctx env (Raw.List (Raw.Atom "$--reduce" :: args))
   | Raw.List (Raw.Atom "$--map" :: [ mapper; xs ]) ->
       let values = expect_list (eval_expr ctx env xs) in
       Raw.List
@@ -159,6 +189,11 @@ let rec eval_expr ctx env expr =
              "null?";
              "atom?";
              "eq?";
+             "let";
+             "for";
+             "map";
+             "filter";
+             "reduce";
              "error";
              "gensym";
            ]

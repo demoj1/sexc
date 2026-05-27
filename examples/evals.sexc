@@ -1,17 +1,16 @@
 (include "stdio.h")
 
 (%evals
-  ($--map
-    `(defn int ,($car it) ()
-       (return ,($car ($cdr it))))
-    ($list ($list add1 1)
-           ($list add2 2)
-           ($list add3 3))))
+  ($for (row '((add1 1) (add2 2) (add3 3)))
+    ($let ((name ($car row))
+           (value ($car ($cdr row))))
+      `(defn int ,name ()
+         (return ,value)))))
 
 (defn int main ()
   (printf "sum: %d\n" (+ (%evals ($dolist (x ($list 1 2 3)) x))))
   (%evals
-    ($--map
+    ($map
       `(printf "Hello %s\n" ,it)
       ($list "foo" "bar" "baz")))
   (return (+ (add1) (add2) (add3))))
