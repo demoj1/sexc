@@ -1,0 +1,15 @@
+(%include <stdio.h>)
+
+(%def-fn int gcd ((int a) (int b))
+  (%block
+    (%while (%!= b 0)
+      (%block
+        (%decl int t b)
+        (%set b (%% a b))
+        (%set a t)))
+    (%return a)))
+
+(%def-fn int main ()
+  (%block
+    (printf "GCD: %d\n" (gcd 48 18))
+    (%return 0)))

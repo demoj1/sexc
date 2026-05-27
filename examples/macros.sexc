@@ -1,0 +1,24 @@
+(%include <stdio.h>)
+
+(%defmacro when (cond body)
+  `(%if ,cond (%block ,body)))
+
+(%defmacro unless (cond body)
+  `(%if (%! ,cond) (%block ,body)))
+
+(%defmacro incf (x)
+  `(%set ,x (%+ ,x 1)))
+
+(%defmacro twice (form)
+  `(%block ,form ,form))
+
+(%def-fn int main ()
+  (%block
+    (%decl int x 0)
+    (when (%== x 0)
+      (printf "x is zero\n"))
+    (incf x)
+    (unless (%== x 0)
+      (printf "x is now %d\n" x))
+    (twice (printf "twice!\n"))
+    (%return 0)))

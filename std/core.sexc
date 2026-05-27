@@ -1,0 +1,131 @@
+; Core macro stdlib: syntax sugar over strict %IR intrinsics
+
+(%defmacro include (h)
+  `(%include ,h))
+
+(%defmacro define (name value)
+  `(%define ,name ,value))
+
+(%defmacro def-fn (ret name params &rest body)
+  `(%def-fn ,ret ,name ,params (%block ,@body)))
+
+(%defmacro decl (ty name)
+  `(%decl ,ty ,name))
+
+(%defmacro decl-init (ty name init)
+  `(%decl ,ty ,name ,init))
+
+(%defmacro block (&rest body)
+  `(%block ,@body))
+
+(%defmacro if (cond then &rest else-body)
+  (if (null? else-body)
+    `(%if ,cond (%block ,then))
+    `(%if ,cond (%block ,then) (%block ,@else-body))))
+
+(%defmacro if1 (cond &rest then-body)
+  `(%if ,cond (%block ,@then-body)))
+
+(%defmacro while (cond &rest body)
+  `(%while ,cond (%block ,@body)))
+
+(%defmacro for (init cond step &rest body)
+  `(%for ,init ,cond ,step (%block ,@body)))
+
+(%defmacro return (expr)
+  `(%return ,expr))
+
+(%defmacro set (lhs rhs)
+  `(%set ,lhs ,rhs))
+
+(%defmacro cast (ty expr)
+  `(%cast ,ty ,expr))
+
+(%defmacro sizeof-type (ty)
+  `(%sizeof-type ,ty))
+
+(%defmacro sizeof-expr (expr)
+  `(%sizeof-expr ,expr))
+
+(%defmacro aref (arr idx)
+  `(%aref ,arr ,idx))
+
+(%defmacro dot (obj field)
+  `(%dot ,obj ,field))
+
+(%defmacro arrow (ptr field)
+  `(%arrow ,ptr ,field))
+
+(%defmacro not (x)
+  `(%! ,x))
+
+(%defmacro + (a b)
+  `(%+ ,a ,b))
+
+(%defmacro - (a b)
+  `(%- ,a ,b))
+
+(%defmacro * (a b)
+  `(%* ,a ,b))
+
+(%defmacro / (a b)
+  `(%/ ,a ,b))
+
+(%defmacro % (a b)
+  `(%% ,a ,b))
+
+(%defmacro == (a b)
+  `(%== ,a ,b))
+
+(%defmacro != (a b)
+  `(%!= ,a ,b))
+
+(%defmacro < (a b)
+  `(%< ,a ,b))
+
+(%defmacro <= (a b)
+  `(%<= ,a ,b))
+
+(%defmacro > (a b)
+  `(%> ,a ,b))
+
+(%defmacro >= (a b)
+  `(%>= ,a ,b))
+
+(%defmacro && (a b)
+  `(%&& ,a ,b))
+
+(%defmacro || (a b)
+  `(%|| ,a ,b))
+
+(%defmacro post-inc (x)
+  `(%post-inc ,x))
+
+(%defmacro nop ()
+  `(%nop))
+
+; Convenience macros
+
+(%defmacro when (cond &rest body)
+  `(%if ,cond (%block ,@body)))
+
+(%defmacro unless (cond &rest body)
+  `(%if (%! ,cond) (%block ,@body)))
+
+(%defmacro incf (x)
+  `(%set ,x (%+ ,x 1)))
+
+(%defmacro decf (x)
+  `(%set ,x (%- ,x 1)))
+
+(%defmacro incf-by (x n)
+  `(%set ,x (%+ ,x ,n)))
+
+(%defmacro decf-by (x n)
+  `(%set ,x (%- ,x ,n)))
+
+(%defmacro dotimes (i n &rest body)
+  `(%for (%decl int ,i 0) (%< ,i ,n) (%post-inc ,i) (%block ,@body)))
+
+(%defmacro for-range (i start stop &rest body)
+  `(%for (%decl int ,i ,start) (%< ,i ,stop) (%post-inc ,i) (%block ,@body)))
