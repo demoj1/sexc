@@ -8,7 +8,7 @@
 - Основной CLI: `src/sexc.ml`.
 - Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`, `std/ocaml-api.sexc`.
 - Примеры: `examples/`.
-- Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command).
+- Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command, eldoc через `show-doc`).
 
 ## Карта модулей (OCaml)
 
@@ -18,6 +18,7 @@
 - `src/macro.ml` — `%defmacro`, `%eval/%evals`, compile-time `$...` builtins.
 - `src/frontend.ml` — парсинг expanded Raw в AST (типы/stmt/expr/top-level).
 - `src/codegen_c.ml` — генерация C из AST + mangling идентификаторов.
+- `src/docs.ml` — `%doc` metadata, `show-doc`, `dump-docs`, `dump-stdlib-docs`, markdown генерация.
 - `src/common.ml` — ошибки/диагностика.
 - `src/raw.ml` — минимальный тип Raw AST.
 
@@ -33,6 +34,7 @@
 - `std/core.sexc` — агрегатор prelude (`%import` цепочки), сюда не добавлять большую логику.
 - `std/c-interop.sexc` — C-facing surface DSL (defn/decl/struct/operators и т.п.).
 - `std/meta.sexc` — generic convenience helpers (when/unless/dotimes/repeat и т.п.).
+- `std/ocaml-api.sexc` — docs-only `%doc` записи для OCaml-only символов (`%...`, `$...`).
 
 Куда добавлять макросы:
 - макрос напрямую про C/interop/низкоуровневый surface синтаксис -> `std/c-interop.sexc`.
@@ -48,6 +50,7 @@
 - Prelude загружается с диска из stdlib-директории (по умолчанию `/usr/local/include/sexc/std`, можно переопределить через `SEXC_STDLIB_DIR`).
 - Prelude подключается автоматически для каждого файла; флаг `--no-prelude` отключает автоподключение.
 - Явный `%import "../std/core.sexc"` по-прежнему допустим, но уже не обязателен.
+- Циклические `%import` запрещены (ошибка `Cyclic %import detected: ...`).
 
 ## CLI фича `-C`
 
@@ -60,6 +63,14 @@
 - `./sexc show-doc <symbol>` — показать документацию символа.
 - `./sexc dump-docs <input.sexc> <out-dir>` — сгенерировать docs по файлам (user graph + std, если prelude включен).
 - `./sexc dump-stdlib-docs <out-dir>` — сгенерировать docs только для stdlib.
+
+## `%doc` metadata
+
+- `%doc` — top-level metadata форма, не влияет на C codegen.
+- Формат: `(%doc name [:sig ...] :doc "..." [:example "..."] [:internal t] [:since "..."] [:deprecated "..."] [:see sym...])`.
+- `:doc` обязателен; `:sig` опционален (для OCaml-only обычно указывается явно).
+- `:example` можно повторять; выводится в `show-doc` и markdown docs.
+- `:internal t` скрывает символ из `show-doc` и `dump-docs` (для helper-макросов).
 
 ## Диагностика ошибок (этап 1)
 
@@ -178,3 +189,4 @@
 - `examples/hello.sexc` — актуальный demo с `struct`, grouped params, `Type#`, и именами вида `Type/method`.
 - `examples/dot_arrow_alias.sexc` — demo для `.` / `->` и цепочек полей.
 - `examples/struct_methods.sexc` — demo для `defn` внутри `struct` и namespace-функций.
+- `examples/complex-project/` — мини-проект из 3 файлов (`main.sexc`, `lib.sexc`, `utils.sexc`) с `%import` между файлами.

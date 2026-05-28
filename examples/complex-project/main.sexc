@@ -1,0 +1,18 @@
+(include "stdio.h")
+
+(%import "./lib.sexc")
+(%import "./utils.sexc")
+
+(defn int main ()
+  (decl (Counter c) (Counter# 0))
+
+  (print-header)
+
+  (for-range i 1 8
+    (decl (int raw-score) (+ (* i i) 7))
+    (decl (int score) (clamp-int raw-score 0 40))
+    (set c (Counter/add c score))
+    (print-step i c))
+
+  (print-summary c)
+  (return 0))

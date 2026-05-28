@@ -1,0 +1,25 @@
+(struct Counter
+  :fields
+  (int total)
+  (int count)
+
+  :methods
+  (defn Counter add ((Counter self) (int value))
+    (return
+      (Counter#
+        (total (+ (. self total) value))
+        (count (+ (. self count) 1)))))
+
+  (defn float average ((Counter self))
+    (if (= (. self count) 0)
+      (return 0.0)
+      (return
+        (/ (cast float (. self total))
+           (cast float (. self count)))))))
+
+(defn int clamp-int ((int value) (int low) (int high))
+  (if (< value low)
+    (return low)
+    (if (> value high)
+      (return high)
+      (return value))))
