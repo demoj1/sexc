@@ -1,4 +1,4 @@
-(%module stats)
+(%module lib)
 
 (struct Counter
   :fields
@@ -19,6 +19,9 @@
         (/ (cast float (. self total))
            (cast float (. self count)))))))
 
+(%doc clamp-int
+  :doc "Clamp VALUE into [LOW, HIGH]."
+  :example "(stats/clamp-int raw 0 40)")
 (defn int clamp-int ((int value) (int low) (int high))
   (if (< value low)
     (return low)

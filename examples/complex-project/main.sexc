@@ -4,14 +4,14 @@
 (%import "./utils.sexc")
 
 (defn int main ()
-  (decl (stats/Counter c) (stats/Counter# 0))
+  (decl (lib/Counter c) (lib/Counter# 0))
 
   (utils/print-header)
 
   (for-range i 1 8
     (decl (int raw-score) (+ (* i i) 7))
-    (decl (int score) (stats/clamp-int raw-score 0 40))
-    (set c (stats/Counter/add c score))
+    (decl (int score) (lib/clamp-int raw-score 0 40))
+    (set c (lib/Counter/add c score))
     (utils/print-step i c))
 
   (utils/print-summary c)

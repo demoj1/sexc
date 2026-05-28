@@ -22,6 +22,7 @@ let usage () =
   prerr_endline "  sexc [--no-prelude] dump-docs <input.sexc> <out-dir>";
   prerr_endline "  sexc dump-stdlib-docs <out-dir>";
   prerr_endline "  sexc [--no-prelude] show-doc <name> [input.sexc]";
+  prerr_endline "  sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]";
   prerr_endline "";
   prerr_endline "By default, std/core.sexc is auto-loaded from stdlib path (implicit prelude).";
   prerr_endline "Use --no-prelude to disable auto prelude.";
@@ -49,6 +50,23 @@ type command =
       name : string;
       input_path : string option;
     }
+  | Complete of {
+      use_prelude : bool;
+      json : bool;
+      prefix : string;
+      input_path : string;
+    }
+
+let parse_complete_args use_prelude args =
+  let json, rest =
+    match args with
+    | "--json" :: tl -> (true, tl)
+    | tl -> (false, tl)
+  in
+  match rest with
+  | prefix :: [] -> Complete { use_prelude; json; prefix; input_path = "-" }
+  | prefix :: input :: [] -> Complete { use_prelude; json; prefix; input_path = input }
+  | _ -> fail "complete expects: sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]"
 
 let parse_command args =
   let rec parse_flags use_prelude = function
@@ -64,6 +82,7 @@ let parse_command args =
   | "show-doc" :: name :: [] -> Show_doc { use_prelude; name; input_path = None }
   | "show-doc" :: name :: input :: [] -> Show_doc { use_prelude; name; input_path = Some input }
   | "show-doc" :: _ -> fail "show-doc expects: sexc [--no-prelude] show-doc <name> [input.sexc]"
+  | "complete" :: tl -> parse_complete_args use_prelude tl
   | [] -> fail "missing input file"
   | input :: tail -> (
       match tail with
@@ -133,6 +152,10 @@ let () =
         if List.is_empty entries then failf "No documentation found for symbol: %s" name;
         Out_channel.output_string stdout (Docs.render_entries_text entries);
         Out_channel.newline stdout
+    | Complete { use_prelude; json; prefix; input_path } ->
+        let items = Completion.complete_items ~use_prelude ~input_path ~prefix in
+        if json then Out_channel.output_string stdout (Completion.items_to_json items ^ "\n")
+        else List.iter (Completion.names_of_items items) ~f:(fun item -> Out_channel.output_string stdout (item ^ "\n"))
   with
   | Sexc_diagnostic d ->
       prerr_endline (render_diagnostic d);

@@ -9,6 +9,7 @@
 - Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`, `std/ocaml-api.sexc`.
 - Примеры: `examples/`.
 - Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command, eldoc через `show-doc`).
+  - completion-at-point через `sexc complete` (учитывает imports + std + `%module`).
 
 ## Карта модулей (OCaml)
 
@@ -63,6 +64,8 @@
 - `./sexc show-doc <symbol>` — показать документацию символа.
 - `./sexc dump-docs <input.sexc> <out-dir>` — сгенерировать docs по файлам (user graph + std, если prelude включен).
 - `./sexc dump-stdlib-docs <out-dir>` — сгенерировать docs только для stdlib.
+- `./sexc complete <prefix> [input.sexc|-]` — выдать completion-кандидаты (макросы + функции) с учетом imports/std и `%module`.
+- `./sexc complete --json <prefix> [input.sexc|-]` — выдать completion в JSON (`name`, `kind`, optional `signature`/`doc`/`example`) для editor/tooling.
 
 ## `%doc` metadata
 

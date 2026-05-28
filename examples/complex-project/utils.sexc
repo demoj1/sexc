@@ -2,9 +2,15 @@
 
 (include "stdio.h")
 
+(%doc print-header
+  :doc "Print demo header."
+  :example "(utils/print-header)")
 (defn void print-header ()
   (printf "\n=== Complex Project Demo ===\n"))
 
+(%doc print-step
+  :doc "Print one aggregation step line."
+  :example "(utils/print-step i c)")
 (defn void print-step ((int step) (stats/Counter c))
   (printf
     "step=%d total=%d count=%d avg=%.2f\n"
@@ -13,6 +19,9 @@
     (. c count)
     (stats/Counter/average c)))
 
+(%doc print-summary
+  :doc "Print final aggregation summary line."
+  :example "(utils/print-summary c)")
 (defn void print-summary ((stats/Counter c))
   (printf
     "summary: total=%d count=%d avg=%.2f\n"
