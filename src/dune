@@ -1,8 +1,3 @@
-(rule
- (targets embedded_prelude.ml)
- (deps ../std/core.sexc ../std/c-interop.sexc ../std/meta.sexc ../tools/embed_prelude.py)
- (action (run python3 ../tools/embed_prelude.py ../std/core.sexc %{targets})))
-
 (executable
  (name sexc)
  (libraries core))

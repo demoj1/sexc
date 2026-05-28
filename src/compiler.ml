@@ -16,12 +16,41 @@ open Common
    - Keep import/prelude behavior centralized here.
 *)
 
-let embedded_core_file = "<embedded:core>"
+let default_stdlib_dir = "/usr/local/include/sexc/std"
+
+let stdlib_env_var = "SEXC_STDLIB_DIR"
 
 let is_prelude_import_target rel =
   match Stdlib.Filename.basename rel with
   | "core.sexc" | "c-interop.sexc" | "meta.sexc" -> true
   | _ -> false
+
+let file_exists path =
+  try Stdlib.Sys.file_exists path with
+  | _ -> false
+
+let stdlib_core_exists dir = file_exists (Filename.concat dir "core.sexc")
+
+let candidate_stdlib_dirs () =
+  let from_env = Option.to_list (Sys.getenv stdlib_env_var) in
+  let from_exe =
+    let exe = Stdlib.Sys.executable_name in
+    let bin_dir = Filename.dirname exe in
+    let prefix_dir = Filename.dirname bin_dir in
+    [ Filename.concat prefix_dir "include/sexc/std" ]
+  in
+  let from_defaults = [ default_stdlib_dir; Filename.concat (Stdlib.Sys.getcwd ()) "std" ] in
+  from_env @ from_exe @ from_defaults
+
+let resolve_stdlib_dir () =
+  let rec find = function
+    | [] ->
+        failf
+          "Could not locate SexC stdlib (missing core.sexc). Tried SEXC_STDLIB_DIR, %s, and ./std. Set %s to your stdlib directory."
+          default_stdlib_dir stdlib_env_var
+    | dir :: tl -> if stdlib_core_exists dir then dir else find tl
+  in
+  find (candidate_stdlib_dirs ())
 
 let resolve_import ~from_file rel =
   let base = Filename.dirname from_file in
@@ -47,16 +76,24 @@ let rec load_forms_from_file ~visited ~use_prelude path =
             load_forms_from_file ~visited ~use_prelude imported
       | None -> [ form ])
 
+let load_prelude_forms () =
+  let stdlib_dir = resolve_stdlib_dir () in
+  let core_path = Filename.concat stdlib_dir "core.sexc" in
+  load_forms_from_file ~visited:String.Set.empty ~use_prelude:false core_path
+
 let compile_forms ?(use_prelude = true) forms =
+  let is_doc_form = function
+    | Raw.List (Raw.Atom "%doc" :: _) -> true
+    | _ -> false
+  in
   let rec flatten_top_forms xs = List.concat_map xs ~f:flatten_top_form
   and flatten_top_form = function
     | Raw.List (Raw.Atom "%top-level-splice" :: inner) -> flatten_top_forms inner
     | other -> [ other ]
   in
-  let prelude_forms =
-    if use_prelude then Reader.parse_many ~file:embedded_core_file Embedded_prelude.core_source else []
-  in
-  let mctx, non_macro = Macro.collect (prelude_forms @ forms) in
+  let prelude_forms = if use_prelude then load_prelude_forms () else [] in
+  let non_doc = List.filter (prelude_forms @ forms) ~f:(fun f -> not (is_doc_form f)) in
+  let mctx, non_macro = Macro.collect non_doc in
   let expanded = Macro.expand_program mctx non_macro in
   expanded
   |> flatten_top_forms

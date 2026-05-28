@@ -6,7 +6,7 @@
 
 - OCaml исходники лежат в `src/`.
 - Основной CLI: `src/sexc.ml`.
-- Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`.
+- Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`, `std/ocaml-api.sexc`.
 - Примеры: `examples/`.
 - Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command).
 
@@ -43,8 +43,9 @@
 - `make` == `make build`.
 - `make build` собирает `./src/sexc.exe` и копирует бинарник в корень как `./sexc`.
 - `make run FILE=...` использует `./sexc`.
+- `make install` ставит бинарник в `$(PREFIX)/bin/sexc` (по умолчанию `/usr/local/bin/sexc`), stdlib в `$(PREFIX)/include/sexc/std`, docs в `$(PREFIX)/share/sexc/docs`.
 - В `Makefile` есть авто-очистка битого/stale `_build/.lock`.
-- Prelude вшивается в бинарь на этапе сборки (`tools/embed_prelude.py` + `src/dune`), начиная с `std/core.sexc` и его `%import`-цепочки.
+- Prelude загружается с диска из stdlib-директории (по умолчанию `/usr/local/include/sexc/std`, можно переопределить через `SEXC_STDLIB_DIR`).
 - Prelude подключается автоматически для каждого файла; флаг `--no-prelude` отключает автоподключение.
 - Явный `%import "../std/core.sexc"` по-прежнему допустим, но уже не обязателен.
 
@@ -53,6 +54,12 @@
 - Формат: `./sexc path/to/file.sexc -C <command...>`.
 - В команде обязателен `%` — он заменяется на временный `.c` файл.
 - Пример: `./sexc examples/raylib_std.sexc -C gcc % -lraylib -o raylib-example`.
+
+## CLI docs
+
+- `./sexc show-doc <symbol>` — показать документацию символа.
+- `./sexc dump-docs <input.sexc> <out-dir>` — сгенерировать docs по файлам (user graph + std, если prelude включен).
+- `./sexc dump-stdlib-docs <out-dir>` — сгенерировать docs только для stdlib.
 
 ## Диагностика ошибок (этап 1)
 

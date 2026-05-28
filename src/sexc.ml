@@ -19,27 +19,57 @@ let usage () =
   prerr_endline "  sexc [--no-prelude] <input.sexc>";
   prerr_endline "  sexc [--no-prelude] <input.sexc> -C <command...>";
   prerr_endline "  sexc [--no-prelude] -";
+  prerr_endline "  sexc [--no-prelude] dump-docs <input.sexc> <out-dir>";
+  prerr_endline "  sexc dump-stdlib-docs <out-dir>";
+  prerr_endline "  sexc [--no-prelude] show-doc <name> [input.sexc]";
   prerr_endline "";
-  prerr_endline "By default, std/core.sexc is embedded and auto-loaded (implicit prelude).";
+  prerr_endline "By default, std/core.sexc is auto-loaded from stdlib path (implicit prelude).";
   prerr_endline "Use --no-prelude to disable auto prelude.";
+  prerr_endline "Set SEXC_STDLIB_DIR to override stdlib lookup directory.";
   prerr_endline "Use '-' as input to read source from stdin.";
   prerr_endline "";
   prerr_endline "When -C is used, token '%' is replaced with a temporary generated C file.";
   prerr_endline "Example:";
   prerr_endline "  sexc examples/raylib_std.sexc -C gcc % -lraylib -o raylib-example"
 
-let split_compile_command args =
+type command =
+  | Compile of {
+      use_prelude : bool;
+      input_path : string;
+      compile_cmd : string list option;
+    }
+  | Dump_docs of {
+      use_prelude : bool;
+      input_path : string;
+      out_dir : string;
+    }
+  | Dump_stdlib_docs of { out_dir : string }
+  | Show_doc of {
+      use_prelude : bool;
+      name : string;
+      input_path : string option;
+    }
+
+let parse_command args =
   let rec parse_flags use_prelude = function
     | "--no-prelude" :: tl -> parse_flags false tl
     | rest -> (use_prelude, rest)
   in
   let use_prelude, rest = parse_flags true args in
   match rest with
+  | "dump-docs" :: input :: out_dir :: [] -> Dump_docs { use_prelude; input_path = input; out_dir }
+  | "dump-docs" :: _ -> fail "dump-docs expects: sexc [--no-prelude] dump-docs <input.sexc> <out-dir>"
+  | "dump-stdlib-docs" :: out_dir :: [] -> Dump_stdlib_docs { out_dir }
+  | "dump-stdlib-docs" :: _ -> fail "dump-stdlib-docs expects: sexc dump-stdlib-docs <out-dir>"
+  | "show-doc" :: name :: [] -> Show_doc { use_prelude; name; input_path = None }
+  | "show-doc" :: name :: input :: [] -> Show_doc { use_prelude; name; input_path = Some input }
+  | "show-doc" :: _ -> fail "show-doc expects: sexc [--no-prelude] show-doc <name> [input.sexc]"
   | [] -> fail "missing input file"
   | input :: tail -> (
       match tail with
-      | [] -> (use_prelude, input, None)
-      | "-C" :: cmd when not (List.is_empty cmd) -> (use_prelude, input, Some cmd)
+      | [] -> Compile { use_prelude; input_path = input; compile_cmd = None }
+      | "-C" :: cmd when not (List.is_empty cmd) ->
+          Compile { use_prelude; input_path = input; compile_cmd = Some cmd }
       | "-C" :: [] -> fail "-C requires a command"
       | _ -> fail "unsupported arguments; expected optional '--no-prelude' and '-C <command...>'")
 
@@ -84,15 +114,25 @@ let () =
   let argv = Sys.get_argv () in
   let args = Array.to_list argv |> List.tl_exn in
   try
-    let use_prelude, input_path, compile_cmd = split_compile_command args in
-    let c = compile_input ~use_prelude input_path in
-    match compile_cmd with
-    | None ->
-        Out_channel.output_string stdout c;
+    match parse_command args with
+    | Compile { use_prelude; input_path; compile_cmd } ->
+        let c = compile_input ~use_prelude input_path in
+        (match compile_cmd with
+        | None ->
+            Out_channel.output_string stdout c;
+            Out_channel.newline stdout
+        | Some cmd ->
+            let status = run_with_temp_c c cmd in
+            if status <> 0 then exit status)
+    | Dump_docs { use_prelude; input_path; out_dir } ->
+        if String.equal input_path "-" then fail "dump-docs does not support stdin input ('-')";
+        Docs.dump_docs_for_input ~use_prelude ~input_path ~out_dir
+    | Dump_stdlib_docs { out_dir } -> Docs.dump_stdlib_docs ~out_dir
+    | Show_doc { use_prelude; name; input_path } ->
+        let entries = Docs.show_doc ?input_path ~use_prelude name in
+        if List.is_empty entries then failf "No documentation found for symbol: %s" name;
+        Out_channel.output_string stdout (Docs.render_entries_text entries);
         Out_channel.newline stdout
-    | Some cmd ->
-        let status = run_with_temp_c c cmd in
-        if status <> 0 then exit status
   with
   | Sexc_diagnostic d ->
       prerr_endline (render_diagnostic d);

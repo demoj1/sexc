@@ -9,6 +9,9 @@
 ; include
 ; (include header...)
 ; => (%include h1) or (%include h1 h2 ...)
+(%doc include
+  :doc "Include one or more C headers."
+  :example "(include <stdio.h> \"my.h\")")
 (%defmacro include (&rest headers)
   ($if ($null? headers)
     ($error "include requires at least one header")
@@ -17,12 +20,18 @@
 ; define
 ; (define name value)
 ; => (%define name value)
+(%doc define
+  :doc "Define a C preprocessor symbol."
+  :example "(define PI 3.14)")
 (%defmacro define (name value)
   `(%define ,name ,value))
 
 ; defn
 ; (defn ret name params form...)
 ; => (%def-fn ret name params (%block form...))
+(%doc defn
+  :doc "Define a C function."
+  :example "(defn int main () (return 0))")
 (%defmacro defn (ret name params &rest body)
   `(%def-fn ,ret ,name ,params (%block ,@body)))
 
@@ -30,6 +39,9 @@
 ; (decl (type name) init ...)
 ; Initializer is required for each declaration.
 ; Multiple pairs expand sequentially (let*-style).
+(%doc decl
+  :doc "Let*-style variable declarations with required initializer."
+  :example "(decl (int x) 10 (int y) (+ x 5))")
 (%defmacro decl (binding init &rest rest)
   ($if ($atom? binding)
     ($error "decl binding must be (type name)")
@@ -50,6 +62,9 @@
 ; block
 ; (block form...)
 ; => (%block form...)
+(%doc block
+  :doc "Group forms into a statement block."
+  :example "(block (set x 1) (set y 2))")
 (%defmacro block (&rest body)
   `(%block ,@body))
 
@@ -58,6 +73,9 @@
 ; => (%if cond (%block then))
 ; => (%if cond (%block then) (%block else))
 ; More complex branching should use cond.
+(%doc if
+  :doc "Conditional with 2 or 3 arguments; use cond for multi-branch logic."
+  :example "(if (> x 0) (return x) (return 0))")
 (%defmacro if (cond then &rest else-body)
   ($if ($null? else-body)
     `(%if ,cond (%block ,then))
@@ -71,11 +89,17 @@
 ;   (test2 form...)
 ;   (else form...))
 ; Expands into nested %if forms with %block bodies.
+(%doc cond
+  :doc "Multi-branch conditional sugar."
+  :example "(cond ((< x 0) (return -1)) ((> x 0) (return 1)) (else (return 0)))")
 (%defmacro cond (&rest clauses)
   ($if ($null? clauses)
     ($error "cond requires at least one clause")
     `(cond-expand ,@clauses)))
 
+(%doc cond-expand
+  :doc "Internal helper used by cond expansion."
+  :internal t)
 (%defmacro cond-expand (clause &rest rest)
   ($if ($null? ($cdr clause))
     ($error "cond clause must contain a test and at least one body form")
@@ -92,18 +116,27 @@
 ; while
 ; (while cond form...)
 ; => (%while cond (%block form...))
+(%doc while
+  :doc "While-loop over COND with BODY forms."
+  :example "(while (< i n) (post-inc i))")
 (%defmacro while (cond &rest body)
   `(%while ,cond (%block ,@body)))
 
 ; for
 ; (for init cond step form...)
 ; => (%for init cond step (%block form...))
+(%doc for
+  :doc "C-style for loop sugar."
+  :example "(for (%decl int i 0) (%< i n) (%post-inc i) (nop))")
 (%defmacro for (init cond step &rest body)
   `(%for ,init ,cond ,step (%block ,@body)))
 
 ; return
 ; (return expr)
 ; => (%return expr)
+(%doc return
+  :doc "Return expression from current function."
+  :example "(return (+ a b))")
 (%defmacro return (expr)
   `(%return ,expr))
 
@@ -112,6 +145,9 @@
 ; Single pair => (%set lhs value)
 ; Multiple pairs => (%block (%set lhs value) (%set lhs2 value2) ...)
 ; Number of arguments after lhs/value must be even.
+(%doc set
+  :doc "Assignment sugar; supports multiple lhs/value pairs."
+  :example "(set x 1 y 2)")
 (%defmacro set (lhs value &rest more)
   ($if ($null? more)
     `(%set ,lhs ,value)
@@ -124,6 +160,9 @@
 ; cast
 ; (cast ty expr)
 ; => (%cast ty expr)
+(%doc cast
+  :doc "Cast EXPR to TY."
+  :example "(cast float x)")
 (%defmacro cast (ty expr)
   `(%cast ,ty ,expr))
 
@@ -135,6 +174,9 @@
 ;   :methods
 ;   (defn ret method params body...) ...)
 ; :methods section is optional.
+(%doc struct
+  :doc "Define typedef struct with :fields and optional :methods sections."
+  :example "(struct Vec2 :fields (float x) (float y))")
 (%defmacro struct (name &rest items)
   ($let ((state
           ($reduce
@@ -193,35 +235,56 @@
 ; union
 ; (union Name (type field) ...)
 ; => typedef union Name { ... } Name;
+(%doc union
+  :doc "Define typedef union with named fields."
+  :example "(union Number (int i) (float f))")
 (%defmacro union (name &rest fields)
   `(%typedef (%union ,name ,@fields) ,name))
 
 ; zero-init
 ; (zero-init) => {0}
+(%doc zero-init
+  :doc "Emit zero initializer expression {0}."
+  :example "(decl (MyType v) (zero-init))")
 (%defmacro zero-init ()
   `(%raw "{0}"))
 
 ; sizeof-type
 ; (sizeof-type ty)
 ; => (%sizeof-type ty)
+(%doc sizeof-type
+  :doc "Return sizeof(TY)."
+  :example "(sizeof-type int)")
 (%defmacro sizeof-type (ty)
   `(%sizeof-type ,ty))
 
 ; sizeof-expr
 ; (sizeof-expr expr)
 ; => (%sizeof-expr expr)
+(%doc sizeof-expr
+  :doc "Return sizeof(EXPR)."
+  :example "(sizeof-expr x)")
 (%defmacro sizeof-expr (expr)
   `(%raw "sizeof(" ,expr ")"))
 
 ; aref / dot / arrow helpers
+(%doc aref
+  :doc "Array indexing helper: ARR[IDX]."
+  :example "(aref arr i)")
 (%defmacro aref (arr idx)
   `(%raw "(" ,arr ")[" ,idx "]"))
 
+(%doc dot
+  :doc "Field access chain helper using '.'."
+  :example "(dot v x)")
 (%defmacro dot (obj field &rest fields)
   ($if ($null? fields)
     `(%dot ,obj ,field)
     `(dot (%dot ,obj ,field) ,@fields)))
 
+(%doc arrow
+  :doc "Pointer field access chain helper using '->'."
+  :example "(arrow p next value)")
 (%defmacro arrow (ptr field &rest fields)
   ($if ($null? fields)
     `(%arrow ,ptr ,field)
@@ -230,23 +293,38 @@
 ; Clojure-style aliases:
 ; (. obj a b c) => (%dot (%dot (%dot obj a) b) c)
 ; (-> ptr a b c) => (%arrow (%arrow (%arrow ptr a) b) c)
+(%doc .
+  :doc "Alias of dot."
+  :example "(. v x)")
 (%defmacro . (obj field &rest fields)
   `(dot ,obj ,field ,@fields))
 
+(%doc ->
+  :doc "Alias of arrow."
+  :example "(-> p next value)")
 (%defmacro -> (ptr field &rest fields)
   `(arrow ,ptr ,field ,@fields))
 
 ; Operator wrappers
+(%doc not
+  :doc "Logical negation helper."
+  :example "(not done)")
 (%defmacro not (x)
   `(%raw "!(" ,x ")"))
 
 ; (+ a b c ...)
 ; n-ary arithmetic, at least 2 args
+(%doc +
+  :doc "N-ary addition."
+  :example "(+ a b c)")
 (%defmacro + (a b &rest rest)
   `(%+ ,a ,b ,@rest))
 
 ; (- a) or (- a b c ...)
 ; unary minus expands to (0 - a)
+(%doc -
+  :doc "Unary/binary/n-ary subtraction."
+  :example "(- x)")
 (%defmacro - (a &rest rest)
   ($if ($null? rest)
     `(%- 0 ,a)
@@ -254,59 +332,104 @@
 
 ; (* a b c ...)
 ; n-ary arithmetic, at least 2 args
+(%doc *
+  :doc "N-ary multiplication."
+  :example "(* a b c)")
 (%defmacro * (a b &rest rest)
   `(%* ,a ,b ,@rest))
 
 ; (/ a b c ...)
 ; n-ary arithmetic, at least 2 args
+(%doc /
+  :doc "N-ary division."
+  :example "(/ a b)")
 (%defmacro / (a b &rest rest)
   `(%/ ,a ,b ,@rest))
 
 ; (% a b c ...)
 ; n-ary arithmetic, at least 2 args
+(%doc %
+  :doc "N-ary modulo."
+  :example "(% a b)")
 (%defmacro % (a b &rest rest)
   `(%% ,a ,b ,@rest))
 
+(%doc =
+  :doc "Equality operator."
+  :example "(= a b)")
 (%defmacro = (a b)
   `(%== ,a ,b))
 
+(%doc not=
+  :doc "Inequality operator."
+  :example "(not= a b)")
 (%defmacro not= (a b)
   `(%!= ,a ,b))
 
+(%doc <
+  :doc "Less-than operator."
+  :example "(< a b)")
 (%defmacro < (a b)
   `(%< ,a ,b))
 
+(%doc <=
+  :doc "Less-than-or-equal operator."
+  :example "(<= a b)")
 (%defmacro <= (a b)
   `(%<= ,a ,b))
 
+(%doc >
+  :doc "Greater-than operator."
+  :example "(> a b)")
 (%defmacro > (a b)
   `(%> ,a ,b))
 
+(%doc >=
+  :doc "Greater-than-or-equal operator."
+  :example "(>= a b)")
 (%defmacro >= (a b)
   `(%>= ,a ,b))
 
 ; (&& a b c ...)
 ; n-ary logical and (short-circuit in backend IR)
+(%doc &&
+  :doc "N-ary logical and."
+  :example "(&& a b c)")
 (%defmacro && (a b &rest rest)
   `(%&& ,a ,b ,@rest))
 
 ; (and a b c ...)
 ; Lisp-style alias for &&
+(%doc and
+  :doc "Alias of &&."
+  :example "(and a b)")
 (%defmacro and (a b &rest rest)
   `(%&& ,a ,b ,@rest))
 
 ; (|| a b c ...)
 ; n-ary logical or (short-circuit in backend IR)
+(%doc ||
+  :doc "N-ary logical or."
+  :example "(|| a b c)")
 (%defmacro || (a b &rest rest)
   `(%|| ,a ,b ,@rest))
 
 ; (or a b c ...)
 ; Lisp-style alias for ||
+(%doc or
+  :doc "Alias of ||."
+  :example "(or a b)")
 (%defmacro or (a b &rest rest)
   `(%|| ,a ,b ,@rest))
 
+(%doc post-inc
+  :doc "Post-increment expression helper."
+  :example "(post-inc i)")
 (%defmacro post-inc (x)
   `(%raw "(" ,x ")++"))
 
+(%doc nop
+  :doc "No-op statement helper."
+  :example "(nop)")
 (%defmacro nop ()
   `(%nop))

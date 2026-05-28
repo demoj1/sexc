@@ -1,0 +1,148 @@
+; std/ocaml-api.sexc
+; Documentation-only entries for symbols implemented directly in OCaml.
+; These forms are metadata for tooling and are ignored by code generation.
+
+(%doc %eval
+  :sig (%eval expr)
+  :doc "Evaluate compile-time EXPR and return one expanded form."
+  :example "(%eval ($quote (set x 1)))")
+
+(%doc %evals
+  :sig (%evals expr)
+  :doc "Evaluate compile-time EXPR and splice resulting list into current list context."
+  :example "(%evals ($list (set x 1) (set y 2)))")
+
+(%doc %top-level-splice
+  :sig (%top-level-splice form...)
+  :doc "Splice multiple top-level forms into program output."
+  :example "(%top-level-splice (%define A 1) (%define B 2))")
+
+(%doc %raw
+  :sig (%raw part...)
+  :doc "Inline raw C expression fragments; strings are copied as-is, non-strings are emitted as expressions."
+  :example "(%raw \"(\" x \" + 1)\")")
+
+(%doc $quote
+  :sig ($quote form)
+  :doc "Return FORM without evaluating it."
+  :example "($quote (a b c))")
+
+(%doc $if
+  :sig ($if cond yes [no])
+  :doc "Compile-time conditional."
+  :example "($if ($eq? mode fast) (quote A) (quote B))")
+
+(%doc $list
+  :sig ($list form...)
+  :doc "Build a list from evaluated items."
+  :example "($list 1 2 3)")
+
+(%doc $cons
+  :sig ($cons head tail)
+  :doc "Construct list cell from HEAD and TAIL list."
+  :example "($cons 0 ($list 1 2))")
+
+(%doc $append
+  :sig ($append list...)
+  :doc "Concatenate lists."
+  :example "($append ($list 1) ($list 2 3))")
+
+(%doc $car
+  :sig ($car list)
+  :doc "Return first element of LIST, or nil for empty list."
+  :example "($car ($list a b c))")
+
+(%doc $cdr
+  :sig ($cdr list)
+  :doc "Return LIST tail, or empty list."
+  :example "($cdr ($list a b c))")
+
+(%doc $length
+  :sig ($length list)
+  :doc "Return LIST length."
+  :example "($length ($list a b c))")
+
+(%doc $reverse
+  :sig ($reverse list)
+  :doc "Return reversed LIST."
+  :example "($reverse ($list a b c))")
+
+(%doc $nth
+  :sig ($nth list idx)
+  :doc "Return element at IDX or nil when out of range."
+  :example "($nth ($list a b c) 1)")
+
+(%doc $null?
+  :sig ($null? value)
+  :doc "True when VALUE is nil or empty list."
+  :example "($null? ($list))")
+
+(%doc $atom?
+  :sig ($atom? value)
+  :doc "True when VALUE is atom or string."
+  :example "($atom? foo)")
+
+(%doc $eq?
+  :sig ($eq? a b)
+  :doc "Structural equality check for raw values."
+  :example "($eq? a a)")
+
+(%doc $error
+  :sig ($error message)
+  :doc "Raise compile-time error with MESSAGE."
+  :example "($error \"bad input\")")
+
+(%doc $gensym
+  :sig ($gensym [prefix])
+  :doc "Generate unique symbol, optionally with PREFIX."
+  :example "($gensym \"tmp_\")")
+
+(%doc $symcat
+  :sig ($symcat part...)
+  :doc "Concatenate parts into a symbol name."
+  :example "($symcat Name \"/\" method)")
+
+(%doc $--map
+  :sig ($--map expr list)
+  :doc "Map LIST with implicit 'it' binding."
+  :example "($--map ($list it it) ($list a b))")
+
+(%doc $--filter
+  :sig ($--filter pred list)
+  :doc "Filter LIST with implicit 'it' binding."
+  :example "($--filter ($eq? it keep) ($list keep drop))")
+
+(%doc $--reduce
+  :sig ($--reduce expr init list)
+  :doc "Fold LIST with implicit 'it' and 'acc' bindings."
+  :example "($--reduce ($append acc ($list it)) ($list) ($list a b))")
+
+(%doc $dolist
+  :sig ($dolist (var list) body)
+  :doc "Iterate compile-time list and return BODY results as a list."
+  :example "($dolist (x ($list a b)) ($list x))")
+
+(%doc $map
+  :sig ($map expr list)
+  :doc "Alias of $--map."
+  :example "($map ($list it) ($list a b))")
+
+(%doc $filter
+  :sig ($filter pred list)
+  :doc "Alias of $--filter."
+  :example "($filter ($eq? it a) ($list a b))")
+
+(%doc $reduce
+  :sig ($reduce expr init list)
+  :doc "Alias of $--reduce."
+  :example "($reduce ($append acc ($list it)) ($list) ($list a b))")
+
+(%doc $for
+  :sig ($for (var list) body)
+  :doc "Iterate LIST with VAR and 'it' bound to each value; return BODY results."
+  :example "($for (x ($list a b)) ($list x))")
+
+(%doc $let
+  :sig ($let ((name expr)...) body...)
+  :doc "Compile-time let* bindings."
+  :example "($let ((x 1) (y 2)) ($list x y))")

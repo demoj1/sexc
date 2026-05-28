@@ -1,5 +1,11 @@
 .PHONY: all build run install clean
 
+PREFIX ?= /usr/local
+DESTDIR ?=
+BINDIR := $(DESTDIR)$(PREFIX)/bin
+STDLIBDIR := $(DESTDIR)$(PREFIX)/include/sexc/std
+DOCDIR := $(DESTDIR)$(PREFIX)/share/sexc/docs
+
 all: build
 
 _dune_lock_fix:
@@ -27,11 +33,21 @@ run: build
 	fi
 	./sexc "$(FILE)"
 
-install: build
-	@mkdir -p "$$HOME/.local/bin"
-	cp ./sexc "$$HOME/.local/bin/sexc"
-	@chmod 755 "$$HOME/.local/bin/sexc"
-	@echo "Installed sexc to $$HOME/.local/bin/sexc"
+install:
+	@if [ ! -x "./sexc" ]; then \
+		echo "Missing ./sexc binary. Run 'make build' as your regular user first."; \
+		exit 1; \
+	fi
+	@mkdir -p "$(BINDIR)"
+	@mkdir -p "$(STDLIBDIR)"
+	@mkdir -p "$(DOCDIR)"
+	cp ./sexc "$(BINDIR)/sexc"
+	@chmod 755 "$(BINDIR)/sexc"
+	cp ./std/*.sexc "$(STDLIBDIR)/"
+	SEXC_STDLIB_DIR="$(PWD)/std" ./sexc dump-stdlib-docs "$(DOCDIR)"
+	@echo "Installed sexc to $(BINDIR)/sexc"
+	@echo "Installed stdlib to $(STDLIBDIR)"
+	@echo "Installed docs to $(DOCDIR)"
 
 clean:
 	opam exec -- dune clean
