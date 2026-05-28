@@ -2,6 +2,19 @@ open Core
 open Common
 open Frontend
 
+(*
+   Code generator: frontend AST -> C source text.
+
+   Responsibilities:
+   - emit C declarations/types/statements/expressions
+   - apply identifier mangling for non-C-safe symbols
+   - preserve expression precedence with minimal parentheses
+
+   Extension point:
+   - Add emission for new AST constructors here.
+   - Keep mangling and literal handling centralized in this module.
+*)
+
 let is_ascii_letter c =
   Char.(c >= 'a' && c <= 'z') || Char.(c >= 'A' && c <= 'Z')
 

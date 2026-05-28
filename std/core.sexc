@@ -1,5 +1,10 @@
 ; std/core.sexc
 ; Aggregate prelude for SexC surface DSL.
+;
+; Where to add new macros:
+; - C/interop-facing surface macros -> std/c-interop.sexc
+; - generic convenience helpers -> std/meta.sexc
+; - this file should stay a thin aggregator only.
 
 (%import "./c-interop.sexc")
 (%import "./meta.sexc")

@@ -1,6 +1,20 @@
 open Core
 open Common
 
+(*
+   Macro phase / compile-time evaluator.
+
+   Responsibilities:
+   - collect %defmacro declarations
+   - expand macro calls recursively
+   - evaluate meta builtins ($...) for %defmacro, %eval, %evals
+   - support list-context splicing for %evals
+
+   Extension point:
+   - Add new compile-time builtins in [eval_expr] (prefer $-prefixed API only).
+   - Add new special compile-time forms in [expand_one] only when they affect expansion control.
+*)
+
 type def = {
   name : string;
   params : string list;

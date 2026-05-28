@@ -1,5 +1,10 @@
 ; std/c-interop.sexc
 ; C-facing surface macros over strict %IR intrinsics.
+;
+; Contains macros that directly shape C-like code (decl/defn/struct/operators/etc).
+; Add new low-level language surface features here.
+;
+; Keep compile-time helper logic explicit with $... meta builtins.
 
 ; include
 ; (include header...)
@@ -20,11 +25,6 @@
 ; => (%def-fn ret name params (%block form...))
 (%defmacro defn (ret name params &rest body)
   `(%def-fn ,ret ,name ,params (%block ,@body)))
-
-; defun
-; Alias of defn. Inside (struct Name ...), defun methods are auto-namespaced to Name/method.
-(%defmacro defun (ret name params &rest body)
-  `(defn ,ret ,name ,params ,@body))
 
 ; decl
 ; (decl (type name) init ...)
@@ -128,32 +128,53 @@
   `(%cast ,ty ,expr))
 
 ; struct
-; (struct Name (type field) ...)
-; => typedef struct Name { ... } Name;
-; (struct Name (type field) ... (defun ret method params body...))
-; => typedef + namespaced methods Name/method
+; Strict section syntax:
+; (struct Name
+;   :fields
+;   (type field) ...
+;   :methods
+;   (defn ret method params body...) ...)
+; :methods section is optional.
 (%defmacro struct (name &rest items)
-  ($let ((fields
-          ($filter
-            ($if ($atom? it)
-              nil
-              ($if ($null? it)
-                nil
-                ($if ($eq? ($car it) defun) nil t)))
+  ($let ((state
+          ($reduce
+            ($let ((phase ($car acc))
+                   (fvals ($car ($cdr acc)))
+                   (mvals ($car ($cdr ($cdr acc)))))
+               ($if ($eq? it :fields)
+                 ($if ($eq? phase start)
+                   ($list fields fvals mvals)
+                   ($error "':fields' section must appear only once and first"))
+                 ($if ($eq? it :methods)
+                   ($if ($eq? phase fields)
+                     ($list methods fvals mvals)
+                     ($error "':methods' section must appear after ':fields' and only once"))
+                   ($if ($eq? phase start)
+                     ($error "struct must start with ':fields' section")
+                     ($if ($eq? phase fields)
+                       ($if ($atom? it)
+                         ($error "struct field must be (type name)")
+                          ($if ($eq? ($car it) defn)
+                            ($error "defn forms are only allowed in ':methods' section")
+                            ($list phase ($append fvals ($list it)) mvals)))
+                        ($if ($atom? it)
+                          ($error "only defn forms are allowed in ':methods' section")
+                          ($if ($eq? ($car it) defn)
+                            ($list phase fvals ($append mvals ($list it)))
+                            ($error "only defn forms are allowed in ':methods' section"))))))))
+            ($list start ($list) ($list))
             items))
-         (methods
-          ($filter
-            ($if ($atom? it)
-              nil
-              ($if ($null? it)
-                nil
-                ($if ($eq? ($car it) defun) t nil)))
-            items)))
+         (phase ($car state))
+         (fields ($car ($cdr state)))
+         (methods ($car ($cdr ($cdr state)))))
+    ($if ($eq? phase start)
+      ($error "struct expects ':fields' section")
+      nil)
     `(%top-level-splice
        (%typedef (%struct ,name ,@fields) ,name)
        ,@($map
            ($if ($atom? it)
-             ($error "struct method must be a list: (defun ret name params body...)")
+             ($error "struct method must be a list: (defn ret name params body...)")
              ($if ($null? ($cdr it))
                ($error "struct method must include return type")
                ($if ($null? ($cdr ($cdr it)))

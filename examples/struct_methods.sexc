@@ -1,15 +1,18 @@
 (include "stdio.h")
 
 (struct MathOps
+  :fields
   (int dummy)
 
-  (defun int add ((int l r))
+  :methods
+
+  (defn int add ((int l r))
     (return (+ l r)))
 
-  (defun int mul ((int l r))
+  (defn int mul ((int l r))
     (return (* l r))))
 
-(defun int sub ((int l r))
+(defn int sub ((int l r))
   (return (- l r)))
 
 (defn int main ()

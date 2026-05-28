@@ -1,13 +1,28 @@
 open Core
 open Common
 
+(*
+   CLI entrypoint.
+
+   Responsibilities:
+   - parse CLI flags/arguments
+   - invoke compiler pipeline
+   - implement optional -C command execution over generated C
+
+   Extension point:
+   - Add user-facing flags here (and wire them into Compiler options).
+   - Keep usage/help text synchronized with parser behavior.
+*)
+
 let usage () =
   prerr_endline "Usage:";
   prerr_endline "  sexc [--no-prelude] <input.sexc>";
   prerr_endline "  sexc [--no-prelude] <input.sexc> -C <command...>";
+  prerr_endline "  sexc [--no-prelude] -";
   prerr_endline "";
   prerr_endline "By default, std/core.sexc is embedded and auto-loaded (implicit prelude).";
   prerr_endline "Use --no-prelude to disable auto prelude.";
+  prerr_endline "Use '-' as input to read source from stdin.";
   prerr_endline "";
   prerr_endline "When -C is used, token '%' is replaced with a temporary generated C file.";
   prerr_endline "Example:";
@@ -58,13 +73,19 @@ let run_with_temp_c compiled_c cmd =
       try Stdlib.Sys.remove tmp_c with
       | _ -> ())
 
+let compile_input ~use_prelude input_path =
+  if String.equal input_path "-" then
+    let source = In_channel.input_all In_channel.stdin in
+    Compiler.compile_source ~use_prelude source
+  else Compiler.compile_file ~use_prelude input_path
+
 let () =
   Random.self_init ();
   let argv = Sys.get_argv () in
   let args = Array.to_list argv |> List.tl_exn in
   try
     let use_prelude, input_path, compile_cmd = split_compile_command args in
-    let c = Compiler.compile_file ~use_prelude input_path in
+    let c = compile_input ~use_prelude input_path in
     match compile_cmd with
     | None ->
         Out_channel.output_string stdout c;

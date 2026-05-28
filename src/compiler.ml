@@ -1,6 +1,21 @@
 open Core
 open Common
 
+(*
+   High-level compile pipeline orchestration.
+
+   Responsibilities:
+   - load source file + %import graph
+   - prepend embedded prelude (unless disabled)
+   - run macro expansion
+   - parse frontend AST
+   - run C code generation
+
+   Extension point:
+   - Add/insert new compiler passes in [compile_forms] between expansion and codegen.
+   - Keep import/prelude behavior centralized here.
+*)
+
 let embedded_core_file = "<embedded:core>"
 
 let is_prelude_import_target rel =

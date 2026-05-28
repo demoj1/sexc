@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Embed std prelude into an OCaml module.
+
+This script flattens %import directives in std/core.sexc (and its transitive
+imports) and emits a generated OCaml file with a single string constant.
+"""
+
 import json
 import pathlib
 import re
@@ -9,6 +15,7 @@ IMPORT_RE = re.compile(r'^\s*\(%import\s+"([^"]+)"\s*\)\s*$')
 
 
 def flatten_source(path: pathlib.Path, visited: set[pathlib.Path]) -> str:
+    # Flatten %import chain once; repeated imports are ignored.
     path = path.resolve()
     if path in visited:
         return ""

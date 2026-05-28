@@ -1,13 +1,16 @@
 (include "stdio.h")
 
 (struct Vec2
+  :fields
   (float x)
   (float y))
 
 (struct Transform
+  :fields
   (Vec2 position))
 
 (struct Player
+  :fields
   (Transform location))
 
 (defn int main ()

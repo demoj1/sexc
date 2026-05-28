@@ -3,28 +3,31 @@
   "math.h")
 
 (struct Roots
+  :fields
   (float x1)
   (float x2))
 
 (struct QuadrEq
+  :fields
   (float a)
   (float b)
   (float c)
 
-  (defun float disc ((QuadrEq self))
+  :methods
+  (defn float disc ((QuadrEq self))
     (return (- (powf (. self b) 2.0) (* 4.0 (. self a) (. self c)))))
 
-  (defun Roots solve ((QuadrEq self))
+  (defn Roots solve ((QuadrEq self))
     (decl
       (float denom) (* 2 (. self a))
       (float d)     (sqrtf (QuadrEq/disc self)))
 
     (%evals
       ($for (row '((x1 +) (x2 -)))
-        ($let ((name ($car row))
-               (op ($car ($cdr row))))
-          `(%decl float ,name
-             (/ (,op (- (. self b)) d) denom)))))
+            ($let ((name ($car row))
+                   (op ($car ($cdr row))))
+                  `(%decl float ,name
+                          (/ (,op (- (. self b)) d) denom)))))
 
     (return (Roots# (x1 x1) (x2 x2)))))
 
@@ -34,8 +37,8 @@
     (Roots root) (QuadrEq/solve problem))
 
   (%evals
-   ($for (name '("Dmitry" "Vasily"))
-         `(printf "Hello %s\n" ,name)))
+    ($for (name '("Dmitry" "Vasily"))
+          `(printf "Hello %s\n" ,name)))
 
   (printf "Solve square roots:\nx1 = %f\nx2 = %f\n" (. root x1) (. root x2))
 

@@ -1,6 +1,19 @@
 open Core
 open Common
 
+(*
+   Reader: source text -> Raw.t forms.
+
+   Responsibilities:
+   - tokenization/parsing of atoms, strings, lists
+   - reader sugars: quote/quasiquote/unquote/splice
+   - precise reader diagnostics (file/line/col)
+
+   Extension point:
+   - Add new reader sugar in [parse_one] and update [is_atom_delim] when needed.
+   - Keep this phase syntax-only; no macro/frontend semantics here.
+*)
+
 type state = {
   file : string;
   src : string;

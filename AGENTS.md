@@ -8,6 +8,35 @@
 - Основной CLI: `src/sexc.ml`.
 - Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`.
 - Примеры: `examples/`.
+- Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command).
+
+## Карта модулей (OCaml)
+
+- `src/sexc.ml` — CLI и флаги (`--no-prelude`, `-C`).
+- `src/compiler.ml` — orchestration пайплайна: import/prelude -> macro -> frontend -> codegen.
+- `src/reader.ml` — reader/парсер Raw-форм + quote/quasiquote sugars.
+- `src/macro.ml` — `%defmacro`, `%eval/%evals`, compile-time `$...` builtins.
+- `src/frontend.ml` — парсинг expanded Raw в AST (типы/stmt/expr/top-level).
+- `src/codegen_c.ml` — генерация C из AST + mangling идентификаторов.
+- `src/common.ml` — ошибки/диагностика.
+- `src/raw.ml` — минимальный тип Raw AST.
+
+Куда добавлять новые вещи:
+- новый CLI-флаг: `src/sexc.ml` (+ прокинуть в `src/compiler.ml` при необходимости).
+- новый reader-sugar: `src/reader.ml`.
+- новый compile-time meta builtin `$...`: `src/macro.ml`.
+- новый `%...` intrinsic (expr/stmt/top): `src/frontend.ml` + `src/codegen_c.ml`.
+- новый compiler pass: вставлять в `src/compiler.ml` между macro/frontend/codegen.
+
+## Карта stdlib (SexC)
+
+- `std/core.sexc` — агрегатор prelude (`%import` цепочки), сюда не добавлять большую логику.
+- `std/c-interop.sexc` — C-facing surface DSL (defn/decl/struct/operators и т.п.).
+- `std/meta.sexc` — generic convenience helpers (when/unless/dotimes/repeat и т.п.).
+
+Куда добавлять макросы:
+- макрос напрямую про C/interop/низкоуровневый surface синтаксис -> `std/c-interop.sexc`.
+- высокоуровневый sugar/утилиты общего назначения -> `std/meta.sexc`.
 
 ## Сборка и запуск
 
@@ -84,6 +113,20 @@
 - Имена без `%` и без `$` — только surface DSL (объявлены в prelude-файлах `std/c-interop.sexc` и `std/meta.sexc`).
 - Legacy meta-имена без `$` (`car`, `cdr`, `null?`, `if`, ...) запрещены.
 
+## Группы ключевых слов
+
+- `IR/Intrinsic (%...)`:
+  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`
+  - Stmt/control: `%block`, `%if`, `%while`, `%do-while`, `%for`, `%switch`, `%case`, `%default`, `%break`, `%continue`, `%return`, `%goto`, `%label`, `%nop`
+  - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`
+  - Compile-time control: `%defmacro`, `%eval`, `%evals`
+- `Meta builtins ($...)` (в `src/macro.ml`):
+  - Базовые: `$quote`, `$if`, `$list`, `$cons`, `$append`, `$car`, `$cdr`, `$length`, `$reverse`, `$nth`, `$null?`, `$atom?`, `$eq?`, `$error`, `$gensym`, `$symcat`
+  - Коллекции/итерация: `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$let`
+- `Surface std macros` (без префикса, в std/*.sexc):
+  - C-interop: `include`, `define`, `defn`, `decl`, `block`, `if`, `cond`, `while`, `for`, `return`, `set`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
+  - Generic/meta helpers: `when`, `unless`, `incf`, `decf`, `incf-by`, `decf-by`, `dotimes`, `for-range`, `repeat`
+
 ## Полезные sugar-макросы
 
 - В `std/core.sexc` добавлен `(zero-init)` -> `(%raw "{0}")`.
@@ -92,8 +135,9 @@
 ## Struct и инициализация
 
 - В std есть макросы:
-  - `(struct Name (type field) ...)` -> `typedef struct ... Name;`
-  - Внутри `struct` можно объявлять методы через `defun`; они автогенерируются как `Name/method`.
+  - `(struct Name :fields (type field) ... :methods (defn ...) ...)` -> `typedef struct ... Name;` + namespace-функции
+  - Секции `:fields` обязательна, `:methods` опциональна; старый mixed-формат `struct` удален.
+  - Внутри `struct` можно объявлять методы через `defn`; они автогенерируются как `Name/method`.
   - `(union Name (type field) ...)` -> `typedef union ... Name;`
 - Инициализация структур через sugar `Type#`:
   - `(Roots# (x1 5) (x2 7))` -> `(Roots){ .x1 = 5, .x2 = 7 }`
@@ -107,8 +151,7 @@
   - Параметры в форматах:
     - классический: `((float a) (float b))`
     - групповой: `((float a b c))`.
-- `defun` — алиас `defn`.
-  - Внутри `struct` `defun` автогенерирует namespaced-имя: `StructName/method`.
+- Используется `defn` как единый синтаксис для объявления функций.
 
 ## Генерация C идентификаторов
 
@@ -127,4 +170,4 @@
 
 - `examples/hello.sexc` — актуальный demo с `struct`, grouped params, `Type#`, и именами вида `Type/method`.
 - `examples/dot_arrow_alias.sexc` — demo для `.` / `->` и цепочек полей.
-- `examples/struct_methods.sexc` — demo для `defun` внутри `struct` и namespace-функций.
+- `examples/struct_methods.sexc` — demo для `defn` внутри `struct` и namespace-функций.

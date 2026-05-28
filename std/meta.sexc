@@ -1,5 +1,8 @@
 ; std/meta.sexc
 ; Generic surface helpers built on top of c-interop macros.
+;
+; Add reusable high-level helpers here (iteration sugar, convenience forms, etc).
+; Avoid putting C-specific low-level wrappers in this file.
 
 ; when
 ; (when cond form...)

@@ -1,4 +1,4 @@
-.PHONY: all build run clean
+.PHONY: all build run install clean
 
 all: build
 
@@ -26,6 +26,12 @@ run: build
 		exit 1; \
 	fi
 	./sexc "$(FILE)"
+
+install: build
+	@mkdir -p "$$HOME/.local/bin"
+	cp ./sexc "$$HOME/.local/bin/sexc"
+	@chmod 755 "$$HOME/.local/bin/sexc"
+	@echo "Installed sexc to $$HOME/.local/bin/sexc"
 
 clean:
 	opam exec -- dune clean

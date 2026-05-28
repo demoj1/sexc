@@ -1,5 +1,13 @@
 open Core
 
+(*
+   Shared errors/diagnostics utilities used across all phases.
+
+   Extension point:
+   - Add new diagnostic helpers here when introducing a new compiler phase.
+   - Keep phase names stable because they are user-visible in error output.
+*)
+
 exception Sexc_error of string
 
 type span = {

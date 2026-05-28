@@ -1,6 +1,20 @@
 open Core
 open Common
 
+(*
+   Frontend: expanded Raw forms -> typed AST for C emission.
+
+   Responsibilities:
+   - parse types/declarations/statements/expressions
+   - enforce intrinsic arity and shape constraints
+   - classify top-level forms for codegen
+
+   Extension point:
+   - Add new intrinsic parsing in [parse_intrinsic_expr].
+   - Add new top-level intrinsic parsing in [parse_top].
+   - When adding new AST constructors, update both parser and codegen.
+*)
+
 type storage = Extern | Static | Register | Auto | Typedef
 
 type qualifier = Const | Volatile | Restrict
