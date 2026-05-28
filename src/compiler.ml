@@ -39,7 +39,7 @@ let candidate_stdlib_dirs () =
     let prefix_dir = Filename.dirname bin_dir in
     [ Filename.concat prefix_dir "include/sexc/std" ]
   in
-  let from_defaults = [ default_stdlib_dir; Filename.concat (Stdlib.Sys.getcwd ()) "std" ] in
+  let from_defaults = [ Filename.concat (Stdlib.Sys.getcwd ()) "std"; default_stdlib_dir ] in
   from_env @ from_exe @ from_defaults
 
 let resolve_stdlib_dir () =
@@ -61,12 +61,172 @@ let extract_import_target = function
   | Raw.List [ Raw.Atom "%import"; Raw.Atom p ] -> Some p
   | _ -> None
 
+let extract_module_name = function
+  | Raw.List [ Raw.Atom "%module"; Raw.Atom name ] -> Some name
+  | Raw.List (Raw.Atom "%module" :: _) -> fail "%module expects exactly one atom argument"
+  | _ -> None
+
+let strip_module_decl forms =
+  let rec loop module_name acc = function
+    | [] -> (module_name, List.rev acc)
+    | form :: tl -> (
+        match extract_module_name form with
+        | None -> loop module_name (form :: acc) tl
+        | Some name -> (
+            match module_name with
+            | None -> loop (Some name) acc tl
+            | Some prev when String.equal prev name -> loop module_name acc tl
+            | Some _ -> fail "Only one %module declaration is allowed per file"))
+  in
+  loop None [] forms
+
+let qualify_name module_name name =
+  if String.is_substring name ~substring:"/" || String.is_prefix name ~prefix:"%"
+     || String.is_prefix name ~prefix:"$"
+  then name
+  else module_name ^ "/" ^ name
+
+let rewrite_atom name_map atom =
+  let map_name n = Option.value (Map.find name_map n) ~default:n in
+  match Map.find name_map atom with
+  | Some mapped -> mapped
+  | None -> (
+      if String.is_suffix atom ~suffix:"#" then
+        let base = String.drop_suffix atom 1 in
+        if Map.mem name_map base then map_name base ^ "#" else atom
+      else
+        match String.lsplit2 atom ~on:'/' with
+        | Some (base, rest) when Map.mem name_map base -> map_name base ^ "/" ^ rest
+        | _ -> atom)
+
+let rec rewrite_type_like name_map raw =
+  match raw with
+  | Raw.Atom a -> Raw.Atom (rewrite_atom name_map a)
+  | Raw.Str _ -> raw
+  | Raw.List xs -> Raw.List (List.map xs ~f:(rewrite_type_like name_map))
+
+let rewrite_params name_map = function
+  | Raw.List groups ->
+      let rewrite_group = function
+        | Raw.List [] -> Raw.List []
+        | Raw.List (ty :: names) -> Raw.List (rewrite_type_like name_map ty :: names)
+        | other -> other
+      in
+      Raw.List (List.map groups ~f:rewrite_group)
+  | other -> other
+
+let rewrite_fields name_map fields =
+  let rewrite_field = function
+    | Raw.List [ ty; Raw.Atom name ] -> Raw.List [ rewrite_type_like name_map ty; Raw.Atom name ]
+    | other -> rewrite_type_like name_map other
+  in
+  List.map fields ~f:rewrite_field
+
+let rewrite_form name_map =
+  let rec rw = function
+    | Raw.Atom a -> Raw.Atom (rewrite_atom name_map a)
+    | Raw.Str _ as s -> s
+    | Raw.List (Raw.Atom "quote" :: _) as q -> q
+    | Raw.List (Raw.Atom "quasiquote" :: _) as q -> q
+    | Raw.List (Raw.Atom "%import" :: _ as xs) -> Raw.List xs
+    | Raw.List (Raw.Atom "%module" :: _ as xs) -> Raw.List xs
+    | Raw.List (Raw.Atom "%doc" :: Raw.Atom name :: props) ->
+        Raw.List (Raw.Atom "%doc" :: Raw.Atom (rewrite_atom name_map name) :: List.map props ~f:rw)
+    | Raw.List (Raw.Atom "defn" :: ret :: Raw.Atom name :: params :: body) ->
+        Raw.List
+          (Raw.Atom "defn" :: rewrite_type_like name_map ret
+          :: Raw.Atom (rewrite_atom name_map name)
+          :: rewrite_params name_map params
+          :: List.map body ~f:rw)
+    | Raw.List (Raw.Atom "%def-fn" :: ret :: Raw.Atom name :: params :: body :: []) ->
+        Raw.List
+          [ Raw.Atom "%def-fn";
+            rewrite_type_like name_map ret;
+            Raw.Atom (rewrite_atom name_map name);
+            rewrite_params name_map params;
+            rw body;
+          ]
+    | Raw.List (Raw.Atom "%decl-fn" :: ret :: Raw.Atom name :: params :: []) ->
+        Raw.List
+          [ Raw.Atom "%decl-fn";
+            rewrite_type_like name_map ret;
+            Raw.Atom (rewrite_atom name_map name);
+            rewrite_params name_map params;
+          ]
+    | Raw.List (Raw.Atom "define" :: Raw.Atom name :: value :: []) ->
+        Raw.List [ Raw.Atom "define"; Raw.Atom (rewrite_atom name_map name); rw value ]
+    | Raw.List (Raw.Atom "%define" :: Raw.Atom name :: value :: []) ->
+        Raw.List [ Raw.Atom "%define"; Raw.Atom (rewrite_atom name_map name); rw value ]
+    | Raw.List (Raw.Atom "struct" :: Raw.Atom name :: items) ->
+        let rec rewrite_struct_items phase acc = function
+          | [] -> List.rev acc
+          | Raw.Atom ":fields" :: tl -> rewrite_struct_items `Fields (Raw.Atom ":fields" :: acc) tl
+          | Raw.Atom ":methods" :: tl -> rewrite_struct_items `Methods (Raw.Atom ":methods" :: acc) tl
+          | item :: tl ->
+              let item =
+                match phase with
+                | `Fields -> (
+                    match item with
+                    | Raw.List [ ty; Raw.Atom field ] -> Raw.List [ rewrite_type_like name_map ty; Raw.Atom field ]
+                    | _ -> rw item)
+                | `Methods -> rw item
+                | `Unknown -> rw item
+              in
+              rewrite_struct_items phase (item :: acc) tl
+        in
+        Raw.List (Raw.Atom "struct" :: Raw.Atom (rewrite_atom name_map name) :: rewrite_struct_items `Unknown [] items)
+    | Raw.List (Raw.Atom "union" :: Raw.Atom name :: fields) ->
+        Raw.List (Raw.Atom "union" :: Raw.Atom (rewrite_atom name_map name) :: rewrite_fields name_map fields)
+    | Raw.List (Raw.Atom "%typedef" :: ty :: Raw.Atom name :: []) ->
+        Raw.List [ Raw.Atom "%typedef"; rewrite_type_like name_map ty; Raw.Atom (rewrite_atom name_map name) ]
+    | Raw.List xs -> Raw.List (List.map xs ~f:rw)
+  in
+  rw
+
+let collect_module_defined_names forms =
+  let add_name set name =
+    if String.is_substring name ~substring:"/" then set else Set.add set name
+  in
+  let from_typedef_type = function
+    | Raw.List (Raw.Atom "%enum" :: Raw.Atom enum_name :: []) -> Some enum_name
+    | _ -> None
+  in
+  List.fold forms ~init:String.Set.empty ~f:(fun acc form ->
+      match form with
+      | Raw.List (Raw.Atom "defn" :: _ :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "%def-fn" :: _ :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "%decl-fn" :: _ :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "define" :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "%define" :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "struct" :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "union" :: Raw.Atom name :: _) -> add_name acc name
+      | Raw.List (Raw.Atom "%typedef" :: ty :: Raw.Atom name :: []) ->
+          let acc = add_name acc name in
+          Option.value_map (from_typedef_type ty) ~default:acc ~f:(fun n -> add_name acc n)
+      | _ -> acc)
+
+let apply_module_namespace module_name forms =
+  let names = collect_module_defined_names forms in
+  if Set.is_empty names then forms
+  else
+    let name_map =
+      Set.fold names ~init:String.Map.empty ~f:(fun acc name ->
+          Map.set acc ~key:name ~data:(qualify_name module_name name))
+    in
+    List.map forms ~f:(rewrite_form name_map)
+
 let rec load_forms_from_file ~visited ~use_prelude path =
   let abs = path in
   if Set.mem visited abs then failf "Cyclic %%import detected: %s" abs;
   let visited = Set.add visited abs in
   let source = In_channel.read_all abs in
   let forms = Reader.parse_many ~file:abs source in
+  let module_name, forms = strip_module_decl forms in
+  let forms =
+    match module_name with
+    | None -> forms
+    | Some name -> apply_module_namespace name forms
+  in
   List.concat_map forms ~f:(fun form ->
       match extract_import_target form with
       | Some rel ->
@@ -82,6 +242,12 @@ let load_prelude_forms () =
   load_forms_from_file ~visited:String.Set.empty ~use_prelude:false core_path
 
 let compile_forms ?(use_prelude = true) forms =
+  let module_name, forms = strip_module_decl forms in
+  let forms =
+    match module_name with
+    | None -> forms
+    | Some name -> apply_module_namespace name forms
+  in
   let is_doc_form = function
     | Raw.List (Raw.Atom "%doc" :: _) -> true
     | _ -> false

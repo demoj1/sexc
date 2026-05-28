@@ -129,7 +129,7 @@ let candidate_stdlib_dirs () =
     let prefix_dir = Filename.dirname bin_dir in
     [ Filename.concat prefix_dir "include/sexc/std" ]
   in
-  let from_defaults = [ default_stdlib_dir; Filename.concat (Stdlib.Sys.getcwd ()) "std" ] in
+  let from_defaults = [ Filename.concat (Stdlib.Sys.getcwd ()) "std"; default_stdlib_dir ] in
   from_env @ from_exe @ from_defaults
 
 let resolve_stdlib_dir () =

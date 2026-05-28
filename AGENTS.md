@@ -124,6 +124,13 @@
   - Новые формы: `$for`, `$let`.
 - Reader поддерживает quote-сахар: `'x` -> `(quote x)`.
 
+## File-level module namespace
+
+- Поддержан `%module` на уровне файла: `(%module foo)`.
+- `%module` применяет префикс `foo/` к именованным top-level сущностям файла (`defn`, `define`, `struct`, `union`, `%def-fn`, `%decl-fn`, `%define`, `%typedef`) и локальным ссылкам на них в этом же файле.
+- Внутри файла можно использовать короткие имена без префикса; снаружи доступны имена с префиксом `foo/...`.
+- `%module` удаляется на раннем compiler-pass и не попадает в frontend/codegen как runtime-форма.
+
 ## Именование уровней (строго)
 
 - `%...` — системные/IR формы компилятора.
@@ -137,7 +144,7 @@
   - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`
   - Stmt/control: `%block`, `%if`, `%while`, `%do-while`, `%for`, `%switch`, `%case`, `%default`, `%break`, `%continue`, `%return`, `%goto`, `%label`, `%nop`
   - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`
-  - Compile-time control: `%defmacro`, `%eval`, `%evals`
+  - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`
 - `Meta builtins ($...)` (в `src/macro.ml`):
   - Базовые: `$quote`, `$if`, `$list`, `$cons`, `$append`, `$car`, `$cdr`, `$length`, `$reverse`, `$nth`, `$null?`, `$atom?`, `$eq?`, `$error`, `$gensym`, `$symcat`
   - Коллекции/итерация: `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$let`

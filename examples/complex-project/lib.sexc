@@ -1,3 +1,5 @@
+(%module stats)
+
 (struct Counter
   :fields
   (int total)

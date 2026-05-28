@@ -1,19 +1,21 @@
+(%module utils)
+
 (include "stdio.h")
 
 (defn void print-header ()
   (printf "\n=== Complex Project Demo ===\n"))
 
-(defn void print-step ((int step) (Counter c))
+(defn void print-step ((int step) (stats/Counter c))
   (printf
     "step=%d total=%d count=%d avg=%.2f\n"
     step
     (. c total)
     (. c count)
-    (Counter/average c)))
+    (stats/Counter/average c)))
 
-(defn void print-summary ((Counter c))
+(defn void print-summary ((stats/Counter c))
   (printf
     "summary: total=%d count=%d avg=%.2f\n"
     (. c total)
     (. c count)
-    (Counter/average c)))
+    (stats/Counter/average c)))

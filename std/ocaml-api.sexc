@@ -17,6 +17,11 @@
   :doc "Splice multiple top-level forms into program output."
   :example "(%top-level-splice (%define A 1) (%define B 2))")
 
+(%doc %module
+  :sig (%module name)
+  :doc "Apply file-level namespace prefix to top-level symbols and local references in that file."
+  :example "(%module math)")
+
 (%doc %raw
   :sig (%raw part...)
   :doc "Inline raw C expression fragments; strings are copied as-is, non-strings are emitted as expressions."
