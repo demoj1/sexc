@@ -69,9 +69,20 @@ let gensym ctx prefix =
   ctx.gensym_counter <- ctx.gensym_counter + 1;
   Raw.Atom (prefix ^ Int.to_string n)
 
+let is_self_evaluating_atom a =
+  String.equal a "nil"
+  || String.equal a "t"
+  || (not (String.is_empty a) && Char.equal a.[0] ':')
+  || Option.is_some (Int.of_string_opt a)
+  || Option.is_some (Float.of_string_opt a)
+
 let rec eval_expr ctx env expr =
   match expr with
-  | Raw.Atom a -> Option.value (Map.find env a) ~default:expr
+  | Raw.Atom a -> (
+      match Map.find env a with
+      | Some v -> v
+      | None when is_self_evaluating_atom a -> expr
+      | None -> failf "Unbound variable in macro eval: %s" a)
   | Raw.Str _ -> expr
   | Raw.List [] -> Raw.List []
   | Raw.List (Raw.Atom "quote" :: [ body ]) -> body
