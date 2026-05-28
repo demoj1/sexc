@@ -21,6 +21,11 @@ type state = {
   mutable i : int;
 }
 
+type located =
+  | LAtom of string * int
+  | LStr of string * int
+  | LList of located list * int
+
 let create ~file src = { file; src; len = String.length src; i = 0 }
 
 let at_end st = st.i >= st.len
@@ -156,6 +161,77 @@ let parse_many ~file src =
     if at_end st then List.rev acc
     else
       let item = parse_one st in
+      loop (item :: acc)
+  in
+  loop []
+
+let loc_of = function
+  | LAtom (_, off) | LStr (_, off) | LList (_, off) -> off
+
+let rec to_raw = function
+  | LAtom (a, _) -> Raw.Atom a
+  | LStr (s, _) -> Raw.Str s
+  | LList (xs, _) -> Raw.List (List.map xs ~f:to_raw)
+
+let rec parse_one_loc st =
+  skip_ws_and_comments st;
+  let start = st.i in
+  match peek st with
+  | None -> error st "unexpected end of input"
+  | Some '\'' ->
+      bump st;
+      let body = parse_one_loc st in
+      LList ([ LAtom ("quote", start); body ], start)
+  | Some '`' ->
+      bump st;
+      let body = parse_one_loc st in
+      LList ([ LAtom ("quasiquote", start); body ], start)
+  | Some ',' ->
+      bump st;
+      let tag =
+        match peek st with
+        | Some '@' ->
+            bump st;
+            "splice"
+        | _ -> "unquote"
+      in
+      let body = parse_one_loc st in
+      LList ([ LAtom (tag, start); body ], start)
+  | Some '(' ->
+      bump st;
+      parse_list_loc st start
+  | Some ')' -> error st "unexpected ')'"
+  | Some '"' ->
+      bump st;
+      (match parse_string st with
+      | Raw.Str s -> LStr (s, start)
+      | _ -> error st "internal reader string error")
+  | Some _ ->
+      (match parse_atom st with
+      | Raw.Atom a -> LAtom (a, start)
+      | _ -> error st "internal reader atom error")
+
+and parse_list_loc st start =
+  let rec loop acc =
+    skip_ws_and_comments st;
+    match peek st with
+    | None -> error st "unterminated list"
+    | Some ')' ->
+        bump st;
+        LList (List.rev acc, start)
+    | Some _ ->
+        let item = parse_one_loc st in
+        loop (item :: acc)
+  in
+  loop []
+
+let parse_many_loc ~file src =
+  let st = create ~file src in
+  let rec loop acc =
+    skip_ws_and_comments st;
+    if at_end st then List.rev acc
+    else
+      let item = parse_one_loc st in
       loop (item :: acc)
   in
   loop []

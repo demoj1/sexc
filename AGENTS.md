@@ -19,6 +19,8 @@
 - `src/macro.ml` — `%defmacro`, `%eval/%evals`, compile-time `$...` builtins.
 - `src/frontend.ml` — парсинг expanded Raw в AST (типы/stmt/expr/top-level).
 - `src/codegen_c.ml` — генерация C из AST + mangling идентификаторов.
+- `src/cache/cache.ml` — пассивный disk-cache индекса символов (md5 по файлам + сериализация).
+- `src/cache/index.ml` — индекс символов/документации/локаций из парсера (для `show-doc`, `complete`, `xref`).
 - `src/docs.ml` — `%doc` metadata, `show-doc`, `dump-docs`, `dump-stdlib-docs`, markdown генерация.
 - `src/common.ml` — ошибки/диагностика.
 - `src/raw.ml` — минимальный тип Raw AST.
@@ -65,7 +67,9 @@
 - `./sexc dump-docs <input.sexc> <out-dir>` — сгенерировать docs по файлам (user graph + std, если prelude включен).
 - `./sexc dump-stdlib-docs <out-dir>` — сгенерировать docs только для stdlib.
 - `./sexc complete <prefix> [input.sexc|-]` — выдать completion-кандидаты (макросы + функции) с учетом imports/std и `%module`.
-- `./sexc complete --json <prefix> [input.sexc|-]` — выдать completion в JSON (`name`, `kind`, optional `signature`/`doc`/`example`) для editor/tooling.
+- `./sexc complete --json <prefix> [input.sexc|-]` — выдать completion в JSON (единый symbol-формат: `name`, `kind`, `file`, `line`, optional `module`/`signature`/`doc`/`example`/`type`, `internal`, `file_md5`).
+- `./sexc xref --json <symbol> <input.sexc>` — выдать определения символа (локации + метаданные) из того же индекс-кэша.
+- `./sexc print-cache-dump` — вывести весь disk-cache индекса символов в human-readable виде.
 
 ## `%doc` metadata
 

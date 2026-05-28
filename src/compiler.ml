@@ -236,6 +236,45 @@ let rec load_forms_from_file ~visited ~use_prelude path =
             load_forms_from_file ~visited ~use_prelude imported
       | None -> [ form ])
 
+let rec load_graph_from_file ~visited ~use_prelude path =
+  let abs = path in
+  if Set.mem visited abs then failf "Cyclic %%import detected: %s" abs;
+  let visited = Set.add visited abs in
+  let source = In_channel.read_all abs in
+  let forms = Reader.parse_many ~file:abs source in
+  let module_name, forms = strip_module_decl forms in
+  let forms =
+    match module_name with
+    | None -> forms
+    | Some name -> apply_module_namespace name forms
+  in
+  let imports, own_forms =
+    List.partition_map forms ~f:(fun form ->
+        match extract_import_target form with
+        | Some rel ->
+            if use_prelude && is_prelude_import_target rel then First ""
+            else First rel
+        | None -> Second form)
+  in
+  let visited, imported_graph =
+    List.fold imports ~init:(visited, []) ~f:(fun (v, acc) rel ->
+        if String.is_empty rel then (v, acc)
+        else
+          let imported = resolve_import ~from_file:abs rel in
+          let v, g = load_graph_from_file ~visited:v ~use_prelude imported in
+          (v, acc @ g))
+  in
+  (visited, (abs, own_forms) :: imported_graph)
+
+let load_graph ~use_prelude path =
+  let _, graph = load_graph_from_file ~visited:String.Set.empty ~use_prelude path in
+  graph
+
+let load_std_graph () =
+  let stdlib_dir = resolve_stdlib_dir () in
+  let core_path = Filename.concat stdlib_dir "core.sexc" in
+  load_graph ~use_prelude:false core_path
+
 let load_prelude_forms () =
   let stdlib_dir = resolve_stdlib_dir () in
   let core_path = Filename.concat stdlib_dir "core.sexc" in

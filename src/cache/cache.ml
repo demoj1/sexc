@@ -1,0 +1,56 @@
+open Core
+
+type symbol = {
+  id : int;
+  name : string;
+  short_name : string;
+  module_name : string option;
+  kind : string;
+  file : string;
+  line : int;
+  col : int;
+  signature : string option;
+  doc : string option;
+  example : string option;
+  internal : bool;
+  scope : string option;
+  ty : string option;
+  file_md5 : string;
+}
+
+type file_entry = {
+  md5 : string;
+  symbols : symbol list;
+}
+
+type t = file_entry String.Map.t
+
+let cache_path () =
+  Filename.concat (Stdlib.Filename.get_temp_dir_name ()) "sexc-symbol-cache.marshal"
+
+let load () : t =
+  let path = cache_path () in
+  if not (Stdlib.Sys.file_exists path) then String.Map.empty
+  else
+    try
+      In_channel.with_file path ~f:(fun ic ->
+          let pairs : (string * file_entry) list = Stdlib.Marshal.from_channel ic in
+          String.Map.of_alist_exn pairs)
+    with
+    | _ -> String.Map.empty
+
+let save cache =
+  Out_channel.with_file (cache_path ()) ~f:(fun oc ->
+      Stdlib.Marshal.to_channel oc (Map.to_alist cache) [])
+
+let file_md5 path = Stdlib.Digest.to_hex (Stdlib.Digest.file path)
+
+let get_fresh_entry cache file =
+  let md5 = file_md5 file in
+  match Map.find cache file with
+  | Some e when String.equal e.md5 md5 -> Some e
+  | _ -> None
+
+let put_file cache ~file ~symbols =
+  let md5 = file_md5 file in
+  Map.set cache ~key:file ~data:{ md5; symbols }

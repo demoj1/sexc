@@ -23,6 +23,7 @@
 (require 'json)
 (require 'lisp-mode)
 (require 'subr-x)
+(require 'xref)
 
 (defgroup sexc nil
   "Editing SexC source files."
@@ -82,7 +83,7 @@ The command must accept source on stdin and print generated C to stdout."
     "%block" "%if" "%while" "%do-while" "%for" "%switch" "%case"
     "%default" "%break" "%continue" "%return" "%goto" "%label" "%nop"
     "%raw" "%cast" "%sizeof-type" "%sizeof-expr" "%ternary" "%comma"
-    "%aref" "%dot" "%arrow" "%call" "%!" "%~" "%addr" "%deref"
+    "%aref" "%dot" "%arrow" "%call" "%!" "%~" "%addr" "%deref" "%ptr"
     "%pre-inc" "%pre-dec" "%post-inc" "%post-dec"
     "%+" "%-" "%*" "%/" "%%" "%==" "%!=" "%<" "%<=" "%>" "%>="
     "%&&" "%||" "%set" "%+=" "%-=" "%*=" "%/=" "%%="
@@ -123,7 +124,7 @@ The command must accept source on stdin and print generated C to stdout."
 (defcustom sexc/indent-rules
   '(("decl" . (&body))
     ("set" . (&body))
-    ("defn" . (4 4 &body))
+    ("defn" . (4 4 4 &body))
     ("struct" . (2 &body))
     ("union" . (2 &body))
     ("if" . (4 &body))
@@ -133,6 +134,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("for" . (4 4 4 &body))
     ("dotimes" . (4 4 &body))
     ("for-range" . (4 4 4 &body))
+    ("%defmacro" . (4 4 &body))
     ("%eval" . (&body))
     ("%evals" . (&body)))
   "Indentation rules applied through `common-lisp-indent-function'."
@@ -171,6 +173,11 @@ When nil, only `sexc/eldoc-docs` is used."
 
 (defcustom sexc/enable-completion t
   "When non-nil, enable completion-at-point via `sexc complete`."
+  :type 'boolean
+  :group 'sexc)
+
+(defcustom sexc/enable-xref t
+  "When non-nil, enable simple xref definitions backend for SexC files."
   :type 'boolean
   :group 'sexc)
 
@@ -439,6 +446,7 @@ Format mirrors Eldoc style: kind, signature, and short doc when available."
      :doc doc
      :example example
      :include-name nil
+     :include-example nil
      :multiline nil)))
 
 (defun sexc--kind-label (kind signature)
@@ -464,6 +472,7 @@ Keys: :name :kind :signature :doc :example :include-name :multiline."
          (doc (plist-get plist :doc))
          (example (plist-get plist :example))
          (include-name (plist-get plist :include-name))
+         (include-example (plist-get plist :include-example))
          (multiline (plist-get plist :multiline))
          (doc (if (and (stringp doc) (> (length doc) 80))
                   (concat (substring doc 0 77) "...")
@@ -478,10 +487,10 @@ Keys: :name :kind :signature :doc :example :include-name :multiline."
            (if signature (format " %s" signature) "")
            (if doc (format " - %s" doc) ""))))
     (if multiline
-        (if example
+        (if (and include-example example)
             (concat head "\nexample: " example)
           head)
-      (concat head (if example (format " | eg: %s" example) "")))))
+      (concat head (if (and include-example example) (format " | eg: %s" example) "")))))
 
 (defun sexc--display-signature (candidate signature)
   "Format SIGNATURE for completion display without repeating CANDIDATE."
@@ -529,6 +538,7 @@ Keys: :name :kind :signature :doc :example :include-name :multiline."
          :doc doc
          :example example
          :include-name t
+         :include-example t
          :multiline t)))))
 
 (defun sexc/completion-at-point ()
@@ -623,7 +633,48 @@ FILE is optional source path for project-aware lookup."
        :doc first-doc
        :example first-example
        :include-name t
+       :include-example t
        :multiline t))))
+
+(defun sexc--fetch-xref-json (identifier)
+  "Fetch xref definitions for IDENTIFIER from compiler JSON endpoint."
+  (let* ((bin (sexc--resolve-binary))
+         (file (or buffer-file-name ""))
+         (args (append (list "xref" "--json" identifier)
+                       (if (and file (not (string-empty-p file))) (list file) nil))))
+    (condition-case nil
+        (when (and bin (fboundp 'json-parse-string))
+          (let* ((lines (apply #'process-lines bin args))
+                 (json-text (car lines)))
+            (when (stringp json-text)
+              (json-parse-string json-text :array-type 'list :object-type 'alist))))
+      (error nil))))
+
+(defun sexc--xref-definitions (identifier)
+  "Find definition locations for IDENTIFIER using compiler xref output."
+  (let ((rows (sexc--fetch-xref-json identifier)))
+    (if (not rows)
+        nil
+      (mapcar
+       (lambda (row)
+         (let* ((name (sexc--json-alist-get row 'name))
+                (kind (or (sexc--kind-label (sexc--json-alist-get row 'kind) nil) "sym"))
+                (file (sexc--json-alist-get row 'file))
+                (line (or (sexc--json-alist-get row 'line) 1))
+                (col (or (sexc--json-alist-get row 'col) 1))
+                (summary (format "%s [%s]" name kind)))
+           (xref-make summary (xref-make-file-location file line col))))
+       rows))))
+
+(defun sexc-xref-backend ()
+  "Return SexC xref backend symbol for current buffer."
+  (when sexc/enable-xref 'sexc))
+
+(cl-defmethod xref-backend-identifier-at-point ((_backend (eql sexc)))
+  (sexc--atom-at-point))
+
+(cl-defmethod xref-backend-definitions ((_backend (eql sexc)) identifier)
+  (sexc--xref-definitions identifier))
 
 ;;;###autoload
 (define-derived-mode sexc-mode lisp-mode "SexC"
@@ -633,6 +684,7 @@ FILE is optional source path for project-aware lookup."
   (setq-local font-lock-defaults (list (sexc--font-lock-keywords)))
   (setq-local eldoc-documentation-functions '(sexc/eldoc-function))
   (add-hook 'completion-at-point-functions #'sexc/completion-at-point nil t)
+  (add-hook 'xref-backend-functions #'sexc-xref-backend nil t)
   (eldoc-mode 1)
   (sexc/apply-indent-rules))
 

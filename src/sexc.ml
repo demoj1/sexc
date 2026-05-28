@@ -23,6 +23,8 @@ let usage () =
   prerr_endline "  sexc dump-stdlib-docs <out-dir>";
   prerr_endline "  sexc [--no-prelude] show-doc <name> [input.sexc]";
   prerr_endline "  sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]";
+  prerr_endline "  sexc [--no-prelude] xref --json <symbol> <input.sexc>";
+  prerr_endline "  sexc print-cache-dump";
   prerr_endline "";
   prerr_endline "By default, std/core.sexc is auto-loaded from stdlib path (implicit prelude).";
   prerr_endline "Use --no-prelude to disable auto prelude.";
@@ -56,6 +58,13 @@ type command =
       prefix : string;
       input_path : string;
     }
+  | Xref of {
+      use_prelude : bool;
+      json : bool;
+      symbol : string;
+      input_path : string;
+    }
+  | Print_cache_dump
 
 let parse_complete_args use_prelude args =
   let json, rest =
@@ -67,6 +76,16 @@ let parse_complete_args use_prelude args =
   | prefix :: [] -> Complete { use_prelude; json; prefix; input_path = "-" }
   | prefix :: input :: [] -> Complete { use_prelude; json; prefix; input_path = input }
   | _ -> fail "complete expects: sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]"
+
+let parse_xref_args use_prelude args =
+  let json, rest =
+    match args with
+    | "--json" :: tl -> (true, tl)
+    | tl -> (false, tl)
+  in
+  match rest with
+  | symbol :: input :: [] -> Xref { use_prelude; json; symbol; input_path = input }
+  | _ -> fail "xref expects: sexc [--no-prelude] xref --json <symbol> <input.sexc>"
 
 let parse_command args =
   let rec parse_flags use_prelude = function
@@ -83,6 +102,9 @@ let parse_command args =
   | "show-doc" :: name :: input :: [] -> Show_doc { use_prelude; name; input_path = Some input }
   | "show-doc" :: _ -> fail "show-doc expects: sexc [--no-prelude] show-doc <name> [input.sexc]"
   | "complete" :: tl -> parse_complete_args use_prelude tl
+  | "xref" :: tl -> parse_xref_args use_prelude tl
+  | "print-cache-dump" :: [] -> Print_cache_dump
+  | "print-cache-dump" :: _ -> fail "print-cache-dump expects no arguments"
   | [] -> fail "missing input file"
   | input :: tail -> (
       match tail with
@@ -148,14 +170,23 @@ let () =
         Docs.dump_docs_for_input ~use_prelude ~input_path ~out_dir
     | Dump_stdlib_docs { out_dir } -> Docs.dump_stdlib_docs ~out_dir
     | Show_doc { use_prelude; name; input_path } ->
-        let entries = Docs.show_doc ?input_path ~use_prelude name in
+        let entries = Index.find_by_name ~use_prelude ?input_path name in
         if List.is_empty entries then failf "No documentation found for symbol: %s" name;
-        Out_channel.output_string stdout (Docs.render_entries_text entries);
+        Out_channel.output_string stdout (Index.render_show_doc entries);
         Out_channel.newline stdout
     | Complete { use_prelude; json; prefix; input_path } ->
-        let items = Completion.complete_items ~use_prelude ~input_path ~prefix in
-        if json then Out_channel.output_string stdout (Completion.items_to_json items ^ "\n")
-        else List.iter (Completion.names_of_items items) ~f:(fun item -> Out_channel.output_string stdout (item ^ "\n"))
+        let items = Index.complete ~use_prelude ~input_path ~prefix in
+        if json then Out_channel.output_string stdout (Index.symbols_to_json items ^ "\n")
+        else List.iter items ~f:(fun item -> Out_channel.output_string stdout (item.name ^ "\n"))
+    | Xref { use_prelude; json; symbol; input_path } ->
+        let defs = Index.find_by_name ~use_prelude ?input_path:(Some input_path) symbol in
+        if json then Out_channel.output_string stdout (Index.symbols_to_json defs ^ "\n")
+        else
+          List.iter defs ~f:(fun d ->
+              Out_channel.output_string stdout (Printf.sprintf "%s:%d:%d %s\n" d.file d.line d.col d.name))
+    | Print_cache_dump ->
+        Out_channel.output_string stdout (Index.render_cache_dump ());
+        Out_channel.newline stdout
   with
   | Sexc_diagnostic d ->
       prerr_endline (render_diagnostic d);
