@@ -54,12 +54,25 @@ let resolve_stdlib_dir () =
 
 let resolve_import ~from_file rel =
   let base = Filename.dirname from_file in
-  Filename.concat base rel
+  let full = Filename.concat base rel in
+  (* Авто-добавляем .sexc если расширение опущено. *)
+  if String.is_suffix full ~suffix:".sexc" then full
+  else full ^ ".sexc"
 
-let extract_import_target = function
-  | Raw.List [ Raw.Atom "%import"; Raw.Str p ] -> Some p
-  | Raw.List [ Raw.Atom "%import"; Raw.Atom p ] -> Some p
+(* Возвращает (path, alias-option). Поддерживается:
+     (%import "./path")
+     (%import "./path" :as alias)
+*)
+let extract_import = function
+  | Raw.List [ Raw.Atom "%import"; Raw.Str p ] -> Some (p, None)
+  | Raw.List [ Raw.Atom "%import"; Raw.Atom p ] -> Some (p, None)
+  | Raw.List [ Raw.Atom "%import"; Raw.Str p; Raw.Atom ":as"; Raw.Atom a ] -> Some (p, Some a)
+  | Raw.List [ Raw.Atom "%import"; Raw.Atom p; Raw.Atom ":as"; Raw.Atom a ] -> Some (p, Some a)
+  | Raw.List (Raw.Atom "%import" :: _) -> fail "Invalid %import form; expected (%import \"path\" [:as alias])"
   | _ -> None
+
+let extract_import_target form =
+  Option.map (extract_import form) ~f:fst
 
 let extract_module_name = function
   | Raw.List [ Raw.Atom "%module"; Raw.Atom name ] -> Some name
@@ -219,41 +232,92 @@ let apply_module_namespace module_name forms =
     in
     List.map forms ~f:(rewrite_form name_map)
 
+(* Replace each atom `alias/X[/Y/...]` with `real-module-name/X[/Y/...]`.
+   Tree-walks everything (incl. quoted contents) since aliases are pure
+   compile-time shorthand with no runtime semantics. *)
+let rewrite_alias_atom aliases a =
+  match String.lsplit2 a ~on:'/' with
+  | Some (prefix, rest) -> (
+      match Map.find aliases prefix with
+      | Some real -> real ^ "/" ^ rest
+      | None -> a)
+  | None -> a
+
+let rec rewrite_alias_form aliases = function
+  | Raw.Atom a -> Raw.Atom (rewrite_alias_atom aliases a)
+  | Raw.Str _ as s -> s
+  | Raw.List xs -> Raw.List (List.map xs ~f:(rewrite_alias_form aliases))
+
 (* Загружает forms из path, гарантируя что каждый файл попадёт в результат
    ровно один раз — даже если он импортируется из нескольких мест. visited
    глобально аккумулирует уже загруженные пути; sibling-ветки видят
-   друг друга через возвращаемый visited. *)
-let rec load_forms_from_file ~visited ~use_prelude path =
+   друг друга через возвращаемый visited.
+
+   module_names — мапа path → module name (если есть %module). Нужна для
+   разрешения :as-алиасов: импортирующий файл должен знать имя модуля
+   того, кого импортирует, даже если файл уже загружен другой веткой. *)
+let rec load_forms_from_file ~visited ~module_names ~use_prelude path =
   let abs = path in
-  if Set.mem visited abs then (visited, [])
+  if Set.mem visited abs then (visited, module_names, [])
   else
     let visited = Set.add visited abs in
     let source = In_channel.read_all abs in
     let forms = Reader.parse_many ~file:abs source in
     let module_name, forms = strip_module_decl forms in
-    let forms =
-      match module_name with
-      | None -> forms
-      | Some name -> apply_module_namespace name forms
-    in
-    let visited, collected =
-      List.fold forms ~init:(visited, []) ~f:(fun (v, acc) form ->
-          match extract_import_target form with
-          | Some rel ->
-              if use_prelude && is_prelude_import_target rel then (v, acc)
+    let module_names = Map.set module_names ~key:abs ~data:module_name in
+
+    (* 1. Резолвим импорты рекурсивно, попутно собирая alias-map. *)
+    let visited, module_names, imported_forms, aliases =
+      List.fold forms
+        ~init:(visited, module_names, [], String.Map.empty)
+        ~f:(fun (v, m, acc, aliases) form ->
+          match extract_import form with
+          | Some (rel, alias_opt) ->
+              if use_prelude && is_prelude_import_target rel then (v, m, acc, aliases)
               else
                 let imported = resolve_import ~from_file:abs rel in
-                let v, more = load_forms_from_file ~visited:v ~use_prelude imported in
-                (v, acc @ more)
-          | None -> (v, acc @ [ form ]))
+                let v, m, more =
+                  load_forms_from_file ~visited:v ~module_names:m ~use_prelude imported
+                in
+                let aliases =
+                  match alias_opt, Map.find m imported |> Option.bind ~f:Fn.id with
+                  | Some a, Some real -> Map.set aliases ~key:a ~data:real
+                  | Some a, None ->
+                      failf ":as alias '%s' targets file without %%module declaration: %s" a imported
+                  | None, _ -> aliases
+                in
+                (v, m, acc @ more, aliases)
+          | None -> (v, m, acc, aliases))
     in
-    (visited, collected)
+
+    (* 2. Свои not-import формы. *)
+    let own_forms =
+      List.filter forms ~f:(fun f -> Option.is_none (extract_import f))
+    in
+
+    (* 3. Раскрываем алиасы ДО %module namespace, чтобы наши `alias/X` стали `real/X`. *)
+    let own_forms =
+      if Map.is_empty aliases then own_forms
+      else List.map own_forms ~f:(rewrite_alias_form aliases)
+    in
+
+    (* 4. Применяем свой %module к собственным определениям. *)
+    let own_forms =
+      match module_name with
+      | None -> own_forms
+      | Some name -> apply_module_namespace name own_forms
+    in
+
+    (visited, module_names, imported_forms @ own_forms)
 
 let rec load_graph_from_file ~visited ~use_prelude path =
   (* Import graph flow:
-     current file -> split imports/non-imports -> recursively load imports -> return (self + imported). *)
+     current file -> split imports/non-imports -> recursively load imports -> return (self + imported).
+     Если файл уже посещён через другую ветку — возвращаем пустой узел
+     (он уже есть в графе), это нормальный sibling re-import, не цикл. *)
   let abs = path in
-  if Set.mem visited abs then failf "Cyclic %%import detected: %s" abs;
+  if Set.mem visited abs then (visited, [])
+  else
   let visited = Set.add visited abs in
   let source = In_channel.read_all abs in
   let forms = Reader.parse_many ~file:abs source in
@@ -293,7 +357,12 @@ let load_std_graph () =
 let load_prelude_forms () =
   let stdlib_dir = resolve_stdlib_dir () in
   let core_path = Filename.concat stdlib_dir "core.sexc" in
-  let _, forms = load_forms_from_file ~visited:String.Set.empty ~use_prelude:false core_path in
+  let _, _, forms =
+    load_forms_from_file
+      ~visited:String.Set.empty
+      ~module_names:String.Map.empty
+      ~use_prelude:false core_path
+  in
   forms
 
 let compile_forms ?(use_prelude = true) forms =
@@ -335,5 +404,10 @@ let compile_source ?(use_prelude = true) source =
   compile_forms ~use_prelude forms
 
 let compile_file ?(use_prelude = true) path =
-  let _, forms = load_forms_from_file ~visited:String.Set.empty ~use_prelude path in
+  let _, _, forms =
+    load_forms_from_file
+      ~visited:String.Set.empty
+      ~module_names:String.Map.empty
+      ~use_prelude path
+  in
   compile_forms ~use_prelude forms

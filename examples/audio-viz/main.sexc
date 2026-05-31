@@ -4,10 +4,10 @@
 ; кладём RMS-уровень в ring-буфер и рисуем 30-секундный график в окне
 ; raylib. Каждый кадр пушим новое значение и сдвигаемся.
 
-(%import "./audio.sexc")
-(%import "./ring-buffer.sexc")
-(%import "./graph.sexc")
-(%import "./auto-derive.sexc")
+(%import "./audio")
+(%import "./ring-buffer" :as r)        ; alias r/ → ring/
+(%import "./graph")
+(%import "./auto-derive")
 
 (include <raylib.h>)
 (include <stdio.h>)
@@ -31,12 +31,12 @@
 ; --- Main -------------------------------------------------------------------
 
 (defn int main ()
-  (decl (ring/Buffer buf) (zero-init))
-  (ring/Buffer/init (%addr buf) HISTORY_LEN)
+  (decl (r/Buffer buf) (zero-init))
+  (r/Buffer/init (%addr buf) HISTORY_LEN)
 
   (when (not (audio_start))
     (fprintf stderr "Failed to start audio capture\n")
-    (ring/Buffer/release (%addr buf))
+    (r/Buffer/release (%addr buf))
     (return 1))
 
   (InitWindow WIDTH HEIGHT "SexC audio level visualizer")
@@ -44,12 +44,12 @@
 
   ; печатаем начальное состояние буфера для дебага
   (printf "Started with buffer:\n")
-  (ring/Buffer/print (%addr buf))
+  (r/Buffer/print (%addr buf))
 
   (while (not (WindowShouldClose))
     ; ||> читается как: уровень → push в буфер (последний аргумент)
     (||> (audio_get_level)
-         (ring/Buffer/push (%addr buf)))
+         (r/Buffer/push (%addr buf)))
 
     (BeginDrawing)
       (ClearBackground BLACK)
@@ -64,7 +64,7 @@
 
   (CloseWindow)
   (audio_stop)
-  (ring/Buffer/release (%addr buf))
+  (r/Buffer/release (%addr buf))
   (return 0))
 
 ; --- Compile-time дамп метадаты в виде C-комментария -----------------------
