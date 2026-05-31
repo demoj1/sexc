@@ -79,38 +79,6 @@ The command must accept source on stdin and print generated C to stdout."
   :type '(repeat string)
   :group 'sexc)
 
-(defcustom sexc/intrinsic-keywords
-  '("%include" "%define" "%define-macro" "%ifdef"
-    "%typedef" "%decl-fn" "%def-fn" "%decl" "%decl-many" "%top-level-splice"
-    "%block" "%if" "%while" "%do-while" "%for" "%switch" "%case"
-    "%default" "%break" "%continue" "%return" "%goto" "%label" "%nop"
-    "%raw" "%cast" "%sizeof-type" "%sizeof-expr" "%ternary" "%comma"
-    "%aref" "%dot" "%arrow" "%call" "%!" "%~" "%addr" "%deref" "%ptr"
-    "%pre-inc" "%pre-dec" "%post-inc" "%post-dec"
-    "%+" "%-" "%*" "%/" "%%" "%==" "%!=" "%<" "%<=" "%>" "%>="
-    "%&&" "%||" "%set" "%+=" "%-=" "%*=" "%/=" "%%="
-    "%defmacro" "%eval" "%evals" "%module")
-  "IR/system intrinsic keywords (%-prefixed)."
-  :type '(repeat string)
-  :group 'sexc)
-
-(defcustom sexc/meta-keywords
-  '("$quote" "$if" "$list" "$cons" "$append" "$car" "$cdr"
-    "$length" "$reverse" "$nth" "$null?" "$atom?" "$eq?"
-    "$error" "$gensym" "$symcat"
-    "$--map" "$--filter" "$--reduce" "$dolist"
-    "$map" "$filter" "$reduce" "$for" "$let"
-    "$not" "$do" "$assert" "$subst" "$|>" "$||>" "$|as>")
-  "Compile-time meta builtins ($-prefixed)."
-  :type '(repeat string)
-  :group 'sexc)
-
-(defcustom sexc/section-keywords
-  '(":fields" ":methods")
-  "Section-like keywords used in SexC forms."
-  :type '(repeat string)
-  :group 'sexc)
-
 (defcustom sexc/type-keywords
   '("void" "char" "short" "int" "long" "float" "double"
     "signed" "unsigned" "const" "volatile" "restrict")
@@ -269,10 +237,15 @@ When nil, only `sexc/eldoc-docs` is used."
   "Compute font-lock rules for SexC mode."
   `((,sexc/number-regexp . font-lock-constant-face)
     (,(regexp-opt sexc/type-keywords 'symbols) . font-lock-type-face)
-    (,(sexc--token-regexp sexc/section-keywords) (1 font-lock-keyword-face))
+    ;; Prefix-based highlighting — single rule per family covers every existing
+    ;; and future token without enumerating them.
+    ;;   `%foo` — IR/system intrinsics
+    ;;   `$foo` — compile-time meta builtins (incl. user `$defun`s)
+    ;;   `:foo` — keyword atoms / metadata keys / struct section markers
+    ("\\_<%[^[:space:]()]+" . font-lock-warning-face)
+    ("\\_<\\$[^[:space:]()]+" . font-lock-constant-face)
+    ("\\_<:[^[:space:]()]+" . font-lock-builtin-face)
     (,(sexc--token-regexp sexc/surface-keywords) (1 font-lock-keyword-face))
-    (,(sexc--token-regexp sexc/intrinsic-keywords) (1 font-lock-warning-face))
-    (,(sexc--token-regexp sexc/meta-keywords) (1 font-lock-constant-face))
     ("(\\(?:defn\\)\\s-+[^()[:space:]]+\\s-+\\([^()[:space:]]+\\)"
      (1 font-lock-function-name-face))
     ("(\\(?:struct\\|union\\)\\s-+\\([^()[:space:]]+\\)"
@@ -701,6 +674,11 @@ FILE is optional source path for project-aware lookup."
   "Major mode for editing SexC files."
   (setq-local comment-start ";")
   (setq-local comment-end "")
+  ;; SexC uses `|` inside symbol names (e.g. `|>`, `||>`, `$|>`). Without this
+  ;; override the inherited lisp-mode syntax treats `|` as a string-quote
+  ;; (Common Lisp `|foo bar|` quoted symbols), which breaks font-lock from the
+  ;; first pipe onward.
+  (modify-syntax-entry ?| "_" sexc-mode-syntax-table)
   (setq-local font-lock-defaults (list (sexc--font-lock-keywords)))
   (setq-local eldoc-documentation-functions '(sexc/eldoc-function))
   (add-hook 'completion-at-point-functions #'sexc/completion-at-point nil t)
