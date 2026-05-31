@@ -1,5 +1,6 @@
 ; std/ocaml-api.sexc
-; Documentation-only entries for symbols implemented directly in OCaml.
+; Documentation-only entries for compile-time API symbols.
+; Covers OCaml primitives and $defun functions from std/meta.sexc.
 ; These forms are metadata for tooling and are ignored by code generation.
 
 (%doc %eval
@@ -39,7 +40,7 @@
 
 (%doc $list
   :sig ($list form...)
-  :doc "Build a list from evaluated items."
+  :doc "Build a list from evaluated items. Defined as $defun in std/meta.sexc."
   :example "($list 1 2 3)")
 
 (%doc $cons
@@ -47,10 +48,50 @@
   :doc "Construct list cell from HEAD and TAIL list."
   :example "($cons 0 ($list 1 2))")
 
+(%doc $defun
+  :sig ($defun name (params...) body...)
+  :doc "Define a compile-time function callable from $-context. Arguments are evaluated before the call."
+  :example "($defun $my-fn (a b) ($cons a b))")
+
+(%doc $+
+  :sig ($+ a b)
+  :doc "Compile-time integer addition."
+  :example "($+ 1 2)")
+
+(%doc $-
+  :sig ($- a b)
+  :doc "Compile-time integer subtraction."
+  :example "($- 5 3)")
+
+(%doc $*
+  :sig ($* a b)
+  :doc "Compile-time integer multiplication."
+  :example "($* 2 3)")
+
+(%doc $/
+  :sig ($/ a b)
+  :doc "Compile-time integer division."
+  :example "($/ 6 2)")
+
 (%doc $append
-  :sig ($append list...)
-  :doc "Concatenate lists."
+  :sig ($append a b)
+  :doc "Concatenate two lists. Defined as $defun in std/meta.sexc."
   :example "($append ($list 1) ($list 2 3))")
+
+(%doc $length
+  :sig ($length list)
+  :doc "Return LIST length. Defined as $defun in std/meta.sexc."
+  :example "($length ($list a b c))")
+
+(%doc $reverse
+  :sig ($reverse list)
+  :doc "Return reversed LIST. Defined as $defun in std/meta.sexc."
+  :example "($reverse ($list a b c))")
+
+(%doc $nth
+  :sig ($nth list idx)
+  :doc "Return element at IDX or nil when out of range. Defined as $defun in std/meta.sexc."
+  :example "($nth ($list a b c) 1)")
 
 (%doc $car
   :sig ($car list)
@@ -61,21 +102,6 @@
   :sig ($cdr list)
   :doc "Return LIST tail, or empty list."
   :example "($cdr ($list a b c))")
-
-(%doc $length
-  :sig ($length list)
-  :doc "Return LIST length."
-  :example "($length ($list a b c))")
-
-(%doc $reverse
-  :sig ($reverse list)
-  :doc "Return reversed LIST."
-  :example "($reverse ($list a b c))")
-
-(%doc $nth
-  :sig ($nth list idx)
-  :doc "Return element at IDX or nil when out of range."
-  :example "($nth ($list a b c) 1)")
 
 (%doc $null?
   :sig ($null? value)
@@ -151,3 +177,58 @@
   :sig ($let ((name expr)...) body...)
   :doc "Compile-time let* bindings."
   :example "($let ((x 1) (y 2)) ($list x y))")
+
+(%doc $not
+  :sig ($not pred)
+  :doc "Compile-time boolean negation."
+  :example "($not ($atom? x))")
+
+(%doc $do
+  :sig ($do expr...)
+  :doc "Evaluate exprs sequentially; return last value. Enables linear guards before logic."
+  :example "($do ($assert cond \"msg\") result-expr)")
+
+(%doc $assert
+  :sig ($assert cond message)
+  :doc "Compile-time assertion; fail with MESSAGE when COND is falsey. Returns nil on success."
+  :example "($assert ($not ($atom? binding)) \"binding must be a list\")")
+
+(%doc $m-put
+  :sig ($m-put sym key1 val1 key2 val2 ...)
+  :doc "Store compile-time metadata on SYM as a set of key-value pairs. Mutates the global symbol metadata table. Keys must be atoms/strings; values can be any form. Returns nil."
+  :example "($m-put 'Point :kind 'struct :fields '((int x) (int y)))")
+
+(%doc $m-get
+  :sig ($m-get sym key)
+  :doc "Read compile-time metadata KEY for SYM. Returns the stored value, or nil if SYM/KEY is missing."
+  :example "($m-get 'Point :fields)")
+
+(%doc %m-dump
+  :sig (%m-dump)
+  :doc "Top-level intrinsic that emits a multi-line C comment listing every symbol recorded in the compile-time metadata table at the point of expansion. Place at the end of the file to see the final state."
+  :example "(%m-dump)")
+
+(%doc %comment
+  :sig (%comment string)
+  :doc "Top-level intrinsic that emits a literal C comment /* STRING */. Newlines inside STRING are preserved."
+  :example "(%comment \" generated below \")")
+
+(%doc $subst
+  :sig ($subst sym replacement form)
+  :doc "Replace all occurrences of SYM atom in FORM with REPLACEMENT. Defined as $defun in std/meta.sexc."
+  :example "($subst 'it x ($car forms))")
+
+(%doc $|>
+  :sig ($|> init step...)
+  :doc "Thread-first: thread INIT as first argument through each STEP (symbol or (f args...))."
+  :example "($|> lst $cdr $cdr $car)")
+
+(%doc $||>
+  :sig ($||> init step...)
+  :doc "Thread-last: thread INIT as last argument through each STEP."
+  :example "($||> items ($filter pred) ($map f))")
+
+(%doc $|as>
+  :sig ($|as> init binding step...)
+  :doc "Thread-as: evaluate each STEP with BINDING bound to previous result."
+  :example "($|as> lst it ($filter pred it) ($map f it))")

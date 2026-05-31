@@ -28,16 +28,16 @@
 Куда добавлять новые вещи:
 - новый CLI-флаг: `src/sexc.ml` (+ прокинуть в `src/compiler.ml` при необходимости).
 - новый reader-sugar: `src/reader.ml`.
-- новый compile-time meta builtin `$...`: `src/macro.ml`.
+- новый compile-time meta builtin `$...`: предпочтительно через `$defun` в `std/meta.sexc`; правка `src/macro.ml` только если требуется OCaml-стейт/исключения/арифметика.
 - новый `%...` intrinsic (expr/stmt/top): `src/frontend.ml` + `src/codegen_c.ml`.
 - новый compiler pass: вставлять в `src/compiler.ml` между macro/frontend/codegen.
 
 ## Карта stdlib (SexC)
 
 - `std/core.sexc` — агрегатор prelude (`%import` цепочки), сюда не добавлять большую логику.
-- `std/c-interop.sexc` — C-facing surface DSL (defn/decl/struct/operators и т.п.).
-- `std/meta.sexc` — generic convenience helpers (when/unless/dotimes/repeat и т.п.).
-- `std/ocaml-api.sexc` — docs-only `%doc` записи для OCaml-only символов (`%...`, `$...`).
+- `std/c-interop.sexc` — C-facing surface DSL (defn/decl/struct/operators и т.п.). Декларативные макросы (`defn`, `decl`, `adecl`, `struct`, `union`, `define`) дополнительно населяют compile-time metadata через `$m-put`.
+- `std/meta.sexc` — generic helpers (when/unless/dotimes/repeat/`|>` и т.п.) **плюс** compile-time функции через `$defun` (`$append`, `$length`, `$reverse`, `$nth`, `$list`, `$subst`).
+- `std/ocaml-api.sexc` — docs-only `%doc` записи для OCaml-only символов (`%...`, `$...`) и для `$defun`-функций из meta.sexc.
 
 Куда добавлять макросы:
 - макрос напрямую про C/interop/низкоуровневый surface синтаксис -> `std/c-interop.sexc`.
@@ -131,8 +131,42 @@
 - Для `%eval` доступны meta-операторы в macro-eval:
   - `$--map`, `$--filter`, `$--reduce`, `$dolist`.
   - Публичные sugar-алиасы: `$map`, `$filter`, `$reduce`.
-  - Новые формы: `$for`, `$let`.
+  - `$for`, `$let`.
 - Reader поддерживает quote-сахар: `'x` -> `(quote x)`.
+
+### Compile-time функции (`$defun`)
+
+- `($defun $name (params...) body...)` — определяет именованную compile-time функцию, доступную в `$`-контексте (внутри `%defmacro`, `%eval`, `%evals`).
+- Семантика: **call-by-value** (аргументы вычисляются до вызова). Это отличие от `%defmacro`, который получает невычисленный синтаксис.
+- Хранилище: `ctx.ct_fns : def String.Map.t`, наполняется `Macro.collect` на верхнем уровне.
+- Несколько body-форм оборачиваются в `$do` автоматически.
+- Поддерживает `&rest`.
+- Используется для функций, которые можно выразить через примитивы `$car`/`$cdr`/`$cons`/`$if`/`$let`/арифметику. Не подходит для функций с неявными биндингами `it`/`acc` (`$map`, `$filter`, `$reduce`) — те остаются OCaml-only, так как требуют невычисленных аргументов-шаблонов.
+
+### Compile-time арифметика
+
+- `$+`, `$-`, `$*`, `$/` — целочисленные операции в `eval_expr`. Бинарные, операнды должны вычисляться в атом-число.
+
+### Что мигрировано из OCaml в sexc
+
+В `std/meta.sexc` как `$defun`: `$append` (binary), `$length`, `$reverse`, `$nth`, `$list` (variadic через `&rest`), `$subst` (рекурсивный обход дерева через `$atom?`/`$null?`).
+
+В OCaml остаются (irreducible bootstrap): `$if`, `$let`, `$do`, `$quote`, `quasiquote`, `$car`, `$cdr`, `$cons`, `$null?`, `$atom?`, `$eq?`, `$symcat`, `$gensym`, `$error`, `$assert`, `$not`, арифметика, `$|>`/`$||>`/`$|as>`, `$for`/`$dolist`/`$map`/`$filter`/`$reduce`, `$defun`, `$m-put`/`$m-get`.
+
+## Compile-time symbol metadata
+
+- `($m-put sym key1 val1 key2 val2 ...)` — variadic, кладёт N пар key/value в глобальную мапу `ctx.sym_meta` под именем `sym`. Перезаписывает только указанные ключи, остальные сохраняет. Возвращает `nil`.
+- `($m-get sym key)` — читает значение или `nil`, если символ/ключ отсутствуют.
+- Подход — Common Lisp `symbol-plist`: глобально, мутабельно, привязано к **имени** символа (а не к форме).
+- Stdlib-макросы автоматически населяют метадату:
+  - `define name value` → `:kind 'define`, `:value`
+  - `defn ret name params body` → `:kind 'fn`, `:return-type`, `:params`
+  - `decl (ty name) init ...` → на каждое имя: `:kind 'var`, `:c-type`
+  - `adecl (ty name) size ...` → `:kind 'var`, `:c-type (%ptr ty)`, `:allocated t`
+  - `struct name :fields ... :methods ...` → `:kind 'struct`, `:fields`, `:methods`
+  - `union name fields...` → `:kind 'union`, `:fields`
+- `(%m-dump)` — top-level интринсик, разворачивается в `(%comment "...")` с отсортированным дампом всей метадаты на момент expand'а. Поставить в конце файла, чтобы увидеть финальное состояние.
+- `(%comment "text")` — новая top-level форма, эмитит `/*text*/` (parse в `frontend.ml`, codegen в `codegen_c.ml`).
 
 ## File-level module namespace
 
@@ -151,13 +185,13 @@
 ## Группы ключевых слов
 
 - `IR/Intrinsic (%...)`:
-  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`
+  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`, `%comment`
   - Stmt/control: `%block`, `%if`, `%while`, `%do-while`, `%for`, `%switch`, `%case`, `%default`, `%break`, `%continue`, `%return`, `%goto`, `%label`, `%nop`
   - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`
-  - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`
-- `Meta builtins ($...)` (в `src/macro.ml`):
-  - Базовые: `$quote`, `$if`, `$list`, `$cons`, `$append`, `$car`, `$cdr`, `$length`, `$reverse`, `$nth`, `$null?`, `$atom?`, `$eq?`, `$error`, `$gensym`, `$symcat`
-  - Коллекции/итерация: `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$let`
+  - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
+- `Meta builtins ($...)`:
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
   - C-interop: `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `while`, `for`, `return`, `set`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
   - Generic/meta helpers: `when`, `unless`, `incf`, `decf`, `incf-by`, `decf-by`, `dotimes`, `for-range`, `repeat`

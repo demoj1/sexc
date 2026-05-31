@@ -30,8 +30,10 @@ type def = {
 
 type ctx = {
   defs : def String.Map.t;
+  ct_fns : def String.Map.t;
   max_depth : int;
   mutable gensym_counter : int;
+  mutable sym_meta : Raw.t String.Map.t String.Map.t;
 }
 
 let evals_splice_tag = "__sexc_internal_evals_splice__"
@@ -100,14 +102,10 @@ let rec eval_expr ctx env expr =
       if is_falsey (eval_expr ctx env cond) then eval_expr ctx env no else eval_expr ctx env yes
   | Raw.List (Raw.Atom "$if" :: [ cond; yes ]) ->
       if is_falsey (eval_expr ctx env cond) then Raw.Atom "nil" else eval_expr ctx env yes
-  | Raw.List (Raw.Atom "$list" :: args) -> Raw.List (List.map args ~f:(eval_expr ctx env))
   | Raw.List (Raw.Atom "$cons" :: [ hd; tl ]) ->
       let h = eval_expr ctx env hd in
       let t = expect_list (eval_expr ctx env tl) in
       Raw.List (h :: t)
-  | Raw.List (Raw.Atom "$append" :: args) ->
-      let elems = List.concat_map args ~f:(fun a -> expect_list (eval_expr ctx env a)) in
-      Raw.List elems
   | Raw.List (Raw.Atom "$car" :: [ x ]) -> (
       match expect_list (eval_expr ctx env x) with
       | h :: _ -> h
@@ -116,21 +114,6 @@ let rec eval_expr ctx env expr =
       match expect_list (eval_expr ctx env x) with
       | _ :: tl -> Raw.List tl
       | [] -> Raw.List [])
-  | Raw.List (Raw.Atom "$length" :: [ x ]) ->
-      let len = List.length (expect_list (eval_expr ctx env x)) in
-      Raw.Atom (Int.to_string len)
-  | Raw.List (Raw.Atom "$reverse" :: [ x ]) ->
-      Raw.List (List.rev (expect_list (eval_expr ctx env x)))
-  | Raw.List (Raw.Atom "$nth" :: [ xs; idx ]) ->
-      let arr = expect_list (eval_expr ctx env xs) in
-      let i =
-        match eval_expr ctx env idx with
-        | Raw.Atom s -> Int.of_string s
-        | _ -> fail "nth index must evaluate to atom/int"
-      in
-      (match List.nth arr i with
-      | Some v -> v
-      | None -> Raw.Atom "nil")
   | Raw.List (Raw.Atom "$null?" :: [ x ]) -> bool_raw (is_falsey (eval_expr ctx env x))
   | Raw.List (Raw.Atom "$atom?" :: [ x ]) -> (
       match eval_expr ctx env x with
@@ -215,6 +198,75 @@ let rec eval_expr ctx env expr =
         | _ -> fail "gensym prefix must evaluate to atom or string"
       in
       gensym ctx p
+  | Raw.List (Raw.Atom "$not" :: [ x ]) ->
+      bool_raw (is_falsey (eval_expr ctx env x))
+  | Raw.List (Raw.Atom "$not" :: _) -> fail "$not expects exactly one argument"
+  | Raw.List (Raw.Atom "$do" :: exprs) ->
+      List.fold exprs ~init:(Raw.Atom "nil") ~f:(fun _ e -> eval_expr ctx env e)
+  | Raw.List (Raw.Atom "$assert" :: [ cond; msg ]) ->
+      if is_falsey (eval_expr ctx env cond) then
+        let text =
+          match eval_expr ctx env msg with
+          | Raw.Atom s | Raw.Str s -> s
+          | _ -> "assertion failed"
+        in
+        fail text
+      else Raw.Atom "nil"
+  | Raw.List (Raw.Atom "$assert" :: _) ->
+      fail "$assert expects exactly two arguments: ($assert cond message)"
+  | Raw.List (Raw.Atom arith :: [ a; b ])
+    when List.mem [ "$+"; "$-"; "$*"; "$/" ] arith ~equal:String.equal ->
+      let to_int e =
+        match eval_expr ctx env e with
+        | Raw.Atom s -> (
+            match Int.of_string_opt s with
+            | Some n -> n
+            | None -> failf "%s: argument is not an integer: %s" arith s)
+        | _ -> failf "%s: argument must be an integer atom" arith
+      in
+      let result =
+        match arith with
+        | "$+" -> to_int a + to_int b
+        | "$-" -> to_int a - to_int b
+        | "$*" -> to_int a * to_int b
+        | "$/" ->
+            let divisor = to_int b in
+            if Int.equal divisor 0 then fail "$/ division by zero";
+            to_int a / divisor
+        | _ -> assert false
+      in
+      Raw.Atom (Int.to_string result)
+  | Raw.List (Raw.Atom arith :: _)
+    when List.mem [ "$+"; "$-"; "$*"; "$/" ] arith ~equal:String.equal ->
+      failf "%s expects exactly two arguments" arith
+  | Raw.List (Raw.Atom "$|>" :: init :: forms) ->
+      let thread acc form =
+        match form with
+        | Raw.Atom _ -> Raw.List [ form; acc ]
+        | Raw.List (f :: args) -> Raw.List (f :: acc :: args)
+        | _ -> fail "$|> each step must be a symbol or (f arg...) list"
+      in
+      eval_expr ctx env (List.fold forms ~init ~f:thread)
+  | Raw.List (Raw.Atom "$|>" :: _) -> fail "$|> expects at least one argument"
+  | Raw.List (Raw.Atom "$||>" :: init :: forms) ->
+      let thread acc form =
+        match form with
+        | Raw.Atom _ -> Raw.List [ form; acc ]
+        | Raw.List fs -> Raw.List (fs @ [ acc ])
+        | _ -> fail "$||> each step must be a symbol or list"
+      in
+      eval_expr ctx env (List.fold forms ~init ~f:thread)
+  | Raw.List (Raw.Atom "$||>" :: _) -> fail "$||> expects at least one argument"
+  | Raw.List (Raw.Atom "$|as>" :: init :: Raw.Atom binding :: forms) ->
+      let rec loop v = function
+        | [] -> v
+        | form :: tl ->
+            let env' = Map.set env ~key:binding ~data:v in
+            loop (eval_expr ctx env' form) tl
+      in
+      loop (eval_expr ctx env init) forms
+  | Raw.List (Raw.Atom "$|as>" :: _) ->
+      fail "$|as> expects: ($|as> init binding-name form...)"
   | Raw.List (Raw.Atom legacy :: _)
     when List.mem
            [
@@ -241,6 +293,56 @@ let rec eval_expr ctx env expr =
            ]
            legacy ~equal:String.equal ->
       failf "Legacy meta builtin '%s' is not allowed; use '$%s'" legacy legacy
+  | Raw.List (Raw.Atom "$m-put" :: sym_expr :: rest) ->
+      let sym_name = expect_atom (eval_expr ctx env sym_expr) in
+      let rec pair_up = function
+        | [] -> []
+        | [ _ ] -> fail "$m-put expects an even number of key/value forms after the symbol"
+        | k :: v :: tl ->
+            let key = expect_atom_or_string (eval_expr ctx env k) in
+            let value = eval_expr ctx env v in
+            (key, value) :: pair_up tl
+      in
+      let pairs = pair_up rest in
+      let cur_meta =
+        Option.value (Map.find ctx.sym_meta sym_name) ~default:String.Map.empty
+      in
+      let new_meta =
+        List.fold pairs ~init:cur_meta ~f:(fun m (k, v) -> Map.set m ~key:k ~data:v)
+      in
+      ctx.sym_meta <- Map.set ctx.sym_meta ~key:sym_name ~data:new_meta;
+      Raw.Atom "nil"
+  | Raw.List (Raw.Atom "$m-put" :: _) ->
+      fail "$m-put expects: ($m-put sym key1 val1 key2 val2 ...)"
+  | Raw.List (Raw.Atom "$m-get" :: [ sym_expr; key_expr ]) -> (
+      let sym_name = expect_atom (eval_expr ctx env sym_expr) in
+      let key = expect_atom_or_string (eval_expr ctx env key_expr) in
+      match Map.find ctx.sym_meta sym_name with
+      | None -> Raw.Atom "nil"
+      | Some m -> Option.value (Map.find m key) ~default:(Raw.Atom "nil"))
+  | Raw.List (Raw.Atom "$m-get" :: _) ->
+      fail "$m-get expects exactly two arguments: ($m-get sym key)"
+  | Raw.List (Raw.Atom fn_name :: args) when Map.mem ctx.ct_fns fn_name ->
+      let f = Map.find_exn ctx.ct_fns fn_name in
+      let evaled_args = List.map args ~f:(eval_expr ctx env) in
+      let fixed_len = List.length f.params in
+      let call_env =
+        match f.rest_param with
+        | None ->
+            if List.length evaled_args <> fixed_len then
+              failf "Compile-time function %s expects %d arguments, got %d"
+                fn_name fixed_len (List.length evaled_args);
+            with_bound String.Map.empty f.params evaled_args
+        | Some rest_name ->
+            if List.length evaled_args < fixed_len then
+              failf "Compile-time function %s expects at least %d arguments, got %d"
+                fn_name fixed_len (List.length evaled_args);
+            let fixed_args = List.take evaled_args fixed_len in
+            let rest_args = List.drop evaled_args fixed_len in
+            Map.set (with_bound String.Map.empty f.params fixed_args)
+              ~key:rest_name ~data:(Raw.List rest_args)
+      in
+      eval_expr ctx call_env f.body
   | Raw.List xs -> Raw.List (List.map xs ~f:(eval_expr ctx env))
 
 and eval_quasiquote ctx env ~depth expr =
@@ -264,16 +366,16 @@ and eval_qq_list ctx env ~depth xs =
           expect_list v
       | _ -> [ eval_quasiquote ctx env ~depth item ])
 
-let parse_macro_def raw =
-  let parse_params params =
-    let rec loop fixed = function
-      | [] -> (List.rev fixed, None)
-      | "&rest" :: [ rest_name ] -> (List.rev fixed, Some rest_name)
-      | "&rest" :: _ -> fail "&rest must be followed by exactly one parameter name"
-      | p :: tl -> loop (p :: fixed) tl
-    in
-    loop [] params
+let parse_params params =
+  let rec loop fixed = function
+    | [] -> (List.rev fixed, None)
+    | "&rest" :: [ rest_name ] -> (List.rev fixed, Some rest_name)
+    | "&rest" :: _ -> fail "&rest must be followed by exactly one parameter name"
+    | p :: tl -> loop (p :: fixed) tl
   in
+  loop [] params
+
+let parse_macro_def raw =
   match raw with
   | Raw.List (Raw.Atom "%defmacro" :: Raw.Atom name :: Raw.List params :: [ body ]) ->
       let params = List.map params ~f:expect_atom in
@@ -281,20 +383,60 @@ let parse_macro_def raw =
       { name; params; rest_param; body }
   | _ -> fail "Invalid %defmacro form; expected (%defmacro name (args...) body)"
 
+let parse_ct_fn_def raw =
+  match raw with
+  | Raw.List (Raw.Atom "$defun" :: Raw.Atom name :: Raw.List params :: body) ->
+      let params = List.map params ~f:expect_atom in
+      let params, rest_param = parse_params params in
+      let body =
+        match body with
+        | [ single ] -> single
+        | _ -> Raw.List (Raw.Atom "$do" :: body)
+      in
+      { name; params; rest_param; body }
+  | _ -> fail "Invalid $defun form; expected ($defun name (params...) body...)"
+
+let rec raw_to_sexp = function
+  | Raw.Atom s -> s
+  | Raw.Str s -> "\"" ^ s ^ "\""
+  | Raw.List xs ->
+      "(" ^ String.concat ~sep:" " (List.map xs ~f:raw_to_sexp) ^ ")"
+
+let escape_for_c_comment s =
+  String.substr_replace_all s ~pattern:"*/" ~with_:"* /"
+
+let format_meta_dump sym_meta =
+  let buf = Buffer.create 512 in
+  Buffer.add_string buf "\n * SexC Symbol Metadata Dump";
+  if Map.is_empty sym_meta then
+    Buffer.add_string buf "\n *   (no symbols recorded)"
+  else
+    Map.iteri sym_meta ~f:(fun ~key:sym ~data:meta ->
+        Buffer.add_string buf (Printf.sprintf "\n *\n *   %s:" sym);
+        Map.iteri meta ~f:(fun ~key ~data ->
+            Buffer.add_string buf
+              (Printf.sprintf "\n *     %s = %s" key (raw_to_sexp data))));
+  Buffer.add_string buf "\n ";
+  escape_for_c_comment (Buffer.contents buf)
+
 let collect forms =
-  let rec loop defs normal = function
+  let rec loop defs ct_fns normal = function
     | [] ->
-        ( { defs; max_depth = 200; gensym_counter = 0 },
+        ( { defs; ct_fns; max_depth = 200; gensym_counter = 0; sym_meta = String.Map.empty },
           List.rev normal )
     | raw :: tl -> (
         match raw with
         | Raw.List (Raw.Atom "%defmacro" :: _) ->
             let m = parse_macro_def raw in
             if Map.mem defs m.name then failf "Duplicate %%defmacro: %s" m.name;
-            loop (Map.set defs ~key:m.name ~data:m) normal tl
-        | _ -> loop defs (raw :: normal) tl)
+            loop (Map.set defs ~key:m.name ~data:m) ct_fns normal tl
+        | Raw.List (Raw.Atom "$defun" :: _) ->
+            let f = parse_ct_fn_def raw in
+            if Map.mem ct_fns f.name then failf "Duplicate $defun: %s" f.name;
+            loop defs (Map.set ct_fns ~key:f.name ~data:f) normal tl
+        | _ -> loop defs ct_fns (raw :: normal) tl)
   in
-  loop (String.Map.empty) [] forms
+  loop String.Map.empty String.Map.empty [] forms
 
 let apply ctx depth m args =
   let fixed_len = List.length m.params in
@@ -350,6 +492,11 @@ and expand_one ctx ~depth raw =
       Raw.List [ Raw.Atom evals_splice_tag; Raw.List items ]
   | Raw.List (Raw.Atom "%evals" :: _) ->
       fail "%evals expects exactly one argument"
+  | Raw.List [ Raw.Atom "%m-dump" ] ->
+      Raw.List
+        [ Raw.Atom "%comment"; Raw.Str (format_meta_dump ctx.sym_meta) ]
+  | Raw.List (Raw.Atom "%m-dump" :: _) ->
+      fail "%m-dump takes no arguments"
   | Raw.List (Raw.Atom head :: args) -> (
       match Map.find ctx.defs head with
       | Some m ->

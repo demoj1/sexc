@@ -122,6 +122,7 @@ type top =
   | TDefFn of ty * string * param list * bool * stmt
   | TDeclTop of decl
   | TStmtTop of stmt
+  | TComment of string
 
 let expect_atom = function
   | Raw.Atom a -> a
@@ -471,4 +472,6 @@ let parse_top raw =
       let ps, varargs = parse_params params in
       TDefFn (parse_type ret_ty, name, ps, varargs, parse_stmt_or_decl body)
   | Raw.List (Raw.Atom "%decl" :: args) -> TDeclTop (parse_decl args)
+  | Raw.List (Raw.Atom "%comment" :: [ Raw.Str s ]) -> TComment s
+  | Raw.List (Raw.Atom "%comment" :: _) -> fail "%comment expects exactly one string argument"
   | _ -> TStmtTop (parse_stmt_or_decl raw)

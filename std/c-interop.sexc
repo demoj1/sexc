@@ -24,7 +24,9 @@
   :doc "Define a C preprocessor symbol."
   :example "(define PI 3.14)")
 (%defmacro define (name value)
-  `(%define ,name ,value))
+  ($do
+    ($m-put name :kind 'define :value value)
+    `(%define ,name ,value)))
 
 ; defn
 ; (defn ret name params form...)
@@ -33,7 +35,9 @@
   :doc "Define a C function."
   :example "(defn int main () (return 0))")
 (%defmacro defn (ret name params &rest body)
-  `(%def-fn ,ret ,name ,params (%block ,@body)))
+  ($do
+    ($m-put name :kind 'fn :return-type ret :params params)
+    `(%def-fn ,ret ,name ,params (%block ,@body))))
 
 ; decl
 ; (decl (type name) init ...)
@@ -43,21 +47,18 @@
   :doc "Let*-style variable declarations with required initializer."
   :example "(decl (int x) 10 (int y) (+ x 5))")
 (%defmacro decl (binding init &rest rest)
-  ($if ($atom? binding)
-    ($error "decl binding must be (type name)")
-    ($if ($null? ($cdr binding))
-      ($error "decl binding must be (type name)")
-      ($if ($null? ($cdr ($cdr binding)))
-        ($if ($atom? ($car ($cdr binding)))
-          ($if ($null? rest)
-            `(%decl ,($car binding) ,($car ($cdr binding)) ,init)
-            ($if ($null? ($cdr rest))
-              ($error "decl expects pairs: (type name) init")
-              `(%decl-many
-                 (%decl ,($car binding) ,($car ($cdr binding)) ,init)
-                 (decl ,@rest))))
-          ($error "decl variable name must be an atom"))
-        ($error "decl binding must contain exactly two items: (type name)")))))
+  ($do
+    ($assert ($not ($atom? binding))    "decl: binding must be (type name)")
+    ($assert ($eq? ($length binding) 2) "decl: binding must contain exactly (type name)")
+    ($let ((ty   ($car binding))
+           (name ($|> binding $cdr $car)))
+      ($assert ($atom? name) "decl: variable name must be an atom")
+      ($m-put name :kind 'var :c-type ty)
+      ($if ($null? rest)
+        `(%decl ,ty ,name ,init)
+        ($do
+          ($assert ($not ($null? ($cdr rest))) "decl: expects pairs: (type name) init")
+          `(%decl-many (%decl ,ty ,name ,init) (decl ,@rest)))))))
 
 ; adecl
 ; (adecl (type name) size ...)
@@ -66,25 +67,20 @@
   :doc "Let*-style pointer allocations: each pair (TYPE NAME) SIZE expands to one malloc-backed declaration."
   :example "(adecl (char name) 25 (int foo) 15)")
 (%defmacro adecl (binding size &rest rest)
-  ($if ($atom? binding)
-    ($error "adecl binding must be (type name)")
-    ($if ($null? ($cdr binding))
-      ($error "adecl binding must be (type name)")
-      ($if ($null? ($cdr ($cdr binding)))
-        ($if ($atom? ($car ($cdr binding)))
-          ($if ($null? rest)
-            `(decl
-               ((%ptr ,($car binding)) ,($car ($cdr binding)))
-               (cast (%ptr ,($car binding)) (malloc ,size)))
-            ($if ($null? ($cdr rest))
-              ($error "adecl expects pairs: (type name) size")
-              `(%decl-many
-                 (decl
-                   ((%ptr ,($car binding)) ,($car ($cdr binding)))
-                   (cast (%ptr ,($car binding)) (malloc ,size)))
-                 (adecl ,@rest))))
-          ($error "adecl variable name must be an atom"))
-        ($error "adecl binding must contain exactly two items: (type name)")))))
+  ($do
+    ($assert ($not ($atom? binding))    "adecl: binding must be (type name)")
+    ($assert ($eq? ($length binding) 2) "adecl: binding must contain exactly (type name)")
+    ($let ((ty   ($car binding))
+           (name ($|> binding $cdr $car)))
+      ($assert ($atom? name) "adecl: variable name must be an atom")
+      ($m-put name :kind 'var :c-type `(%ptr ,ty) :allocated t)
+      ($if ($null? rest)
+        `(decl ((%ptr ,ty) ,name) (cast (%ptr ,ty) (malloc ,size)))
+        ($do
+          ($assert ($not ($null? ($cdr rest))) "adecl: expects pairs: (type name) size")
+          `(%decl-many
+             (decl ((%ptr ,ty) ,name) (cast (%ptr ,ty) (malloc ,size)))
+             (adecl ,@rest)))))))
 
 ; free*
 ; (free* ptr1 ptr2 ...)
@@ -115,11 +111,11 @@
   :doc "Conditional with 2 or 3 arguments; use cond for multi-branch logic."
   :example "(if (> x 0) (return x) (return 0))")
 (%defmacro if (cond then &rest else-body)
-  ($if ($null? else-body)
-    `(%if ,cond (%block ,then))
-    ($if ($null? ($cdr else-body))
-      `(%if ,cond (%block ,then) (%block ,($car else-body)))
-      ($error "if accepts only 2 or 3 arguments; use cond for multi-branch logic"))))
+  ($do
+    ($assert ($null? ($cdr else-body)) "if accepts only 2 or 3 arguments; use cond for multi-branch logic")
+    ($if ($null? else-body)
+      `(%if ,cond (%block ,then))
+      `(%if ,cond (%block ,then) (%block ,($car else-body))))))
 
 ; cond
 ; (cond
@@ -139,12 +135,12 @@
   :doc "Internal helper used by cond expansion."
   :internal t)
 (%defmacro cond-expand (clause &rest rest)
-  ($if ($null? ($cdr clause))
-    ($error "cond clause must contain a test and at least one body form")
+  ($do
+    ($assert ($not ($null? ($cdr clause))) "cond clause must contain a test and at least one body form")
     ($if ($eq? ($car clause) 'else)
-      ($if ($null? rest)
-        `(%block ,@($cdr clause))
-        ($error "else clause must be the last cond clause"))
+      ($do
+        ($assert ($null? rest) "else clause must be the last cond clause")
+        `(%block ,@($cdr clause)))
       ($if ($null? rest)
         `(%if ,($car clause) (%block ,@($cdr clause)))
         `(%if ,($car clause)
@@ -219,55 +215,48 @@
   ($let ((state
           ($reduce
             ($let ((phase ($car acc))
-                   (fvals ($car ($cdr acc)))
-                   (mvals ($car ($cdr ($cdr acc)))))
-                ($if ($eq? it :fields)
-                  ($if ($eq? phase 'start)
-                    ($list 'fields fvals mvals)
-                    ($error "':fields' section must appear only once and first"))
-                  ($if ($eq? it :methods)
+                   (fvals ($|> acc $cdr $car))
+                   (mvals ($|> acc $cdr $cdr $car)))
+              ($if ($eq? it :fields)
+                ($do
+                  ($assert ($eq? phase 'start) "':fields' section must appear only once and first")
+                  ($list 'fields fvals mvals))
+                ($if ($eq? it :methods)
+                  ($do
+                    ($assert ($eq? phase 'fields) "':methods' section must appear after ':fields' and only once")
+                    ($list 'methods fvals mvals))
+                  ($do
+                    ($assert ($not ($eq? phase 'start)) "struct must start with ':fields' section")
                     ($if ($eq? phase 'fields)
-                      ($list 'methods fvals mvals)
-                      ($error "':methods' section must appear after ':fields' and only once"))
-                    ($if ($eq? phase 'start)
-                      ($error "struct must start with ':fields' section")
-                      ($if ($eq? phase 'fields)
-                        ($if ($atom? it)
-                          ($error "struct field must be (type name)")
-                           ($if ($eq? ($car it) 'defn)
-                             ($error "defn forms are only allowed in ':methods' section")
-                             ($list phase ($append fvals ($list it)) mvals)))
-                         ($if ($atom? it)
-                           ($error "only defn forms are allowed in ':methods' section")
-                           ($if ($eq? ($car it) 'defn)
-                             ($list phase fvals ($append mvals ($list it)))
-                             ($error "only defn forms are allowed in ':methods' section"))))))))
+                      ($do
+                        ($assert ($not ($atom? it)) "struct field must be (type name)")
+                        ($assert ($not ($eq? ($car it) 'defn)) "defn forms are only allowed in ':methods' section")
+                        ($list phase ($append fvals ($list it)) mvals))
+                      ($do
+                        ($assert ($not ($atom? it)) "only defn forms are allowed in ':methods' section")
+                        ($assert ($eq? ($car it) 'defn) "only defn forms are allowed in ':methods' section")
+                        ($list phase fvals ($append mvals ($list it)))))))))
             ($list 'start ($list) ($list))
             items))
          (phase ($car state))
-         (fields ($car ($cdr state)))
-         (methods ($car ($cdr ($cdr state)))))
-    ($if ($eq? phase 'start)
-      ($error "struct expects ':fields' section")
-      nil)
+         (fields ($|> state $cdr $car))
+         (methods ($|> state $cdr $cdr $car)))
+    ($assert ($not ($eq? phase 'start)) "struct expects ':fields' section")
+    ($m-put name :kind 'struct :fields fields :methods methods)
     `(%top-level-splice
        (%typedef (%struct ,name ,@fields) ,name)
        ,@($map
-           ($if ($atom? it)
-             ($error "struct method must be a list: (defn ret name params body...)")
-             ($if ($null? ($cdr it))
-               ($error "struct method must include return type")
-               ($if ($null? ($cdr ($cdr it)))
-                 ($error "struct method must include method name")
-                 ($if ($null? ($cdr ($cdr ($cdr it))))
-                   ($error "struct method must include parameter list")
-                   ($let ((ret ($car ($cdr it)))
-                          (mname ($car ($cdr ($cdr it))))
-                          (params ($car ($cdr ($cdr ($cdr it)))))
-                          (body ($cdr ($cdr ($cdr ($cdr it))))))
-                     ($if ($atom? mname)
-                       `(%def-fn ,ret ,($symcat name "/" mname) ,params (%block ,@body))
-                       ($error "struct method name must be an atom")))))))
+           ($do
+             ($assert ($not ($atom? it))                      "struct method must be a list: (defn ret name params body...)")
+             ($assert ($not ($null? ($|> it $cdr)))           "struct method must include return type")
+             ($assert ($not ($null? ($|> it $cdr $cdr)))      "struct method must include method name")
+             ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "struct method must include parameter list")
+             ($let ((ret    ($|> it $cdr $car))
+                    (mname  ($|> it $cdr $cdr $car))
+                    (params ($|> it $cdr $cdr $cdr $car))
+                    (body   ($|> it $cdr $cdr $cdr $cdr)))
+               ($assert ($atom? mname) "struct method name must be an atom")
+               `(%def-fn ,ret ,($symcat name "/" mname) ,params (%block ,@body))))
            methods))))
 
 ; union
@@ -277,7 +266,9 @@
   :doc "Define typedef union with named fields."
   :example "(union Number (int i) (float f))")
 (%defmacro union (name &rest fields)
-  `(%typedef (%union ,name ,@fields) ,name))
+  ($do
+    ($m-put name :kind 'union :fields fields)
+    `(%typedef (%union ,name ,@fields) ,name)))
 
 ; zero-init
 ; (zero-init) => {0}

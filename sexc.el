@@ -73,7 +73,8 @@ The command must accept source on stdin and print generated C to stdout."
     "." "->" "not" "+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">"
     ">=" "&&" "and" "||" "or" "post-inc" "nop"
     "when" "unless" "incf" "decf" "incf-by" "decf-by"
-    "dotimes" "for-range" "repeat")
+    "dotimes" "for-range" "repeat"
+    "|>" "||>" "|as>")
   "Surface DSL keywords/macros (no %/$ prefix)."
   :type '(repeat string)
   :group 'sexc)
@@ -98,7 +99,8 @@ The command must accept source on stdin and print generated C to stdout."
     "$length" "$reverse" "$nth" "$null?" "$atom?" "$eq?"
     "$error" "$gensym" "$symcat"
     "$--map" "$--filter" "$--reduce" "$dolist"
-    "$map" "$filter" "$reduce" "$for" "$let")
+    "$map" "$filter" "$reduce" "$for" "$let"
+    "$not" "$do" "$assert" "$subst" "$|>" "$||>" "$|as>")
   "Compile-time meta builtins ($-prefixed)."
   :type '(repeat string)
   :group 'sexc)
@@ -137,7 +139,13 @@ The command must accept source on stdin and print generated C to stdout."
     ("for-range" . (4 4 4 &body))
     ("%defmacro" . (4 4 &body))
     ("%eval" . (&body))
-    ("%evals" . (&body)))
+    ("%evals" . (&body))
+    ("|>" . (&body))
+    ("||>" . (&body))
+    ("|as>" . (4 4 &body))
+    ("$do" . (&body))
+    ("$assert" . (4 4))
+    ("$subst" . (4 4 4)))
   "Indentation rules applied through `common-lisp-indent-function'."
   :type '(alist :key-type string :value-type sexp)
   :group 'sexc)
@@ -162,7 +170,17 @@ The command must accept source on stdin and print generated C to stdout."
     ("dot" . "(dot OBJ FIELD [FIELD...])")
     ("arrow" . "(arrow PTR FIELD [FIELD...])")
     ("." . "(. OBJ FIELD [FIELD...]) alias of dot")
-    ("->" . "(-> PTR FIELD [FIELD...]) alias of arrow"))
+    ("->" . "(-> PTR FIELD [FIELD...]) alias of arrow")
+    ("|>" . "(|> INIT STEP...) -> thread INIT as first arg through each STEP")
+    ("||>" . "(||> INIT STEP...) -> thread INIT as last arg through each STEP")
+    ("|as>" . "(|as> INIT BINDING STEP...) -> thread with BINDING substituted in each STEP")
+    ("$not" . "($not PRED) -> compile-time boolean negation")
+    ("$do" . "($do EXPR...) -> evaluate sequentially, return last value")
+    ("$assert" . "($assert COND MESSAGE) -> fail with MESSAGE when COND is falsey")
+    ("$subst" . "($subst SYM REPLACEMENT FORM) -> replace SYM atom in FORM with REPLACEMENT")
+    ("$|>" . "($|> INIT STEP...) -> meta thread-first")
+    ("$||>" . "($||> INIT STEP...) -> meta thread-last")
+    ("$|as>" . "($|as> INIT BINDING FORM...) -> meta thread-as with direct env binding"))
   "Eldoc mapping: symbol -> short documentation string."
   :type '(alist :key-type string :value-type string)
   :group 'sexc)
@@ -245,8 +263,7 @@ When nil, only `sexc/eldoc-docs` is used."
   "Build regexp matching TOKENS as standalone SexC atoms."
   (if (null tokens)
       "a^"
-    (concat "\\(?:^\\|[[:space:]()]\\)\\(" (mapconcat #'regexp-quote tokens "\\|")
-            "\\)\\(?:$\\|[[:space:]()]\\)")))
+    (concat "\\(?:^\\|[[:space:]()]\\)\\(" (regexp-opt tokens) "\\)\\(?:$\\|[[:space:]()]\\)")))
 
 (defun sexc--font-lock-keywords ()
   "Compute font-lock rules for SexC mode."

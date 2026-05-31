@@ -4,6 +4,45 @@
 ; Add reusable high-level helpers here (iteration sugar, convenience forms, etc).
 ; Avoid putting C-specific low-level wrappers in this file.
 
+; ─── Compile-time functions ($defun) ────────────────────────────────────────
+
+($defun $list (&rest xs) xs)
+
+($defun $append (a b)
+  ($if ($null? a)
+    b
+    ($cons ($car a) ($append ($cdr a) b))))
+
+($defun $subst (sym repl form)
+  ($if ($atom? form)
+    ($if ($eq? form sym) repl form)
+    ($if ($null? form)
+      form
+      ($cons ($subst sym repl ($car form))
+             ($subst sym repl ($cdr form))))))
+
+($defun $length (lst)
+  ($if ($null? lst)
+    0
+    ($+ 1 ($length ($cdr lst)))))
+
+($defun $--reverse-aux (lst acc)
+  ($if ($null? lst)
+    acc
+    ($--reverse-aux ($cdr lst) ($cons ($car lst) acc))))
+
+($defun $reverse (lst)
+  ($--reverse-aux lst ($list)))
+
+($defun $nth (lst idx)
+  ($if ($null? lst)
+    nil
+    ($if ($eq? idx 0)
+      ($car lst)
+      ($nth ($cdr lst) ($- idx 1)))))
+
+; ─── Surface macros ──────────────────────────────────────────────────────────
+
 ; when
 ; (when cond form...)
 ; => (%if cond (%block form...))
@@ -87,3 +126,43 @@
          (%< ,i ,n)
          (%post-inc ,i)
          ,body))
+
+; |> (thread-first, like Clojure ->)
+; (|> x (f a) (g b)) => (g (f x a) b)
+(%doc |>
+  :doc "Thread INIT as the first argument through each step. Each step is a symbol or (f arg...) list."
+  :example "(|> x (+ 1) (* 2))")
+(%defmacro |> (init &rest forms)
+  ($if ($null? forms)
+    init
+    ($let ((form ($car forms)))
+      ($if ($atom? form)
+        `(|> (,form ,init) ,@($cdr forms))
+        `(|> (,($car form) ,init ,@($cdr form)) ,@($cdr forms))))))
+
+; ||> (thread-last, like Clojure ->>)
+; (||> x (f a) (g b)) => (g b (f a x))
+(%doc ||>
+  :doc "Thread INIT as the last argument through each step."
+  :example "(||> items (filter pred) (map f))")
+(%defmacro ||> (init &rest forms)
+  ($if ($null? forms)
+    init
+    ($let ((form ($car forms)))
+      ($if ($atom? form)
+        `(||> (,form ,init) ,@($cdr forms))
+        `(||> (,@form ,init) ,@($cdr forms))))))
+
+; |as> (thread-as, like Clojure as->)
+; (|as> x it (f it 1) (g 2 it)) => (g 2 (f x 1))
+; Compile-time substitution: each step has BINDING replaced by the accumulated expression.
+(%doc |as>
+  :doc "Thread INIT through steps, binding the result to BINDING in each step via compile-time substitution."
+  :example "(|as> arr it (aref it 0) (. it field))")
+(%defmacro |as> (init binding &rest forms)
+  ($if ($null? forms)
+    init
+    `(|as>
+       ,($subst binding init ($car forms))
+       ,binding
+       ,@($cdr forms))))

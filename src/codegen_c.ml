@@ -303,3 +303,4 @@ let emit_top = function
   | TDefFn (ret, name, params, varargs, body) -> emit_fn_sig ret name params varargs ^ "\n" ^ emit_stmt body
   | TDeclTop d -> emit_decl_stmt d
   | TStmtTop s -> emit_stmt s
+  | TComment s -> "/*" ^ s ^ "*/"
