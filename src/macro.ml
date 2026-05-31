@@ -13,6 +13,12 @@ open Common
    Extension point:
    - Add new compile-time builtins in [eval_expr] (prefer $-prefixed API only).
    - Add new special compile-time forms in [expand_one] only when they affect expansion control.
+
+   Data flow:
+   - [collect] splits top-level forms into macro definitions + normal forms.
+   - [expand_program] expands normal forms recursively with [expand_one].
+   - [expand_one] calls [apply] for %defmacro and [eval_expr] for %eval/%evals.
+   - [eval_expr] is a small Lisp evaluator used only during compile-time expansion.
 *)
 
 type def = {

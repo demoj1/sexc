@@ -59,6 +59,44 @@
           ($error "decl variable name must be an atom"))
         ($error "decl binding must contain exactly two items: (type name)")))))
 
+; adecl
+; (adecl (type name) size ...)
+; => pointer declarations + malloc casted assignments (let*-style)
+(%doc adecl
+  :doc "Let*-style pointer allocations: each pair (TYPE NAME) SIZE expands to one malloc-backed declaration."
+  :example "(adecl (char name) 25 (int foo) 15)")
+(%defmacro adecl (binding size &rest rest)
+  ($if ($atom? binding)
+    ($error "adecl binding must be (type name)")
+    ($if ($null? ($cdr binding))
+      ($error "adecl binding must be (type name)")
+      ($if ($null? ($cdr ($cdr binding)))
+        ($if ($atom? ($car ($cdr binding)))
+          ($if ($null? rest)
+            `(decl
+               ((%ptr ,($car binding)) ,($car ($cdr binding)))
+               (cast (%ptr ,($car binding)) (malloc ,size)))
+            ($if ($null? ($cdr rest))
+              ($error "adecl expects pairs: (type name) size")
+              `(%decl-many
+                 (decl
+                   ((%ptr ,($car binding)) ,($car ($cdr binding)))
+                   (cast (%ptr ,($car binding)) (malloc ,size)))
+                 (adecl ,@rest))))
+          ($error "adecl variable name must be an atom"))
+        ($error "adecl binding must contain exactly two items: (type name)")))))
+
+; free*
+; (free* ptr1 ptr2 ...)
+; => block of (free ptrN)
+(%doc free*
+  :doc "Free one or more pointers in order."
+  :example "(free* p q r)")
+(%defmacro free* (&rest ptrs)
+  ($if ($null? ptrs)
+    '(%nop)
+    `(%block ,@($map `(free ,it) ptrs))))
+
 ; block
 ; (block form...)
 ; => (%block form...)

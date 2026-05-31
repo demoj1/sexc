@@ -12,6 +12,14 @@ open Common
    Extension point:
    - Add user-facing flags here (and wire them into Compiler options).
    - Keep usage/help text synchronized with parser behavior.
+
+   Data flow:
+   argv
+     -> [parse_command]
+     -> command variant
+     -> dispatcher in [let ()]
+     -> Compiler/Docs/Index call
+     -> stdout/stderr + exit code
 *)
 
 let usage () =

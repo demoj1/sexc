@@ -1,6 +1,21 @@
 open Core
 open Common
 
+(*
+   Documentation metadata extraction and markdown rendering.
+
+   Responsibilities:
+   - read %doc forms from project files and stdlib files
+   - enrich docs with %defmacro signatures when :sig is omitted
+   - render docs for CLI commands: show-doc, dump-docs, dump-stdlib-docs
+
+   Data flow:
+   - [load_project_graph]/[load_std_graph] collect (file, forms) pairs.
+   - [entries_from_file] converts forms -> doc entries for one file.
+   - [collect_entries] merges entries across files.
+   - [show_doc]/[dump_docs_for_input]/[dump_stdlib_docs] format and emit outputs.
+*)
+
 type kind =
   | Surface
   | Intrinsic

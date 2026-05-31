@@ -11,20 +11,20 @@
 (%doc print-step
   :doc "Print one aggregation step line."
   :example "(utils/print-step i c)")
-(defn void print-step ((int step) (stats/Counter c))
+(defn void print-step ((int step) (lib/Counter c))
   (printf
     "step=%d total=%d count=%d avg=%.2f\n"
     step
     (. c total)
     (. c count)
-    (stats/Counter/average c)))
+    (lib/Counter/average c)))
 
 (%doc print-summary
   :doc "Print final aggregation summary line."
   :example "(utils/print-summary c)")
-(defn void print-summary ((stats/Counter c))
+(defn void print-summary ((lib/Counter c))
   (printf
     "summary: total=%d count=%d avg=%.2f\n"
     (. c total)
     (. c count)
-    (stats/Counter/average c)))
+    (lib/Counter/average c)))

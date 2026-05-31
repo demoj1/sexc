@@ -237,6 +237,8 @@ let rec load_forms_from_file ~visited ~use_prelude path =
       | None -> [ form ])
 
 let rec load_graph_from_file ~visited ~use_prelude path =
+  (* Import graph flow:
+     current file -> split imports/non-imports -> recursively load imports -> return (self + imported). *)
   let abs = path in
   if Set.mem visited abs then failf "Cyclic %%import detected: %s" abs;
   let visited = Set.add visited abs in
@@ -281,6 +283,14 @@ let load_prelude_forms () =
   load_forms_from_file ~visited:String.Set.empty ~use_prelude:false core_path
 
 let compile_forms ?(use_prelude = true) forms =
+  (* Core compile pipeline (in order):
+     1) normalize %module names
+     2) prepend prelude (optional)
+     3) drop %doc metadata (docs are handled out-of-band)
+     4) collect+expand macros
+     5) flatten top-level splice forms
+     6) parse frontend AST
+     7) emit C text. *)
   let module_name, forms = strip_module_decl forms in
   let forms =
     match module_name with

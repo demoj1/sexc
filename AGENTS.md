@@ -95,6 +95,9 @@
     - `(decl (int x) 5)`
     - `(decl (int x) 5 (int y) (+ x 9))`.
   - Старый формат `(decl name type ...)` — **удален** (breaking change).
+- `adecl` в стиле `let*` для malloc-аллоцируемых указателей:
+  - Формат: `(adecl (type name) size (type2 name2) size2 ...)`.
+  - Пример: `(adecl (char name) 25 (int foo) 15)`.
 - `set` порядок аргументов: **lhs, value**.
   - Поддерживает пачку пар: `(set x v y v2 ...)`.
 - `include` принимает один или несколько заголовков.
@@ -156,7 +159,7 @@
   - Базовые: `$quote`, `$if`, `$list`, `$cons`, `$append`, `$car`, `$cdr`, `$length`, `$reverse`, `$nth`, `$null?`, `$atom?`, `$eq?`, `$error`, `$gensym`, `$symcat`
   - Коллекции/итерация: `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$let`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - C-interop: `include`, `define`, `defn`, `decl`, `block`, `if`, `cond`, `while`, `for`, `return`, `set`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
+  - C-interop: `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `while`, `for`, `return`, `set`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
   - Generic/meta helpers: `when`, `unless`, `incf`, `decf`, `incf-by`, `decf-by`, `dotimes`, `for-range`, `repeat`
 
 ## Полезные sugar-макросы

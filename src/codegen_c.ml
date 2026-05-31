@@ -13,6 +13,15 @@ open Frontend
    Extension point:
    - Add emission for new AST constructors here.
    - Keep mangling and literal handling centralized in this module.
+
+   Data flow:
+   Frontend AST [top]
+     -> [emit_top]
+     -> [emit_stmt]/[emit_expr]/[emit_decl_of_type]
+     -> final C text
+
+   Invariant:
+   - all user-facing identifiers pass through [mangle_ident] before output.
 *)
 
 let is_ascii_letter c =

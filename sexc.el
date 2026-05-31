@@ -68,6 +68,7 @@ The command must accept source on stdin and print generated C to stdout."
 (defcustom sexc/surface-keywords
   '("include" "define" "defn" "decl" "block" "if" "cond"
     "while" "for" "return" "set" "cast" "struct" "union"
+    "adecl" "free*"
     "zero-init" "sizeof-type" "sizeof-expr" "aref" "dot" "arrow"
     "." "->" "not" "+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">"
     ">=" "&&" "and" "||" "or" "post-inc" "nop"
@@ -144,6 +145,8 @@ The command must accept source on stdin and print generated C to stdout."
 (defcustom sexc/eldoc-docs
   '(("defn" . "(defn RET NAME PARAMS FORM...) -> define function")
     ("decl" . "(decl (TYPE NAME) INIT ...) -> let*-style declarations")
+    ("adecl" . "(adecl (TYPE NAME) SIZE ...) -> let*-style malloc declarations")
+    ("free*" . "(free* PTR...) -> emit block of free calls")
     ("set" . "(set LHS VALUE [LHS2 VALUE2 ...])")
     ("struct" . "(struct Name :fields ... [:methods (defn ...)...])")
     ("union" . "(union Name (TYPE FIELD) ...)")

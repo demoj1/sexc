@@ -13,6 +13,13 @@ open Common
    - Add new intrinsic parsing in [parse_intrinsic_expr].
    - Add new top-level intrinsic parsing in [parse_top].
    - When adding new AST constructors, update both parser and codegen.
+
+   Data flow:
+   expanded Raw.t
+     -> [parse_top]
+     -> [parse_stmt]/[parse_expr]/[parse_type]
+     -> typed AST nodes ([top], [stmt], [expr], [ty])
+     -> consumed by Codegen_c
 *)
 
 type storage = Extern | Static | Register | Auto | Typedef

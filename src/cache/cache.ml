@@ -1,5 +1,20 @@
 open Core
 
+(*
+   Disk cache for symbol index entries.
+
+   Responsibilities:
+   - store per-file symbol lists plus file md5
+   - return cached entries only when md5 matches current file state
+   - persist cache between CLI runs in a temp-file marshal store
+
+   Data flow:
+   - [Index.symbols_for_files] calls [load] once per request.
+   - [get_fresh_entry] decides cache-hit vs re-index.
+   - [put_file] writes refreshed entries into in-memory map.
+   - [save] flushes updated map to disk.
+*)
+
 type symbol = {
   id : int;
   name : string;

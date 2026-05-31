@@ -12,6 +12,18 @@ open Common
    Extension point:
    - Add new reader sugar in [parse_one] and update [is_atom_delim] when needed.
    - Keep this phase syntax-only; no macro/frontend semantics here.
+
+   Data flow:
+   text buffer
+     -> cursor state ([state])
+     -> token-level parsers ([parse_atom]/[parse_string]/[parse_list])
+     -> Raw AST ([parse_many])
+
+   Located variant:
+   text buffer
+     -> [parse_many_loc]
+     -> [located] tree with byte offsets
+     -> later used by index/xref diagnostics
 *)
 
 type state = {

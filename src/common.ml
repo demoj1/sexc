@@ -6,6 +6,13 @@ open Core
    Extension point:
    - Add new diagnostic helpers here when introducing a new compiler phase.
    - Keep phase names stable because they are user-visible in error output.
+
+   Data flow:
+   phase code
+     -> [fail]/[failf] for plain errors OR [fail_diag] for rich diagnostics
+     -> exception value
+     -> caught in CLI
+     -> [render_diagnostic] converts span offsets to line/column + caret output
 *)
 
 exception Sexc_error of string

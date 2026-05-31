@@ -1,5 +1,21 @@
 open Core
 
+(*
+   Symbol index builder/query layer used by docs, completion, and xref.
+
+   Responsibilities:
+   - parse files (with reader locations) and extract symbol metadata
+   - merge %doc metadata into concrete symbol definitions
+   - serve query APIs: [find_by_name], [complete], JSON serialization
+   - cooperate with [Cache] for incremental per-file indexing
+
+   Data flow:
+   - [files_for_input]/[files_for_stdlib] choose files for current command.
+   - [symbols_for_files] gets fresh entries from [Cache] or rebuilds via [index_file].
+   - [index_file] walks reader forms and emits [Cache.symbol] values.
+   - query functions filter/sort these symbols for CLI consumers.
+*)
+
 type symbol = Cache.symbol
 
 let id_counter = ref 0
@@ -94,6 +110,8 @@ let rec parse_decl_bindings module_name current_scope = function
   | _ :: tl -> parse_decl_bindings module_name current_scope tl
 
 let index_file file =
+  (* One-file indexing pipeline:
+     source -> located reader forms -> symbol/doc maps -> merged symbol list. *)
   let source = In_channel.read_all file in
   let file_md5 = Cache.file_md5 file in
   let forms = Reader.parse_many_loc ~file source in
@@ -217,6 +235,8 @@ let files_for_stdlib () =
   Compiler.load_std_graph () |> List.map ~f:fst |> List.dedup_and_sort ~compare:String.compare
 
 let symbols_for_files files =
+  (* Incremental flow:
+     cache load -> per-file hit/miss -> optional re-index -> cache save -> merged symbols. *)
   let cache = Cache.load () in
   let cache, symbols =
     List.fold files ~init:(cache, []) ~f:(fun (cache, acc) file ->
