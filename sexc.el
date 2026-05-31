@@ -550,11 +550,19 @@ Keys: :name :kind :signature :doc :example :include-name :multiline."
 (defun sexc/eldoc-function (&rest _ignored)
   "Return Eldoc string for symbol at point in SexC buffers.
 
-Accept optional arguments for compatibility with newer Eldoc call conventions."
+Chain of fallbacks (first hit wins):
+  1. `sexc show-doc` for %doc-documented SexC symbols
+  2. completion metadata cache
+  3. compile-time $m-put metadata (via `sexc m-dump`)
+  4. static eldoc dictionary `sexc/eldoc-docs`
+  5. C-library fallback via `man 3 SYM` / `man 2 SYM`"
   (let ((sym (sexc--atom-at-point)))
-    (or (sexc--eldoc-via-show-doc sym)
-        (sexc--eldoc-via-completion-meta sym)
-        (cdr (assoc sym sexc/eldoc-docs)))))
+    (when sym
+      (or (sexc--eldoc-via-show-doc sym)
+          (sexc--eldoc-via-completion-meta sym)
+          (sexc--eldoc-via-m-dump sym)
+          (cdr (assoc sym sexc/eldoc-docs))
+          (sexc--c-eldoc-fallback sym)))))
 
 (defun sexc--eldoc-via-show-doc (sym)
   "Return Eldoc for SYM via `sexc show-doc`, or nil.
@@ -629,6 +637,193 @@ FILE is optional source path for project-aware lookup."
        :include-example t
        :multiline t))))
 
+;; --- m-dump cache: compile-time metadata from `sexc m-dump --json` ---------
+
+(defvar sexc/m-dump-cache (make-hash-table :test #'equal)
+  "Hash table: absolute file path → parsed `sexc m-dump --json` alist.")
+
+(defvar sexc/man-eldoc-cache (make-hash-table :test #'equal)
+  "Hash table: C symbol → man-page synopsis line (or :miss).")
+
+(defun sexc/clear-m-dump-cache ()
+  "Drop cached m-dump JSON. Next eldoc/inspect call will fetch fresh."
+  (interactive)
+  (clrhash sexc/m-dump-cache)
+  (clrhash sexc/man-eldoc-cache))
+
+(defun sexc--fetch-m-dump (path)
+  "Run `sexc m-dump --json PATH`, cache and return parsed alist."
+  (when (and path (not (string-empty-p path)) (file-readable-p path))
+    (or (gethash path sexc/m-dump-cache)
+        (condition-case nil
+            (let* ((bin (sexc--resolve-binary))
+                   (lines (and bin (process-lines bin "m-dump" "--json" path)))
+                   (json-text (and lines (mapconcat #'identity lines "\n")))
+                   (data (and (stringp json-text)
+                              (not (string-empty-p json-text))
+                              (fboundp 'json-parse-string)
+                              (json-parse-string json-text
+                                                 :array-type 'list
+                                                 :object-type 'alist))))
+              (when data (puthash path data sexc/m-dump-cache))
+              data)
+          (error nil)))))
+
+(defun sexc--m-dump-invalidate-current ()
+  "Drop the m-dump cache entry for the current buffer's file."
+  (when (and buffer-file-name (gethash buffer-file-name sexc/m-dump-cache))
+    (remhash buffer-file-name sexc/m-dump-cache)))
+
+;; --- Metadata formatting ---------------------------------------------------
+
+(defun sexc--pp-meta-value (val)
+  "Render a JSON-decoded metadata value as a compact sexp-style string."
+  (cond
+   ((null val) "()")
+   ((stringp val) val)
+   ((numberp val) (number-to-string val))
+   ;; Raw.Str из OCaml сериализован как {\"str\": \"...\"}
+   ((and (consp val) (consp (car val)) (eq (caar val) 'str))
+    (format "%S" (cdr (assq 'str val))))
+   ((listp val)
+    (concat "(" (mapconcat #'sexc--pp-meta-value val " ") ")"))
+   (t (format "%S" val))))
+
+(defun sexc--meta-kind (entry)
+  "Read :kind field of metadata ENTRY (alist)."
+  (let ((k (sexc--json-alist-get entry :kind)))
+    (and (stringp k) k)))
+
+(defun sexc--format-meta-for-eldoc (sym entry)
+  "Return one-line eldoc summary for SYM from JSON ENTRY (alist of keys)."
+  (when entry
+    (let ((kind (sexc--meta-kind entry))
+          (parts nil))
+      (cond
+       ((equal kind "fn")
+        (let ((ret (sexc--json-alist-get entry :return-type))
+              (params (sexc--json-alist-get entry :params)))
+          (push (format "(%s %s) → %s"
+                        sym
+                        (sexc--pp-meta-value params)
+                        (sexc--pp-meta-value ret))
+                parts)))
+       ((equal kind "var")
+        (let ((ct (sexc--json-alist-get entry :c-type))
+              (alloc (sexc--json-alist-get entry :allocated)))
+          (push (format "%s : %s%s"
+                        sym
+                        (sexc--pp-meta-value ct)
+                        (if alloc " (allocated)" ""))
+                parts)))
+       ((equal kind "struct")
+        (push (format "struct %s %s"
+                      sym
+                      (sexc--pp-meta-value
+                       (sexc--json-alist-get entry :fields)))
+              parts))
+       ((equal kind "union")
+        (push (format "union %s %s"
+                      sym
+                      (sexc--pp-meta-value
+                       (sexc--json-alist-get entry :fields)))
+              parts))
+       ((equal kind "define")
+        (push (format "#define %s = %s"
+                      sym
+                      (sexc--pp-meta-value
+                       (sexc--json-alist-get entry :value)))
+              parts)))
+      ;; namespace info (вторая часть строки) — если у symbol есть :fns/:types/:defines
+      (let ((fns (sexc--json-alist-get entry :fns))
+            (types (sexc--json-alist-get entry :types))
+            (defs (sexc--json-alist-get entry :defines)))
+        (when (or fns types defs)
+          (push (format "namespace %s: %d fns, %d types, %d defs"
+                        sym
+                        (length (or fns ()))
+                        (length (or types ()))
+                        (length (or defs ())))
+                parts)))
+      (when parts (string-join (reverse parts) " · ")))))
+
+(defun sexc--eldoc-via-m-dump (sym)
+  "Look up SYM in m-dump cache for current file and format for eldoc."
+  (when (and sym buffer-file-name)
+    (let* ((data (sexc--fetch-m-dump buffer-file-name))
+           (entry (and data (sexc--json-alist-get data (intern sym)))))
+      (sexc--format-meta-for-eldoc sym entry))))
+
+;; --- C-fallback via man pages ----------------------------------------------
+
+(defun sexc--extract-synopsis-line (man-output sym)
+  "Find the first line in SYNOPSIS block of MAN-OUTPUT that mentions SYM."
+  (with-temp-buffer
+    (insert man-output)
+    (goto-char (point-min))
+    (when (re-search-forward "^SYNOPSIS" nil t)
+      (let ((block-end (save-excursion
+                         (if (re-search-forward "^[A-Z][A-Z ]+$" nil t)
+                             (line-beginning-position)
+                           (point-max)))))
+        (when (re-search-forward (regexp-quote sym) block-end t)
+          (beginning-of-line)
+          (let ((line (string-trim
+                       (buffer-substring-no-properties
+                        (point) (line-end-position)))))
+            (and (not (string-empty-p line)) line)))))))
+
+(defun sexc--c-eldoc-fallback (sym)
+  "Try man 3 SYM (then man 2) to find a C-library synopsis. Cache result."
+  (when (and sym
+             (not (string-empty-p sym))
+             (string-match-p "\\`[A-Za-z_][A-Za-z0-9_]*\\'" sym))
+    (let ((cached (gethash sym sexc/man-eldoc-cache 'unknown)))
+      (cond
+       ((eq cached :miss) nil)
+       ((stringp cached) cached)
+       (t
+        (let ((result
+               (cl-loop for section in '("3" "2")
+                        for out = (ignore-errors
+                                    (shell-command-to-string
+                                     (format "man -P cat %s %s 2>/dev/null"
+                                             section
+                                             (shell-quote-argument sym))))
+                        when (and out (not (string-empty-p out)))
+                        for line = (sexc--extract-synopsis-line out sym)
+                        when line return line)))
+          (puthash sym (or result :miss) sexc/man-eldoc-cache)
+          result))))))
+
+;; --- Meta-inspector command ------------------------------------------------
+
+(defun sexc/inspect-meta (&optional symbol)
+  "Show all $m-put metadata for SYMBOL (default: at point) in a buffer."
+  (interactive
+   (list (or (sexc--atom-at-point)
+             (read-string "Symbol: "))))
+  (unless (and symbol (not (string-empty-p symbol)))
+    (user-error "No symbol given"))
+  (unless buffer-file-name
+    (user-error "Buffer is not visiting a file"))
+  (let* ((data (sexc--fetch-m-dump buffer-file-name))
+         (entry (and data (sexc--json-alist-get data (intern symbol)))))
+    (if (null entry)
+        (message "sexc: no compile-time metadata for: %s" symbol)
+      (let ((buf (get-buffer-create (format "*sexc-meta: %s*" symbol))))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert (format ";; metadata for: %s\n\n" symbol))
+            (dolist (kv entry)
+              (insert (format "%s\n  %s\n\n"
+                              (car kv)
+                              (sexc--pp-meta-value (cdr kv))))))
+          (goto-char (point-min))
+          (read-only-mode 1))
+        (pop-to-buffer buf)))))
+
 (defun sexc--fetch-xref-json (identifier)
   "Fetch xref definitions for IDENTIFIER from compiler JSON endpoint."
   (let* ((bin (sexc--resolve-binary))
@@ -683,6 +878,8 @@ FILE is optional source path for project-aware lookup."
   (setq-local eldoc-documentation-functions '(sexc/eldoc-function))
   (add-hook 'completion-at-point-functions #'sexc/completion-at-point nil t)
   (add-hook 'xref-backend-functions #'sexc-xref-backend nil t)
+  ;; Файл сохранился → метадата на диске обновилась → дропаем кеш.
+  (add-hook 'after-save-hook #'sexc--m-dump-invalidate-current nil t)
   (eldoc-mode 1)
   (sexc/apply-indent-rules))
 
@@ -694,6 +891,7 @@ FILE is optional source path for project-aware lookup."
 (define-key sexc-mode-map (kbd "C-c C-S-e") #'sexc/expand-buffer)
 (define-key sexc-mode-map (kbd "C-c C-r") #'sexc/reload-config)
 (define-key sexc-mode-map (kbd "C-c C-d") #'sexc/diagnose-eldoc)
+(define-key sexc-mode-map (kbd "C-c C-i") #'sexc/inspect-meta)
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.sexc\\'" . sexc-mode))
