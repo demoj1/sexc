@@ -1,0 +1,12 @@
+(%def-fn int count-down ((int n))
+  (%block
+    (%while (> n 0)
+      (%set n (- n 1)))
+    (%return n)))
+;==EXPECTED==
+int count_u002D_down(int n)
+{
+  while (n > 0)
+    n = n - 1;
+  return n;
+}

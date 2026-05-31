@@ -1,0 +1,7 @@
+(%def-fn float int-to-float ((int x))
+  (%block (%return (%cast float x))))
+;==EXPECTED==
+float int_u002D_to_u002D_float(int x)
+{
+  return (float)x;
+}

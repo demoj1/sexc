@@ -1,0 +1,13 @@
+(%def-fn int read-loop ((int n))
+  (%block
+    (%do-while (> n 0)
+      (%set n (- n 1)))
+    (%return n)))
+;==EXPECTED==
+int read_u002D_loop(int n)
+{
+  do
+    n = n - 1;
+  while (n > 0);
+  return n;
+}

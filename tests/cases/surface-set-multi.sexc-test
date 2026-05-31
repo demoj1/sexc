@@ -1,0 +1,19 @@
+(defn void zero-three ()
+  (decl (int a) 1 (int b) 2 (int c) 3)
+  (set a 0
+       b 0
+       c 0))
+;==EXPECTED==
+void zero_u002D_three(void)
+{
+  int a = 1;
+  int b = 2;
+  int c = 3;
+  {
+    a = 0;
+    {
+      b = 0;
+      c = 0;
+    }
+  }
+}

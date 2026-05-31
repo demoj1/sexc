@@ -1,0 +1,20 @@
+(struct Counter
+  :fields
+  (int total)
+  (int n)
+
+  :methods
+  (defn Counter add ((Counter self) (int delta))
+    (return (Counter#
+              (total (+ (dot self total) delta))
+              (n (+ (dot self n) 1))))))
+;==EXPECTED==
+typedef struct Counter {
+  int total;
+  int n;
+} Counter;
+
+Counter Counter_u002F_add(Counter self, int delta)
+{
+  return (Counter){ .total = self.total + delta, .n = self.n + 1 };
+}

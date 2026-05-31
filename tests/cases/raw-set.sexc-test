@@ -1,0 +1,10 @@
+(%def-fn void f ()
+  (%block
+    (%decl int x 0)
+    (%set x 42)))
+;==EXPECTED==
+void f(void)
+{
+  int x = 0;
+  x = 42;
+}

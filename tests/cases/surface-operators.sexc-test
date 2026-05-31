@@ -1,0 +1,25 @@
+(defn int math ((int a b))
+  (decl (int s) (+ a b)
+        (int d) (- a b)
+        (int p) (* a b)
+        (int q) (/ a b)
+        (int r) (% a b))
+  (return (+ s d p q r)))
+
+(defn int logic ((int a b))
+  (return (and (= a b) (or (< a 10) (not (> b 0))))))
+;==EXPECTED==
+int math(int a, int b)
+{
+  int s = a + b;
+  int d = a - b;
+  int p = a * b;
+  int q = a / b;
+  int r = a % b;
+  return s + d + p + q + r;
+}
+
+int logic(int a, int b)
+{
+  return a == b && (a < 10 || !(b > 0));
+}

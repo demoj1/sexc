@@ -1,4 +1,4 @@
-.PHONY: all build run install clean
+.PHONY: all build run install clean test test-update
 
 PREFIX ?= /usr/local
 DESTDIR ?=
@@ -21,10 +21,11 @@ _dune_lock_fix:
 	fi
 
 build: _dune_lock_fix
-	opam exec -- dune build ./src/sexc.exe
-	rm -f ./sexc
-	cp _build/default/src/sexc.exe ./sexc
-	chmod 755 ./sexc
+	@opam exec -- dune build src
+	@rm -f ./sexc
+	@cp _build/default/src/sexc.exe ./sexc
+	@chmod 755 ./sexc
+	@echo "Built ./sexc"
 
 run: build
 	@if [ -z "$(FILE)" ]; then \
@@ -52,3 +53,13 @@ install:
 clean:
 	opam exec -- dune clean
 	rm -f ./sexc
+
+# Run all regression tests (golden snapshots + example compiles).
+# Vars: JOBS=N (parallel workers), FILTER=substring (filter tests by path).
+test: build
+	@./tests/run.sh
+
+# Regenerate all .expected files from current compiler output.
+# Review the resulting diff before committing.
+test-update: build
+	@UPDATE=1 ./tests/run.sh

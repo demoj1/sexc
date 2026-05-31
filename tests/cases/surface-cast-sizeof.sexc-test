@@ -1,0 +1,23 @@
+(defn float to-float ((int x))
+  (return (cast float x)))
+
+(defn (unsigned long) int-size ()
+  (return (sizeof-type int)))
+
+(defn (unsigned long) x-size ((int x))
+  (return (sizeof-expr x)))
+;==EXPECTED==
+float to_u002D_float(int x)
+{
+  return (float)x;
+}
+
+unsigned long int_u002D_size(void)
+{
+  return sizeof(int);
+}
+
+unsigned long x_u002D_size(int x)
+{
+  return sizeof(x);
+}

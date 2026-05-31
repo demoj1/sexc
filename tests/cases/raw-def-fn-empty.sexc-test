@@ -1,0 +1,6 @@
+(%def-fn int main () (%block))
+;==EXPECTED==
+int main(void)
+{
+
+}

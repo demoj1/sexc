@@ -1,0 +1,9 @@
+(%typedef (%struct Point
+            (int x)
+            (int y))
+          Point)
+;==EXPECTED==
+typedef struct Point {
+  int x;
+  int y;
+} Point;

@@ -1,0 +1,14 @@
+(%typedef (%struct Foo (int x)) Foo)
+
+(%def-fn int read-field (((%ptr Foo) p) (Foo v))
+  (%block
+    (%return (+ (%arrow p x) (%dot v x)))))
+;==EXPECTED==
+typedef struct Foo {
+  int x;
+} Foo;
+
+int read_u002D_field(Foo *p, Foo v)
+{
+  return p->x + v.x;
+}

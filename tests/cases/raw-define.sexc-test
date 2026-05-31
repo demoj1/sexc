@@ -1,0 +1,6 @@
+(%define PI 3.14159)
+(%define MAX_SIZE 1024)
+;==EXPECTED==
+#define PI 3.14159
+
+#define MAX_SIZE 1024

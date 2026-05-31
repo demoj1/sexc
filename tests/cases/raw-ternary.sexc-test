@@ -1,0 +1,7 @@
+(%def-fn int abs-of ((int x))
+  (%block (%return (%ternary (< x 0) (- 0 x) x))))
+;==EXPECTED==
+int abs_u002D_of(int x)
+{
+  return x < 0 ? 0 - x : x;
+}

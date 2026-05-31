@@ -15,6 +15,39 @@ open Core
      -> [render_diagnostic] converts span offsets to line/column + caret output
 *)
 
+(* Глобальный quiet-флаг. По умолчанию компилятор логирует стадии пайплайна
+   на stderr — длительные сборки (большие %import-графы или тяжёлый gcc -O2)
+   иначе выглядят зависшими. Включается через --quiet или SEXC_QUIET=1, когда
+   логи не нужны (например в редакторских интеграциях). *)
+let quiet : bool ref = ref false
+
+let logf fmt =
+  if !quiet then Printf.ksprintf (fun _ -> ()) fmt
+  else Printf.ksprintf (fun s -> prerr_endline ("[sexc] " ^ s)) fmt
+
+(* Human-readable длительность: ns → "850µs" / "12.4ms" / "1.23s" / "1m 32s".
+   Используется для тайминга стадий пайплайна. *)
+let format_span (span : Time_ns.Span.t) : string =
+  let ns = Time_ns.Span.to_int_ns span in
+  if ns < 1_000 then Printf.sprintf "%dns" ns
+  else if ns < 1_000_000 then Printf.sprintf "%.0fµs" (Float.of_int ns /. 1_000.0)
+  else if ns < 1_000_000_000 then Printf.sprintf "%.1fms" (Float.of_int ns /. 1_000_000.0)
+  else if ns < 60 * 1_000_000_000 then Printf.sprintf "%.2fs" (Float.of_int ns /. 1_000_000_000.0)
+  else
+    let total_s = ns / 1_000_000_000 in
+    Printf.sprintf "%dm %ds" (total_s / 60) (total_s mod 60)
+
+let now_ns () = Time_ns.now ()
+
+let since (t0 : Time_ns.t) : string = format_span (Time_ns.diff (now_ns ()) t0)
+
+(* Время стадии-обёртки: лог пишется после завершения с тэгом и elapsed. *)
+let with_stage (name : string) (f : unit -> 'a) : 'a =
+  let t0 = now_ns () in
+  let result = f () in
+  logf "%s — %s" name (since t0);
+  result
+
 exception Sexc_error of string
 
 type span = {

@@ -1,0 +1,20 @@
+(%def-fn int day-len ((int day))
+  (%block
+    (%switch day
+      (%case 0 (%return 24) (%break))
+      (%case 1 (%return 24) (%break))
+      (%default (%return 0)))))
+;==EXPECTED==
+int day_u002D_len(int day)
+{
+  switch (day) {
+    case 0:
+      return 24;
+      break;
+    case 1:
+      return 24;
+      break;
+    default:
+      return 0;
+  }
+}

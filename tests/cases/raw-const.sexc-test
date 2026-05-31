@@ -1,0 +1,7 @@
+(%def-fn int read-only (((%const (%ptr int)) p))
+  (%block (%return (%deref p))))
+;==EXPECTED==
+int read_u002D_only(int * const p)
+{
+  return *p;
+}

@@ -1,0 +1,10 @@
+# Standalone examples — compile via plain gcc (no external link deps beyond libm).
+# One path per line, relative to repo root. '#' lines are skipped.
+# Examples with extra deps (raylib, miniaudio) live in their own lists or build.sh.
+examples/hello.sexc
+examples/gcd.sexc
+examples/macros.sexc
+examples/evals.sexc
+examples/dot_arrow_alias.sexc
+examples/struct_methods.sexc
+examples/complex-project/main.sexc

@@ -24,8 +24,8 @@ open Common
 
 let usage () =
   prerr_endline "Usage:";
-  prerr_endline "  sexc [--no-prelude] <input.sexc>";
-  prerr_endline "  sexc [--no-prelude] <input.sexc> -C <command...>";
+  prerr_endline "  sexc [--no-prelude] [--quiet] <input.sexc>";
+  prerr_endline "  sexc [--no-prelude] [--quiet] <input.sexc> -C <command...>";
   prerr_endline "  sexc [--no-prelude] -";
   prerr_endline "  sexc [--no-prelude] dump-docs <input.sexc> <out-dir>";
   prerr_endline "  sexc dump-stdlib-docs <out-dir>";
@@ -37,6 +37,8 @@ let usage () =
   prerr_endline "";
   prerr_endline "By default, std/core.sexc is auto-loaded from stdlib path (implicit prelude).";
   prerr_endline "Use --no-prelude to disable auto prelude.";
+  prerr_endline "Compile/build stages are logged to stderr by default;";
+  prerr_endline "use --quiet (or SEXC_QUIET=1) to suppress them.";
   prerr_endline "Set SEXC_STDLIB_DIR to override stdlib lookup directory.";
   prerr_endline "Use '-' as input to read source from stdin.";
   prerr_endline "";
@@ -104,8 +106,16 @@ let parse_xref_args use_prelude args =
 let parse_command args =
   let rec parse_flags use_prelude = function
     | "--no-prelude" :: tl -> parse_flags false tl
+    | "--quiet" :: tl | "-q" :: tl ->
+        quiet := true;
+        parse_flags use_prelude tl
     | rest -> (use_prelude, rest)
   in
+  (* SEXC_QUIET=1 env var отключает stage-логи без флага (для редакторских
+     интеграций, которые парсят stdout/stderr). *)
+  (match Sys.getenv "SEXC_QUIET" with
+   | Some s when not (String.is_empty s) && not (String.equal s "0") -> quiet := true
+   | _ -> ());
   let use_prelude, rest = parse_flags true args in
   match rest with
   | "dump-docs" :: input :: out_dir :: [] -> Dump_docs { use_prelude; input_path = input; out_dir }
@@ -156,7 +166,12 @@ let run_with_temp_c compiled_c cmd =
     ~f:(fun () ->
       Out_channel.write_all tmp_c ~data:compiled_c;
       let cmd = replace_placeholder cmd tmp_c in
-      run_shell_command cmd)
+      let head = Option.value (List.hd cmd) ~default:"<cmd>" in
+      logf "running: %s" (String.concat ~sep:" " cmd);
+      let t = now_ns () in
+      let status = run_shell_command cmd in
+      logf "%s exit %d — %s" (Stdlib.Filename.basename head) status (since t);
+      status)
     ~finally:(fun () ->
       try Stdlib.Sys.remove tmp_c with
       | _ -> ())
@@ -174,13 +189,16 @@ let () =
   try
     match parse_command args with
     | Compile { use_prelude; input_path; compile_cmd } ->
+        let t0 = now_ns () in
         let c = compile_input ~use_prelude input_path in
         (match compile_cmd with
         | None ->
             Out_channel.output_string stdout c;
-            Out_channel.newline stdout
+            Out_channel.newline stdout;
+            logf "total — %s" (since t0)
         | Some cmd ->
             let status = run_with_temp_c c cmd in
+            logf "total — %s" (since t0);
             if status <> 0 then exit status)
     | Dump_docs { use_prelude; input_path; out_dir } ->
         if String.equal input_path "-" then fail "dump-docs does not support stdin input ('-')";

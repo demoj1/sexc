@@ -1,0 +1,9 @@
+(%defmacro twice (x) `(%+ ,x ,x))
+
+(defn int double-it ((int n))
+  (return (twice n)))
+;==EXPECTED==
+int double_u002D_it(int n)
+{
+  return n + n;
+}

@@ -1,0 +1,6 @@
+(%decl (%static int) counter 0)
+(%decl-fn int rand ())
+;==EXPECTED==
+static int counter = 0;
+
+int rand(void);

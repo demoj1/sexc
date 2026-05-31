@@ -1,0 +1,19 @@
+(struct Point
+  :fields
+  (int x)
+  (int y))
+
+(defn int origin-sum ()
+  (decl (Point p) (Point# (x 3) (y 4)))
+  (return (+ (dot p x) (dot p y))))
+;==EXPECTED==
+typedef struct Point {
+  int x;
+  int y;
+} Point;
+
+int origin_u002D_sum(void)
+{
+  Point p = (Point){ .x = 3, .y = 4 };
+  return p.x + p.y;
+}

@@ -1,0 +1,11 @@
+(%typedef (%union Value
+            (int i)
+            (float f)
+            ((%ptr char) s))
+          Value)
+;==EXPECTED==
+typedef union Value {
+  int i;
+  float f;
+  char *s;
+} Value;

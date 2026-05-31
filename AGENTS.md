@@ -8,12 +8,13 @@
 - Основной CLI: `src/sexc.ml`.
 - Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`, `std/ocaml-api.sexc`.
 - Примеры: `examples/`.
+- Регрессионные тесты: `tests/` (bash + golden snapshots, см. ниже).
 - Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command, eldoc через `show-doc`).
   - completion-at-point через `sexc complete` (учитывает imports + std + `%module`).
 
 ## Карта модулей (OCaml)
 
-- `src/sexc.ml` — CLI и флаги (`--no-prelude`, `-C`).
+- `src/sexc.ml` — CLI и флаги (`--no-prelude`, `--quiet`/`-q`, `-C`).
 - `src/compiler.ml` — orchestration пайплайна: import/prelude -> macro -> frontend -> codegen.
 - `src/reader.ml` — reader/парсер Raw-форм + quote/quasiquote sugars.
 - `src/macro.ml` — `%defmacro`, `%eval/%evals`, compile-time `$...` builtins.
@@ -48,7 +49,7 @@
 ## Сборка и запуск
 
 - `make` == `make build`.
-- `make build` собирает `./src/sexc.exe` и копирует бинарник в корень как `./sexc`.
+- `make build` собирает SexC и кладёт бинарник в корень как `./sexc` (dune-внутренний `.exe`-артефакт скрыт от вывода).
 - `make run FILE=...` использует `./sexc`.
 - `make install` ставит бинарник в `$(PREFIX)/bin/sexc` (по умолчанию `/usr/local/bin/sexc`), stdlib в `$(PREFIX)/include/sexc/std`, docs в `$(PREFIX)/share/sexc/docs`.
 - В `Makefile` есть авто-очистка битого/stale `_build/.lock`.
@@ -56,6 +57,39 @@
 - Prelude подключается автоматически для каждого файла; флаг `--no-prelude` отключает автоподключение.
 - Явный `%import "../std/core.sexc"` по-прежнему допустим, но уже не обязателен.
 - Циклические `%import` запрещены (ошибка `Cyclic %import detected: ...`).
+
+### Прогресс-логи стадий
+
+- Компилятор пишет на stderr тэгированный лог стадий пайплайна с таймингами в human-readable формате (`850µs`/`12.4ms`/`1.23s`/`1m 32s`). Видны: `load <file> (N forms) — Xµs`, `prelude — Xms`, `macro collect/expand`, `frontend parse`, `codegen C`, `running: <gcc cmd>`, `<bin> exit N — Xs`, `total — Xs`.
+- Зачем по умолчанию: длинные сборки (большие `%import`-графы или тяжёлый `gcc -O2`) иначе выглядят зависшими.
+- Отключение — `--quiet`/`-q` или `SEXC_QUIET=1` (например для редакторских интеграций, которые не хотят шум в stderr).
+- Реализация: `Common.quiet` ref / `Common.logf` / `Common.with_stage` / `Common.format_span`. Тайминги стадий — в `compile_forms` и `load_forms_from_file` (`src/compiler.ml`), время gcc — в `run_with_temp_c` (`src/sexc.ml`).
+
+## Регрессионные тесты (`tests/`)
+
+- Тесты написаны на **bash** намеренно — чтобы не зависеть от языка реализации компилятора. При смене языка (OCaml → что угодно) тесты продолжат работать как есть.
+- Запуск: `make test` (или напрямую `./tests/run.sh`). Параллелизм по умолчанию = `nproc`, переопределяется через `JOBS=N`. Фильтр по подстроке пути — `FILTER=substr`.
+- Перегенерация expected: `make test-update` (= `UPDATE=1 ./tests/run.sh`). Diff после регена надо ревьюить.
+
+Состав:
+
+- `tests/cases/*.sexc-test` — golden snapshot тесты. **Одиночный файл** содержит и source, и expected, разделённые маркером `;==EXPECTED==`:
+  ```
+  ;; sexc-flags: --no-prelude    ; опциональная первая строка
+  ... SexC исходник ...
+  ;==EXPECTED==
+  ... ожидаемый C-выход ...
+  ```
+  Runner пайпит часть до маркера через `sexc - --quiet` (с прелюдией по умолчанию), сравнивает с частью после маркера.
+- `tests/examples/standalone.list` — список путей к example'ам, которые компилируются через `gcc -O0 -w -lm`. Examples с raylib/miniaudio-зависимостями (`raylib*.sexc`, `audio-viz/`) сюда не включены.
+- `tests/run.sh` — диспетчер: находит cases + lists, запускает воркеров через `xargs -P`, агрегирует pass/fail через файлы-маркеры в tmpdir, выводит summary с общим временем.
+- `tests/run_one.sh` — один snapshot: парсит формат, проверяет/обновляет.
+- `tests/run_example.sh` — один example-compile: выполняет `sexc <src> -C gcc % ...`, проверяет exit 0.
+
+Куда добавлять:
+- Новый surface/raw-кейс — `tests/cases/<topic>-<name>.sexc-test`, source + `;==EXPECTED==` + (либо руками пишешь expected, либо запускаешь `UPDATE=1 ./tests/run.sh FILTER=<name>` и ревьюишь сгенерированное).
+- Новый standalone-пример без внешних зависимостей — добавить путь в `tests/examples/standalone.list`.
+- Examples с экзотическими link-флагами могут указывать их в первой строке: `;; sexc-test-flags: -lm -lpthread`.
 
 ## CLI фича `-C`
 

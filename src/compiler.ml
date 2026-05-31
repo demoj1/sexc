@@ -261,8 +261,10 @@ let rec load_forms_from_file ~visited ~module_names ~use_prelude path =
   if Set.mem visited abs then (visited, module_names, [])
   else
     let visited = Set.add visited abs in
+    let t = now_ns () in
     let source = In_channel.read_all abs in
     let forms = Reader.parse_many ~file:abs source in
+    logf "load %s (%d forms) — %s" abs (List.length forms) (since t);
     let module_name, forms = strip_module_decl forms in
     let module_names = Map.set module_names ~key:abs ~data:module_name in
 
@@ -389,15 +391,25 @@ let compile_forms ?(use_prelude = true) forms =
     | Raw.List (Raw.Atom "%top-level-splice" :: inner) -> flatten_top_forms inner
     | other -> [ other ]
   in
-  let prelude_forms = if use_prelude then load_prelude_forms () else [] in
+  let prelude_forms =
+    if use_prelude then with_stage "prelude" (fun () -> load_prelude_forms ()) else []
+  in
   let non_doc = List.filter (prelude_forms @ forms) ~f:(fun f -> not (is_doc_form f)) in
+  let t = now_ns () in
   let mctx, non_macro = Macro.collect non_doc in
+  logf "macro collect: %d forms — %s" (List.length non_doc) (since t);
+  let t = now_ns () in
   let expanded = Macro.expand_program mctx non_macro in
-  expanded
-  |> flatten_top_forms
-  |> List.map ~f:Frontend.parse_top
-  |> List.map ~f:Codegen_c.emit_top
-  |> String.concat ~sep:"\n\n"
+  logf "macro expand: %d forms, %d macros — %s"
+    (List.length non_macro) (Map.length mctx.defs) (since t);
+  let flattened = flatten_top_forms expanded in
+  let t = now_ns () in
+  let parsed = List.map flattened ~f:Frontend.parse_top in
+  logf "frontend parse: %d top-level forms — %s" (List.length flattened) (since t);
+  let t = now_ns () in
+  let c = parsed |> List.map ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n" in
+  logf "codegen C: %d bytes — %s" (String.length c) (since t);
+  c
 
 let compile_source ?(use_prelude = true) source =
   let forms = Reader.parse_many ~file:"<memory>" source in

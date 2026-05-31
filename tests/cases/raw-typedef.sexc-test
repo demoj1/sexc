@@ -1,0 +1,6 @@
+(%typedef int Counter)
+(%typedef (%ptr char) String)
+;==EXPECTED==
+typedef int Counter;
+
+typedef char *String;

@@ -1,0 +1,10 @@
+;; sexc-flags: --no-prelude
+;; verifies that ;-prefixed lines are dropped before being fed to sexc
+;; ALSO multiple toplevels
+(%include "stdio.h")
+;; midline comment
+(%define X 42)
+;==EXPECTED==
+#include "stdio.h"
+
+#define X 42

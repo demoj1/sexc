@@ -1,0 +1,9 @@
+(%evals
+  ($for (n '(1 2 3))
+    `(%define ,($symcat 'K_ n) ,n)))
+;==EXPECTED==
+#define K_1 1
+
+#define K_2 2
+
+#define K_3 3

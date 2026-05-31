@@ -1,0 +1,7 @@
+(defn int sum-first-two (((%ptr int) arr))
+  (return (+ (aref arr 0) (aref arr 1))))
+;==EXPECTED==
+int sum_u002D_first_u002D_two(int *arr)
+{
+  return (arr)[0] + (arr)[1];
+}

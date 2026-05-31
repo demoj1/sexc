@@ -1,0 +1,15 @@
+(defn int sum-n ((int n))
+  (decl (int total) 0)
+  (for (decl (int i) 0) (< i n) (incf i)
+    (set total (+ total i)))
+  (return total))
+;==EXPECTED==
+int sum_u002D_n(int n)
+{
+  int total = 0;
+  for (int i = 0; i < n; i = i + 1)
+    {
+      total = total + i;
+    }
+  return total;
+}

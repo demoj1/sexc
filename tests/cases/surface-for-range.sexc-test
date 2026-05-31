@@ -1,0 +1,15 @@
+(defn int sum-range ((int lo hi))
+  (decl (int total) 0)
+  (for-range i lo hi
+    (set total (+ total i)))
+  (return total))
+;==EXPECTED==
+int sum_u002D_range(int lo, int hi)
+{
+  int total = 0;
+  for (int i = lo; i < hi; i++)
+    {
+      total = total + i;
+    }
+  return total;
+}

@@ -1,0 +1,15 @@
+(%def-fn (unsigned long) size-of-int ()
+  (%block (%return (%sizeof-type int))))
+
+(%def-fn (unsigned long) size-of-x ((int x))
+  (%block (%return (%sizeof-expr x))))
+;==EXPECTED==
+unsigned long size_u002D_of_u002D_int(void)
+{
+  return sizeof(int);
+}
+
+unsigned long size_u002D_of_u002D_x(int x)
+{
+  return sizeof(x);
+}

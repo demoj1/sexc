@@ -1,0 +1,7 @@
+(%def-fn int first (((%ptr int) arr))
+  (%block (%return (%aref arr 0))))
+;==EXPECTED==
+int first(int *arr)
+{
+  return arr[0];
+}

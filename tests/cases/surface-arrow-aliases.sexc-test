@@ -1,0 +1,21 @@
+(struct Foo :fields (int x))
+
+(defn int via-arrow (((%ptr Foo) p) (Foo v))
+  (return (+ (-> p x) (. v x))))
+
+(defn int via-dot (((%ptr Foo) p) (Foo v))
+  (return (+ (arrow p x) (dot v x))))
+;==EXPECTED==
+typedef struct Foo {
+  int x;
+} Foo;
+
+int via_u002D_arrow(Foo *p, Foo v)
+{
+  return p->x + v.x;
+}
+
+int via_u002D_dot(Foo *p, Foo v)
+{
+  return p->x + v.x;
+}

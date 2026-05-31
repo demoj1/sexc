@@ -1,0 +1,17 @@
+(%def-fn void inc-ptr (((%ptr int) p))
+  (%block
+    (%set (%deref p) (+ (%deref p) 1))))
+
+(%def-fn (%ptr int) take-addr ((int x))
+  (%block
+    (%return (%addr x))))
+;==EXPECTED==
+void inc_u002D_ptr(int *p)
+{
+  *p = *p + 1;
+}
+
+int *take_u002D_addr(int x)
+{
+  return &x;
+}

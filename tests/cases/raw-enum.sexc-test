@@ -1,0 +1,3 @@
+(%typedef (%enum Color) Color)
+;==EXPECTED==
+typedef enum Color Color;

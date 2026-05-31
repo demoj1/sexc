@@ -1,0 +1,19 @@
+(defn int compute ((int n))
+  (block
+    (decl (int a) 0)
+    (block
+      (decl (int b) 5)
+      (set a (+ a b)))
+    (return a)))
+;==EXPECTED==
+int compute(int n)
+{
+  {
+    int a = 0;
+    {
+      int b = 5;
+      a = a + b;
+    }
+    return a;
+  }
+}

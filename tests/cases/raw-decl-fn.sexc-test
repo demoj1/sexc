@@ -1,0 +1,3 @@
+(%decl-fn int strlen (((%ptr char) s)))
+;==EXPECTED==
+int strlen(char *s);
