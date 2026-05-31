@@ -1,8 +1,8 @@
 (defn int main () (dotimes 5))
 ;==EXPECTED-ERROR==
-<stdin>:1:1: error[compile]: Macro dotimes expects at least 2 arguments, got 1
+<stdin>:1:19: error[macro]: Macro dotimes expects at least 2 arguments, got 1
 (defn int main () (dotimes 5))
-^
+                  ^
 
 Signature: (dotimes i n &rest body)
 Doc: Loop I from 0 to N-1.

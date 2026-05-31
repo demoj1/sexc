@@ -1,8 +1,8 @@
 (defn int main () (when))
 ;==EXPECTED-ERROR==
-<stdin>:1:1: error[compile]: Macro when expects at least 1 arguments, got 0
+<stdin>:1:19: error[macro]: Macro when expects at least 1 arguments, got 0
 (defn int main () (when))
-^
+                  ^
 
 Signature: (when cond &rest body)
 Doc: Execute BODY when COND is truthy.

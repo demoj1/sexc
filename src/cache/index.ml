@@ -39,9 +39,9 @@ let short_name name =
 let line_col source off = Common.line_col source off
 
 let rec render_raw = function
-  | Raw.Atom a -> a
-  | Raw.Str s -> "\"" ^ String.escaped s ^ "\""
-  | Raw.List xs -> "(" ^ String.concat ~sep:" " (List.map xs ~f:render_raw) ^ ")"
+  | Raw.Atom (a, _) -> a
+  | Raw.Str (s, _) -> "\"" ^ String.escaped s ^ "\""
+  | Raw.List (xs, _) -> "(" ^ String.concat ~sep:" " (List.map xs ~f:render_raw) ^ ")"
 
 type doc_meta = {
   signature : string option;
@@ -53,14 +53,14 @@ type doc_meta = {
 let parse_doc_meta props =
   let rec loop signature doc example internal = function
     | [] -> { signature; doc; example; internal }
-    | Raw.Atom ":sig" :: v :: tl -> loop (Some (render_raw v)) doc example internal tl
-    | Raw.Atom ":doc" :: v :: tl ->
-        let d = Option.first_some doc (Some (match v with Raw.Str s | Raw.Atom s -> s | _ -> render_raw v)) in
+    | Raw.Atom (":sig", _) :: v :: tl -> loop (Some (render_raw v)) doc example internal tl
+    | Raw.Atom (":doc", _) :: v :: tl ->
+        let d = Option.first_some doc (Some (match v with Raw.Str (s, _) | Raw.Atom (s, _) -> s | _ -> render_raw v)) in
         loop signature d example internal tl
-    | Raw.Atom ":example" :: v :: tl ->
-        let e = Option.first_some example (Some (match v with Raw.Str s | Raw.Atom s -> s | _ -> render_raw v)) in
+    | Raw.Atom (":example", _) :: v :: tl ->
+        let e = Option.first_some example (Some (match v with Raw.Str (s, _) | Raw.Atom (s, _) -> s | _ -> render_raw v)) in
         loop signature doc e internal tl
-    | Raw.Atom ":internal" :: Raw.Atom v :: tl ->
+    | Raw.Atom (":internal", _) :: Raw.Atom (v, _) :: tl ->
         loop signature doc example
           (internal || List.mem [ "t"; "true"; "1" ] v ~equal:String.equal)
           tl
@@ -156,7 +156,7 @@ let index_file file =
               (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind:"function" ~name:fq ~signature:sig_s ?scope:current_scope ())
         | Reader.LAtom ("%defmacro", _) :: Reader.LAtom (name, _) :: Reader.LList (params, _) :: _ ->
             let fq = qualify module_name name in
-            let sig_s = render_raw (Raw.List (Raw.Atom fq :: List.map params ~f:Reader.to_raw)) in
+            let sig_s = render_raw (Raw.List ((Raw.Atom (fq, None) :: List.map params ~f:Reader.to_raw), None)) in
             add_symbol (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind:"macro" ~name:fq ~signature:sig_s ?scope:current_scope ())
         | Reader.LAtom ("define", _) :: Reader.LAtom (name, _) :: _
         | Reader.LAtom ("%define", _) :: Reader.LAtom (name, _) :: _ ->
@@ -181,7 +181,7 @@ let index_file file =
             let fq = qualify module_name name in
             let kind =
               match Reader.to_raw ty with
-              | Raw.List (Raw.Atom "%enum" :: _) -> "type.enum"
+              | Raw.List ((Raw.Atom ("%enum", _) :: _), _) -> "type.enum"
               | _ -> "type.alias"
             in
             add_symbol (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind ~name:fq ())

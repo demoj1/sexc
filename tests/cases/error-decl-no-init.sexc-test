@@ -2,9 +2,9 @@
   (decl (int x))
   (return x))
 ;==EXPECTED-ERROR==
-<stdin>:1:1: error[compile]: Macro decl expects at least 2 arguments, got 1
-(defn int main ()
-^
+<stdin>:2:3: error[macro]: Macro decl expects at least 2 arguments, got 1
+  (decl (int x))
+  ^
 
 Signature: (decl binding init &rest rest)
 Doc: Let*-style variable declarations with required initializer.

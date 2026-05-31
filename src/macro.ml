@@ -34,39 +34,45 @@ type ctx = {
   max_depth : int;
   mutable gensym_counter : int;
   mutable sym_meta : Raw.t String.Map.t String.Map.t;
+  (* Span формы-вызова текущего раскрываемого макроса. Устанавливается
+     [apply] перед выполнением тела макроса; используется
+     [eval_quasiquote] чтобы помечать синтезированные узлы (которые иначе
+     не имеют source-локации) call-site span'ом — ошибки во вложенных
+     формах указывают на сам макровызов, а не на stdlib. *)
+  mutable expand_site_span : Common.span option;
 }
 
 let evals_splice_tag = "__sexc_internal_evals_splice__"
 
-let bool_raw b = if b then Raw.Atom "t" else Raw.Atom "nil"
+let bool_raw b = if b then Raw.Atom ("t", None) else Raw.Atom ("nil", None)
 
 let is_falsey = function
-  | Raw.Atom "nil" -> true
-  | Raw.List [] -> true
+  | Raw.Atom ("nil", _) -> true
+  | Raw.List ([], _) -> true
   | _ -> false
 
 let rec raw_equal a b =
   match a, b with
-  | Raw.Atom x, Raw.Atom y -> String.equal x y
-  | Raw.Str x, Raw.Str y -> String.equal x y
-  | Raw.List xs, Raw.List ys ->
+  | Raw.Atom (x, _), Raw.Atom (y, _) -> String.equal x y
+  | Raw.Str (x, _), Raw.Str (y, _) -> String.equal x y
+  | Raw.List (xs, _), Raw.List (ys, _) ->
       List.length xs = List.length ys && List.for_all2_exn xs ys ~f:raw_equal
   | _ -> false
 
 let expect_atom = function
-  | Raw.Atom s -> s
+  | Raw.Atom (s, _) -> s
   | _ -> fail "macro expected atom"
 
 let expect_list = function
-  | Raw.List xs -> xs
+  | Raw.List (xs, _) -> xs
   | _ -> fail "macro expected list"
 
 let expect_atom_or_string = function
-  | Raw.Atom s | Raw.Str s -> s
+  | Raw.Atom (s, _) | Raw.Str (s, _) -> s
   | _ -> fail "macro expected atom or string"
 
 let is_evals_splice = function
-  | Raw.List [ Raw.Atom tag; Raw.List xs ] when String.equal tag evals_splice_tag -> Some xs
+  | Raw.List ([ Raw.Atom (tag, _); Raw.List (xs, _) ], _) when String.equal tag evals_splice_tag -> Some xs
   | _ -> None
 
 let with_bound env names values =
@@ -75,7 +81,7 @@ let with_bound env names values =
 let gensym ctx prefix =
   let n = ctx.gensym_counter in
   ctx.gensym_counter <- ctx.gensym_counter + 1;
-  Raw.Atom (prefix ^ Int.to_string n)
+  Raw.Atom ((prefix ^ Int.to_string n), None)
 
 let is_self_evaluating_atom a =
   String.equal a "nil"
@@ -86,159 +92,159 @@ let is_self_evaluating_atom a =
 
 let rec eval_expr ctx env expr =
   match expr with
-  | Raw.Atom a -> (
+  | Raw.Atom (a, _) -> (
       match Map.find env a with
       | Some v -> v
       | None when is_self_evaluating_atom a -> expr
       | None -> failf "Unbound variable in macro eval: %s" a)
-  | Raw.Str _ -> expr
-  | Raw.List [] -> Raw.List []
-  | Raw.List (Raw.Atom "quote" :: [ body ]) -> body
-  | Raw.List (Raw.Atom "quote" :: _) -> fail "quote expects exactly one argument"
-  | Raw.List (Raw.Atom "$quote" :: [ body ]) -> body
-  | Raw.List (Raw.Atom "$quote" :: _) -> fail "$quote expects exactly one argument"
-  | Raw.List (Raw.Atom "quasiquote" :: [ body ]) -> eval_quasiquote ctx env ~depth:1 body
-  | Raw.List (Raw.Atom "$if" :: [ cond; yes; no ]) ->
+  | Raw.Str (_, _) -> expr
+  | Raw.List ([], _) -> Raw.List ([], None)
+  | Raw.List ((Raw.Atom ("quote", _) :: [ body ]), _) -> body
+  | Raw.List ((Raw.Atom ("quote", _) :: _), _) -> fail "quote expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$quote", _) :: [ body ]), _) -> body
+  | Raw.List ((Raw.Atom ("$quote", _) :: _), _) -> fail "$quote expects exactly one argument"
+  | Raw.List ((Raw.Atom ("quasiquote", _) :: [ body ]), _) -> eval_quasiquote ctx env ~depth:1 body
+  | Raw.List ((Raw.Atom ("$if", _) :: [ cond; yes; no ]), _) ->
       if is_falsey (eval_expr ctx env cond) then eval_expr ctx env no else eval_expr ctx env yes
-  | Raw.List (Raw.Atom "$if" :: [ cond; yes ]) ->
-      if is_falsey (eval_expr ctx env cond) then Raw.Atom "nil" else eval_expr ctx env yes
-  | Raw.List (Raw.Atom "$cond" :: clauses) -> eval_cond ctx env clauses
-  | Raw.List (Raw.Atom "$case" :: scrut :: clauses) ->
+  | Raw.List ((Raw.Atom ("$if", _) :: [ cond; yes ]), _) ->
+      if is_falsey (eval_expr ctx env cond) then Raw.Atom ("nil", None) else eval_expr ctx env yes
+  | Raw.List ((Raw.Atom ("$cond", _) :: clauses), _) -> eval_cond ctx env clauses
+  | Raw.List ((Raw.Atom ("$case", _) :: scrut :: clauses), _) ->
       let v = eval_expr ctx env scrut in
       eval_case ctx env v clauses
-  | Raw.List (Raw.Atom "$case" :: _) -> fail "$case expects: ($case scrutinee clause...)"
-  | Raw.List (Raw.Atom "$cons" :: [ hd; tl ]) ->
+  | Raw.List ((Raw.Atom ("$case", _) :: _), _) -> fail "$case expects: ($case scrutinee clause...)"
+  | Raw.List ((Raw.Atom ("$cons", _) :: [ hd; tl ]), _) ->
       let h = eval_expr ctx env hd in
       let t = expect_list (eval_expr ctx env tl) in
-      Raw.List (h :: t)
-  | Raw.List (Raw.Atom "$car" :: [ x ]) -> (
+      Raw.List ((h :: t), None)
+  | Raw.List ((Raw.Atom ("$car", _) :: [ x ]), _) -> (
       match expect_list (eval_expr ctx env x) with
       | h :: _ -> h
-      | [] -> Raw.Atom "nil")
-  | Raw.List (Raw.Atom "$cdr" :: [ x ]) -> (
+      | [] -> Raw.Atom ("nil", None))
+  | Raw.List ((Raw.Atom ("$cdr", _) :: [ x ]), _) -> (
       match expect_list (eval_expr ctx env x) with
-      | _ :: tl -> Raw.List tl
-      | [] -> Raw.List [])
-  | Raw.List (Raw.Atom "$null?" :: [ x ]) -> bool_raw (is_falsey (eval_expr ctx env x))
-  | Raw.List (Raw.Atom "$atom?" :: [ x ]) -> (
+      | _ :: tl -> Raw.List (tl, None)
+      | [] -> Raw.List ([], None))
+  | Raw.List ((Raw.Atom ("$null?", _) :: [ x ]), _) -> bool_raw (is_falsey (eval_expr ctx env x))
+  | Raw.List ((Raw.Atom ("$atom?", _) :: [ x ]), _) -> (
       match eval_expr ctx env x with
-      | Raw.Atom _ | Raw.Str _ -> bool_raw true
-      | Raw.List _ -> bool_raw false)
-  | Raw.List (Raw.Atom "$eq?" :: [ a; b ]) ->
+      | Raw.Atom (_, _) | Raw.Str (_, _) -> bool_raw true
+      | Raw.List (_, _) -> bool_raw false)
+  | Raw.List ((Raw.Atom ("$eq?", _) :: [ a; b ]), _) ->
       bool_raw (raw_equal (eval_expr ctx env a) (eval_expr ctx env b))
-  | Raw.List (Raw.Atom "$symcat" :: parts) ->
+  | Raw.List ((Raw.Atom ("$symcat", _) :: parts), _) ->
       let text =
         List.map parts ~f:(fun p -> eval_expr ctx env p |> expect_atom_or_string)
         |> String.concat ~sep:""
       in
-      Raw.Atom text
-  | Raw.List (Raw.Atom "$str" :: parts) ->
+      Raw.Atom (text, None)
+  | Raw.List ((Raw.Atom ("$str", _) :: parts), _) ->
       let text =
         List.map parts ~f:(fun p -> eval_expr ctx env p |> expect_atom_or_string)
         |> String.concat ~sep:""
       in
-      Raw.Str text
-  | Raw.List (Raw.Atom "$namespace-of" :: [ x ]) ->
+      Raw.Str (text, None)
+  | Raw.List ((Raw.Atom ("$namespace-of", _) :: [ x ]), _) ->
       (* "a/b/c" → "a/b"; "x" → nil. Split on LAST '/' — каждое имя
          попадает в свой непосредственный родительский namespace. *)
       let s = expect_atom_or_string (eval_expr ctx env x) in
       (match String.rsplit2 s ~on:'/' with
-       | Some (prefix, _) -> Raw.Atom prefix
-       | None -> Raw.Atom "nil")
-  | Raw.List (Raw.Atom "$namespace-of" :: _) ->
+       | Some (prefix, _) -> Raw.Atom (prefix, None)
+       | None -> Raw.Atom ("nil", None))
+  | Raw.List ((Raw.Atom ("$namespace-of", _) :: _), _) ->
       fail "$namespace-of expects exactly one argument"
-  | Raw.List (Raw.Atom "$let" :: Raw.List binds :: body) ->
+  | Raw.List ((Raw.Atom ("$let", _) :: Raw.List (binds, _) :: body), _) ->
       let rec bind env = function
         | [] -> env
-        | Raw.List [ Raw.Atom name; value_expr ] :: tl ->
+        | Raw.List ([ Raw.Atom (name, _); value_expr ], _) :: tl ->
             let value = eval_expr ctx env value_expr in
             bind (Map.set env ~key:name ~data:value) tl
         | _ -> fail "$let bindings must be pairs: ((name expr) ...)"
       in
       let env = bind env binds in
       let rec eval_last = function
-        | [] -> Raw.Atom "nil"
+        | [] -> Raw.Atom ("nil", None)
         | [ x ] -> eval_expr ctx env x
         | x :: tl ->
             ignore (eval_expr ctx env x);
             eval_last tl
       in
       eval_last body
-  | Raw.List (Raw.Atom "$for" :: [ Raw.List [ Raw.Atom var; xs ]; body ]) ->
+  | Raw.List ((Raw.Atom ("$for", _) :: [ Raw.List ([ Raw.Atom (var, _); xs ], _); body ]), _) ->
       let values = expect_list (eval_expr ctx env xs) in
       Raw.List
-        (List.map values ~f:(fun v ->
+        ((List.map values ~f:(fun v ->
              let env = Map.set env ~key:var ~data:v |> Map.set ~key:"it" ~data:v in
-             eval_expr ctx env body))
-  | Raw.List (Raw.Atom "$for" :: _) ->
+             eval_expr ctx env body)), None)
+  | Raw.List ((Raw.Atom ("$for", _) :: _), _) ->
       fail "$for expects ($for (var list-expr) body)"
-  | Raw.List (Raw.Atom "$map" :: args) -> eval_expr ctx env (Raw.List (Raw.Atom "$--map" :: args))
-  | Raw.List (Raw.Atom "$filter" :: args) ->
-      eval_expr ctx env (Raw.List (Raw.Atom "$--filter" :: args))
-  | Raw.List (Raw.Atom "$reduce" :: args) ->
-      eval_expr ctx env (Raw.List (Raw.Atom "$--reduce" :: args))
-  | Raw.List (Raw.Atom "$--map" :: [ mapper; xs ]) ->
+  | Raw.List ((Raw.Atom ("$map", _) :: args), _) -> eval_expr ctx env (Raw.List ((Raw.Atom ("$--map", None) :: args), None))
+  | Raw.List ((Raw.Atom ("$filter", _) :: args), _) ->
+      eval_expr ctx env (Raw.List ((Raw.Atom ("$--filter", None) :: args), None))
+  | Raw.List ((Raw.Atom ("$reduce", _) :: args), _) ->
+      eval_expr ctx env (Raw.List ((Raw.Atom ("$--reduce", None) :: args), None))
+  | Raw.List ((Raw.Atom ("$--map", _) :: [ mapper; xs ]), _) ->
       let values = expect_list (eval_expr ctx env xs) in
       Raw.List
-        (List.map values ~f:(fun v ->
+        ((List.map values ~f:(fun v ->
              let env = Map.set env ~key:"it" ~data:v in
-             eval_expr ctx env mapper))
-  | Raw.List (Raw.Atom "$--filter" :: [ pred; xs ]) ->
+             eval_expr ctx env mapper)), None)
+  | Raw.List ((Raw.Atom ("$--filter", _) :: [ pred; xs ]), _) ->
       let values = expect_list (eval_expr ctx env xs) in
       Raw.List
-        (List.filter values ~f:(fun v ->
+        ((List.filter values ~f:(fun v ->
              let env = Map.set env ~key:"it" ~data:v in
-             not (is_falsey (eval_expr ctx env pred))))
-  | Raw.List (Raw.Atom "$--reduce" :: [ reducer; init; xs ]) ->
+             not (is_falsey (eval_expr ctx env pred)))), None)
+  | Raw.List ((Raw.Atom ("$--reduce", _) :: [ reducer; init; xs ]), _) ->
       let values = expect_list (eval_expr ctx env xs) in
       let acc0 = eval_expr ctx env init in
       List.fold values ~init:acc0 ~f:(fun acc v ->
           let env = Map.set env ~key:"it" ~data:v |> Map.set ~key:"acc" ~data:acc in
           eval_expr ctx env reducer)
-  | Raw.List (Raw.Atom "$dolist" :: [ Raw.List [ Raw.Atom var; xs ]; body ]) ->
+  | Raw.List ((Raw.Atom ("$dolist", _) :: [ Raw.List ([ Raw.Atom (var, _); xs ], _); body ]), _) ->
       let values = expect_list (eval_expr ctx env xs) in
       Raw.List
-        (List.map values ~f:(fun v ->
+        ((List.map values ~f:(fun v ->
              let env = Map.set env ~key:var ~data:v in
-             eval_expr ctx env body))
-  | Raw.List (Raw.Atom "$dolist" :: _) ->
+             eval_expr ctx env body)), None)
+  | Raw.List ((Raw.Atom ("$dolist", _) :: _), _) ->
       fail "$dolist expects ($dolist (var list-expr) body)"
-  | Raw.List (Raw.Atom "$error" :: [ msg ]) ->
+  | Raw.List ((Raw.Atom ("$error", _) :: [ msg ]), _) ->
       let text =
         match eval_expr ctx env msg with
-        | Raw.Atom s | Raw.Str s -> s
+        | Raw.Atom (s, _) | Raw.Str (s, _) -> s
         | _ -> "macro error"
       in
       fail text
-  | Raw.List (Raw.Atom "$gensym" :: []) -> gensym ctx "__g"
-  | Raw.List (Raw.Atom "$gensym" :: [ prefix ]) ->
+  | Raw.List ((Raw.Atom ("$gensym", _) :: []), _) -> gensym ctx "__g"
+  | Raw.List ((Raw.Atom ("$gensym", _) :: [ prefix ]), _) ->
       let p =
         match eval_expr ctx env prefix with
-        | Raw.Atom s | Raw.Str s -> s
+        | Raw.Atom (s, _) | Raw.Str (s, _) -> s
         | _ -> fail "gensym prefix must evaluate to atom or string"
       in
       gensym ctx p
-  | Raw.List (Raw.Atom "$not" :: [ x ]) ->
+  | Raw.List ((Raw.Atom ("$not", _) :: [ x ]), _) ->
       bool_raw (is_falsey (eval_expr ctx env x))
-  | Raw.List (Raw.Atom "$not" :: _) -> fail "$not expects exactly one argument"
-  | Raw.List (Raw.Atom "$do" :: exprs) ->
-      List.fold exprs ~init:(Raw.Atom "nil") ~f:(fun _ e -> eval_expr ctx env e)
-  | Raw.List (Raw.Atom "$assert" :: [ cond; msg ]) ->
+  | Raw.List ((Raw.Atom ("$not", _) :: _), _) -> fail "$not expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$do", _) :: exprs), _) ->
+      List.fold exprs ~init:(Raw.Atom ("nil", None)) ~f:(fun _ e -> eval_expr ctx env e)
+  | Raw.List ((Raw.Atom ("$assert", _) :: [ cond; msg ]), _) ->
       if is_falsey (eval_expr ctx env cond) then
         let text =
           match eval_expr ctx env msg with
-          | Raw.Atom s | Raw.Str s -> s
+          | Raw.Atom (s, _) | Raw.Str (s, _) -> s
           | _ -> "assertion failed"
         in
         fail text
-      else Raw.Atom "nil"
-  | Raw.List (Raw.Atom "$assert" :: _) ->
+      else Raw.Atom ("nil", None)
+  | Raw.List ((Raw.Atom ("$assert", _) :: _), _) ->
       fail "$assert expects exactly two arguments: ($assert cond message)"
-  | Raw.List (Raw.Atom arith :: [ a; b ])
+  | Raw.List ((Raw.Atom (arith, _) :: [ a; b ]), _)
     when List.mem [ "$+"; "$-"; "$*"; "$/" ] arith ~equal:String.equal ->
       let to_int e =
         match eval_expr ctx env e with
-        | Raw.Atom s -> (
+        | Raw.Atom (s, _) -> (
             match Int.of_string_opt s with
             | Some n -> n
             | None -> failf "%s: argument is not an integer: %s" arith s)
@@ -255,29 +261,29 @@ let rec eval_expr ctx env expr =
             to_int a / divisor
         | _ -> assert false
       in
-      Raw.Atom (Int.to_string result)
-  | Raw.List (Raw.Atom arith :: _)
+      Raw.Atom ((Int.to_string result), None)
+  | Raw.List ((Raw.Atom (arith, _) :: _), _)
     when List.mem [ "$+"; "$-"; "$*"; "$/" ] arith ~equal:String.equal ->
       failf "%s expects exactly two arguments" arith
-  | Raw.List (Raw.Atom "$|>" :: init :: forms) ->
+  | Raw.List ((Raw.Atom ("$|>", _) :: init :: forms), _) ->
       let thread acc form =
         match form with
-        | Raw.Atom _ -> Raw.List [ form; acc ]
-        | Raw.List (f :: args) -> Raw.List (f :: acc :: args)
+        | Raw.Atom (_, _) -> Raw.List ([ form; acc ], None)
+        | Raw.List ((f :: args), _) -> Raw.List ((f :: acc :: args), None)
         | _ -> fail "$|> each step must be a symbol or (f arg...) list"
       in
       eval_expr ctx env (List.fold forms ~init ~f:thread)
-  | Raw.List (Raw.Atom "$|>" :: _) -> fail "$|> expects at least one argument"
-  | Raw.List (Raw.Atom "$||>" :: init :: forms) ->
+  | Raw.List ((Raw.Atom ("$|>", _) :: _), _) -> fail "$|> expects at least one argument"
+  | Raw.List ((Raw.Atom ("$||>", _) :: init :: forms), _) ->
       let thread acc form =
         match form with
-        | Raw.Atom _ -> Raw.List [ form; acc ]
-        | Raw.List fs -> Raw.List (fs @ [ acc ])
+        | Raw.Atom (_, _) -> Raw.List ([ form; acc ], None)
+        | Raw.List (fs, _) -> Raw.List ((fs @ [ acc ]), None)
         | _ -> fail "$||> each step must be a symbol or list"
       in
       eval_expr ctx env (List.fold forms ~init ~f:thread)
-  | Raw.List (Raw.Atom "$||>" :: _) -> fail "$||> expects at least one argument"
-  | Raw.List (Raw.Atom "$|as>" :: init :: Raw.Atom binding :: forms) ->
+  | Raw.List ((Raw.Atom ("$||>", _) :: _), _) -> fail "$||> expects at least one argument"
+  | Raw.List ((Raw.Atom ("$|as>", _) :: init :: Raw.Atom (binding, _) :: forms), _) ->
       let rec loop v = function
         | [] -> v
         | form :: tl ->
@@ -285,9 +291,9 @@ let rec eval_expr ctx env expr =
             loop (eval_expr ctx env' form) tl
       in
       loop (eval_expr ctx env init) forms
-  | Raw.List (Raw.Atom "$|as>" :: _) ->
+  | Raw.List ((Raw.Atom ("$|as>", _) :: _), _) ->
       fail "$|as> expects: ($|as> init binding-name form...)"
-  | Raw.List (Raw.Atom legacy :: _)
+  | Raw.List ((Raw.Atom (legacy, _) :: _), _)
     when List.mem
            [
              "if";
@@ -313,7 +319,7 @@ let rec eval_expr ctx env expr =
            ]
            legacy ~equal:String.equal ->
       failf "Legacy meta builtin '%s' is not allowed; use '$%s'" legacy legacy
-  | Raw.List (Raw.Atom "$m-put" :: sym_expr :: rest) ->
+  | Raw.List ((Raw.Atom ("$m-put", _) :: sym_expr :: rest), _) ->
       let sym_name = expect_atom (eval_expr ctx env sym_expr) in
       let rec pair_up = function
         | [] -> []
@@ -331,18 +337,18 @@ let rec eval_expr ctx env expr =
         List.fold pairs ~init:cur_meta ~f:(fun m (k, v) -> Map.set m ~key:k ~data:v)
       in
       ctx.sym_meta <- Map.set ctx.sym_meta ~key:sym_name ~data:new_meta;
-      Raw.Atom "nil"
-  | Raw.List (Raw.Atom "$m-put" :: _) ->
+      Raw.Atom ("nil", None)
+  | Raw.List ((Raw.Atom ("$m-put", _) :: _), _) ->
       fail "$m-put expects: ($m-put sym key1 val1 key2 val2 ...)"
-  | Raw.List (Raw.Atom "$m-get" :: [ sym_expr; key_expr ]) -> (
+  | Raw.List ((Raw.Atom ("$m-get", _) :: [ sym_expr; key_expr ]), _) -> (
       let sym_name = expect_atom (eval_expr ctx env sym_expr) in
       let key = expect_atom_or_string (eval_expr ctx env key_expr) in
       match Map.find ctx.sym_meta sym_name with
-      | None -> Raw.Atom "nil"
-      | Some m -> Option.value (Map.find m key) ~default:(Raw.Atom "nil"))
-  | Raw.List (Raw.Atom "$m-get" :: _) ->
+      | None -> Raw.Atom ("nil", None)
+      | Some m -> Option.value (Map.find m key) ~default:(Raw.Atom ("nil", None)))
+  | Raw.List ((Raw.Atom ("$m-get", _) :: _), _) ->
       fail "$m-get expects exactly two arguments: ($m-get sym key)"
-  | Raw.List (Raw.Atom fn_name :: args) when Map.mem ctx.ct_fns fn_name ->
+  | Raw.List ((Raw.Atom (fn_name, _) :: args), _) when Map.mem ctx.ct_fns fn_name ->
       let f = Map.find_exn ctx.ct_fns fn_name in
       let evaled_args = List.map args ~f:(eval_expr ctx env) in
       let fixed_len = List.length f.params in
@@ -360,62 +366,67 @@ let rec eval_expr ctx env expr =
             let fixed_args = List.take evaled_args fixed_len in
             let rest_args = List.drop evaled_args fixed_len in
             Map.set (with_bound String.Map.empty f.params fixed_args)
-              ~key:rest_name ~data:(Raw.List rest_args)
+              ~key:rest_name ~data:(Raw.List (rest_args, None))
       in
       eval_expr ctx call_env f.body
-  | Raw.List xs -> Raw.List (List.map xs ~f:(eval_expr ctx env))
+  | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:(eval_expr ctx env)), None)
 
 and eval_body_last ctx env = function
-  | [] -> Raw.Atom "nil"
+  | [] -> Raw.Atom ("nil", None)
   | [ x ] -> eval_expr ctx env x
   | x :: tl ->
       ignore (eval_expr ctx env x);
       eval_body_last ctx env tl
 
 and eval_cond ctx env = function
-  | [] -> Raw.Atom "nil"
-  | Raw.List (Raw.Atom "else" :: body) :: rest ->
+  | [] -> Raw.Atom ("nil", None)
+  | Raw.List ((Raw.Atom ("else", _) :: body), _) :: rest ->
       if not (List.is_empty rest) then fail "$cond: else must be the last clause";
       if List.is_empty body then fail "$cond: else clause must have a body";
       eval_body_last ctx env body
-  | Raw.List (test :: body) :: rest ->
+  | Raw.List ((test :: body), _) :: rest ->
       if List.is_empty body then fail "$cond: clause must have a body";
       if is_falsey (eval_expr ctx env test) then eval_cond ctx env rest
       else eval_body_last ctx env body
-  | Raw.List [] :: _ -> fail "$cond: clause must be (test body...) or (else body...)"
+  | Raw.List ([], _) :: _ -> fail "$cond: clause must be (test body...) or (else body...)"
   | _ -> fail "$cond: each clause must be a list"
 
 and eval_case ctx env scrutinee = function
-  | [] -> Raw.Atom "nil"
-  | Raw.List (Raw.Atom "else" :: body) :: rest ->
+  | [] -> Raw.Atom ("nil", None)
+  | Raw.List ((Raw.Atom ("else", _) :: body), _) :: rest ->
       if not (List.is_empty rest) then fail "$case: else must be the last clause";
       if List.is_empty body then fail "$case: else clause must have a body";
       eval_body_last ctx env body
-  | Raw.List (pattern :: body) :: rest ->
+  | Raw.List ((pattern :: body), _) :: rest ->
       if List.is_empty body then fail "$case: clause must have a body";
       let pv = eval_expr ctx env pattern in
       if raw_equal scrutinee pv then eval_body_last ctx env body
       else eval_case ctx env scrutinee rest
-  | Raw.List [] :: _ -> fail "$case: clause must be (pattern body...) or (else body...)"
+  | Raw.List ([], _) :: _ -> fail "$case: clause must be (pattern body...) or (else body...)"
   | _ -> fail "$case: each clause must be a list"
 
 and eval_quasiquote ctx env ~depth expr =
+  let sp = ctx.expand_site_span in
   match expr with
-  | Raw.List [ Raw.Atom "unquote"; x ] ->
+  | Raw.List ([ Raw.Atom ("unquote", _); x ], _) ->
       if depth = 1 then eval_expr ctx env x
-      else Raw.List [ Raw.Atom "unquote"; eval_quasiquote ctx env ~depth:(depth - 1) x ]
-  | Raw.List [ Raw.Atom "splice"; x ] ->
+      else Raw.List ([ Raw.Atom ("unquote", sp); eval_quasiquote ctx env ~depth:(depth - 1) x ], sp)
+  | Raw.List ([ Raw.Atom ("splice", _); x ], _) ->
       if depth = 1 then fail "splice is only valid inside list in quasiquote"
-      else Raw.List [ Raw.Atom "splice"; eval_quasiquote ctx env ~depth:(depth - 1) x ]
-  | Raw.List [ Raw.Atom "quasiquote"; x ] ->
-      Raw.List [ Raw.Atom "quasiquote"; eval_quasiquote ctx env ~depth:(depth + 1) x ]
-  | Raw.List xs -> Raw.List (eval_qq_list ctx env ~depth xs)
-  | Raw.Atom _ | Raw.Str _ -> expr
+      else Raw.List ([ Raw.Atom ("splice", sp); eval_quasiquote ctx env ~depth:(depth - 1) x ], sp)
+  | Raw.List ([ Raw.Atom ("quasiquote", _); x ], _) ->
+      Raw.List ([ Raw.Atom ("quasiquote", sp); eval_quasiquote ctx env ~depth:(depth + 1) x ], sp)
+  | Raw.List (xs, _) -> Raw.List ((eval_qq_list ctx env ~depth xs), sp)
+  | Raw.Atom _ | Raw.Str _ ->
+      (* Атомы/строки внутри quasiquote — это литералы из тела макроса
+         (stdlib). Привязываем их к call-site, чтобы ошибки указывали
+         на пользовательский код, а не на stdlib. *)
+      Raw.with_span sp expr
 
 and eval_qq_list ctx env ~depth xs =
   List.concat_map xs ~f:(fun item ->
       match item with
-      | Raw.List [ Raw.Atom "splice"; x ] when depth = 1 ->
+      | Raw.List ([ Raw.Atom ("splice", _); x ], _) when depth = 1 ->
           let v = eval_expr ctx env x in
           expect_list v
       | _ -> [ eval_quasiquote ctx env ~depth item ])
@@ -431,7 +442,7 @@ let parse_params params =
 
 let parse_macro_def raw =
   match raw with
-  | Raw.List (Raw.Atom "%defmacro" :: Raw.Atom name :: Raw.List params :: [ body ]) ->
+  | Raw.List ((Raw.Atom ("%defmacro", _) :: Raw.Atom (name, _) :: Raw.List (params, _) :: [ body ]), _) ->
       let params = List.map params ~f:expect_atom in
       let params, rest_param = parse_params params in
       { name; params; rest_param; body }
@@ -439,21 +450,21 @@ let parse_macro_def raw =
 
 let parse_ct_fn_def raw =
   match raw with
-  | Raw.List (Raw.Atom "$defun" :: Raw.Atom name :: Raw.List params :: body) ->
+  | Raw.List ((Raw.Atom ("$defun", _) :: Raw.Atom (name, _) :: Raw.List (params, _) :: body), _) ->
       let params = List.map params ~f:expect_atom in
       let params, rest_param = parse_params params in
       let body =
         match body with
         | [ single ] -> single
-        | _ -> Raw.List (Raw.Atom "$do" :: body)
+        | _ -> Raw.List ((Raw.Atom ("$do", None) :: body), None)
       in
       { name; params; rest_param; body }
   | _ -> fail "Invalid $defun form; expected ($defun name (params...) body...)"
 
 let rec raw_to_sexp = function
-  | Raw.Atom s -> s
-  | Raw.Str s -> "\"" ^ s ^ "\""
-  | Raw.List xs ->
+  | Raw.Atom (s, _) -> s
+  | Raw.Str (s, _) -> "\"" ^ s ^ "\""
+  | Raw.List (xs, _) ->
       "(" ^ String.concat ~sep:" " (List.map xs ~f:raw_to_sexp) ^ ")"
 
 let escape_for_c_comment s =
@@ -502,9 +513,9 @@ let json_escape s =
   Buffer.contents buf
 
 let rec raw_to_json = function
-  | Raw.Atom s -> Printf.sprintf "\"%s\"" (json_escape s)
-  | Raw.Str s -> Printf.sprintf "{\"str\":\"%s\"}" (json_escape s)
-  | Raw.List xs ->
+  | Raw.Atom (s, _) -> Printf.sprintf "\"%s\"" (json_escape s)
+  | Raw.Str (s, _) -> Printf.sprintf "{\"str\":\"%s\"}" (json_escape s)
+  | Raw.List (xs, _) ->
       "[" ^ String.concat ~sep:"," (List.map xs ~f:raw_to_json) ^ "]"
 
 let format_meta_json sym_meta =
@@ -524,15 +535,15 @@ let format_meta_json sym_meta =
 let collect forms =
   let rec loop defs ct_fns normal = function
     | [] ->
-        ( { defs; ct_fns; max_depth = 200; gensym_counter = 0; sym_meta = String.Map.empty },
+        ( { defs; ct_fns; max_depth = 200; gensym_counter = 0; sym_meta = String.Map.empty; expand_site_span = None },
           List.rev normal )
     | raw :: tl -> (
         match raw with
-        | Raw.List (Raw.Atom "%defmacro" :: _) ->
+        | Raw.List ((Raw.Atom ("%defmacro", _) :: _), _) ->
             let m = parse_macro_def raw in
             if Map.mem defs m.name then failf "Duplicate %%defmacro: %s" m.name;
             loop (Map.set defs ~key:m.name ~data:m) ct_fns normal tl
-        | Raw.List (Raw.Atom "$defun" :: _) ->
+        | Raw.List ((Raw.Atom ("$defun", _) :: _), _) ->
             let f = parse_ct_fn_def raw in
             if Map.mem ct_fns f.name then failf "Duplicate $defun: %s" f.name;
             loop defs (Map.set ct_fns ~key:f.name ~data:f) normal tl
@@ -540,37 +551,43 @@ let collect forms =
   in
   loop String.Map.empty String.Map.empty [] forms
 
-let apply ctx depth m args =
+let apply ctx depth m ~call_span args =
   Common.with_macro_context m.name (fun () ->
+    let prev_site = ctx.expand_site_span in
+    ctx.expand_site_span <- (match call_span with Some _ -> call_span | None -> prev_site);
     let fixed_len = List.length m.params in
     let env =
       match m.rest_param with
       | None ->
           if List.length args <> fixed_len then
-            failf "Macro %s expects %d arguments, got %d" m.name fixed_len (List.length args);
+            Common.failf_at ~phase:"macro" ctx.expand_site_span
+              "Macro %s expects %d arguments, got %d" m.name fixed_len (List.length args);
           with_bound String.Map.empty m.params args
       | Some rest_name ->
           if List.length args < fixed_len then
-            failf "Macro %s expects at least %d arguments, got %d" m.name fixed_len (List.length args);
+            Common.failf_at ~phase:"macro" ctx.expand_site_span
+              "Macro %s expects at least %d arguments, got %d" m.name fixed_len (List.length args);
           let fixed_args = List.take args fixed_len in
           let rest_args = List.drop args fixed_len in
-          Map.set (with_bound String.Map.empty m.params fixed_args) ~key:rest_name ~data:(Raw.List rest_args)
+          Map.set (with_bound String.Map.empty m.params fixed_args) ~key:rest_name ~data:(Raw.List (rest_args, ctx.expand_site_span))
     in
     let expanded = eval_expr ctx env m.body in
     if depth > ctx.max_depth then
-      failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
+      Common.failf_at ~phase:"macro" ctx.expand_site_span
+        "Macro expansion exceeded max depth (%d)" ctx.max_depth;
+    ctx.expand_site_span <- prev_site;
     expanded)
 
 let rec expand_eval_form_for_arg ctx ~depth = function
-  | Raw.List (Raw.Atom "%eval" :: [ expr ]) ->
+  | Raw.List ((Raw.Atom ("%eval", _) :: [ expr ]), _) ->
       let out = eval_expr ctx String.Map.empty expr in
       [ expand_one ctx ~depth:(depth + 1) out ]
-  | Raw.List (Raw.Atom "%eval" :: _) -> fail "%eval expects exactly one argument"
-  | Raw.List (Raw.Atom "%evals" :: [ expr ]) ->
+  | Raw.List ((Raw.Atom ("%eval", _) :: _), _) -> fail "%eval expects exactly one argument"
+  | Raw.List ((Raw.Atom ("%evals", _) :: [ expr ]), _) ->
       let out = eval_expr ctx String.Map.empty expr in
       let items = expect_list out in
       List.map items ~f:(fun item -> expand_one ctx ~depth:(depth + 1) item)
-  | Raw.List (Raw.Atom "%evals" :: _) -> fail "%evals expects exactly one argument"
+  | Raw.List ((Raw.Atom ("%evals", _) :: _), _) -> fail "%evals expects exactly one argument"
   | other -> [ other ]
 
 and expand_eval_args_for_macro ctx ~depth xs =
@@ -579,35 +596,38 @@ and expand_eval_args_for_macro ctx ~depth xs =
 and expand_one ctx ~depth raw =
   if depth > ctx.max_depth then failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
   match raw with
-  | Raw.Atom _ | Raw.Str _ -> raw
-  | Raw.List [] -> raw
-  | Raw.List (Raw.Atom "quote" :: _) -> raw
-  | Raw.List (Raw.Atom "quasiquote" :: _) -> raw
-  | Raw.List (Raw.Atom "%eval" :: [ expr ]) ->
+  | Raw.Atom (_, _) | Raw.Str (_, _) -> raw
+  | Raw.List ([], _) -> raw
+  | Raw.List ((Raw.Atom ("quote", _) :: _), _) -> raw
+  | Raw.List ((Raw.Atom ("quasiquote", _) :: _), _) -> raw
+  | Raw.List ((Raw.Atom ("%eval", _) :: [ expr ]), _) ->
       let out = eval_expr ctx String.Map.empty expr in
       expand_one ctx ~depth:(depth + 1) out
-  | Raw.List (Raw.Atom "%eval" :: _) ->
+  | Raw.List ((Raw.Atom ("%eval", _) :: _), _) ->
       fail "%eval expects exactly one argument"
-  | Raw.List (Raw.Atom "%evals" :: [ expr ]) ->
+  | Raw.List ((Raw.Atom ("%evals", _) :: [ expr ]), _) ->
       let out = eval_expr ctx String.Map.empty expr in
       let items = expect_list out in
       let items = List.map items ~f:(fun item -> expand_one ctx ~depth:(depth + 1) item) in
-      Raw.List [ Raw.Atom evals_splice_tag; Raw.List items ]
-  | Raw.List (Raw.Atom "%evals" :: _) ->
+      Raw.List ([ Raw.Atom (evals_splice_tag, None); Raw.List (items, None) ], None)
+  | Raw.List ((Raw.Atom ("%evals", _) :: _), _) ->
       fail "%evals expects exactly one argument"
-  | Raw.List [ Raw.Atom "%m-dump" ] ->
+  | Raw.List ([ Raw.Atom ("%m-dump", _) ], _) ->
       Raw.List
-        [ Raw.Atom "%comment"; Raw.Str (format_meta_dump ctx.sym_meta) ]
-  | Raw.List (Raw.Atom "%m-dump" :: _) ->
+        ([ Raw.Atom ("%comment", None); Raw.Str ((format_meta_dump ctx.sym_meta), None) ], None)
+  | Raw.List ((Raw.Atom ("%m-dump", _) :: _), _) ->
       fail "%m-dump takes no arguments"
-  | Raw.List (Raw.Atom head :: args) -> (
+  | Raw.List ((Raw.Atom (head, head_sp) :: args), list_sp) -> (
       match Map.find ctx.defs head with
       | Some m ->
           let args = expand_eval_args_for_macro ctx ~depth args in
-          let out = apply ctx (depth + 1) m args in
+          (* call-site span: предпочитаем span самого списка-вызова (он покрывает
+             всю форму (macro arg1 arg2 ...)), иначе span head-атома. *)
+          let call_span = match list_sp with Some _ -> list_sp | None -> head_sp in
+          let out = apply ctx (depth + 1) m ~call_span args in
           expand_one ctx ~depth:(depth + 1) out
-      | None -> Raw.List (Raw.Atom head :: expand_list_items ctx ~depth args))
-  | Raw.List xs -> Raw.List (expand_list_items ctx ~depth xs)
+      | None -> Raw.List ((Raw.Atom (head, head_sp) :: expand_list_items ctx ~depth args), list_sp))
+  | Raw.List (xs, _) -> Raw.List ((expand_list_items ctx ~depth xs), None)
 
 and expand_list_items ctx ~depth xs =
   List.concat_map xs ~f:(fun x ->

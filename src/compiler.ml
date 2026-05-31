@@ -32,12 +32,10 @@ let with_form (t : top_form) (form : Raw.t) : top_form = { t with form }
 
 let attach_span (sp : Common.span option) (form : Raw.t) : top_form = { form; span = sp }
 
-(* Конвертирует Reader.located-список в top_form-список, прикрепляя span. *)
-let top_forms_of_located ~file ~source (locs : Reader.located list) : top_form list =
-  List.map locs ~f:(fun l ->
-    let off = Reader.loc_of l in
-    let span : Common.span = { file; source; start_off = off; end_off = off } in
-    { form = Reader.to_raw l; span = Some span })
+(* Конвертирует span-aware Raw.t-список (от Reader.parse_many) в top_form-список.
+   Span каждой top-формы берётся прямо из узла. *)
+let top_forms_of_raws (forms : Raw.t list) : top_form list =
+  List.map forms ~f:(fun form -> { form; span = Raw.span_of form })
 
 let default_stdlib_dir = "/usr/local/include/sexc/std"
 
@@ -87,19 +85,19 @@ let resolve_import ~from_file rel =
      (%import "./path" :as alias)
 *)
 let extract_import = function
-  | Raw.List [ Raw.Atom "%import"; Raw.Str p ] -> Some (p, None)
-  | Raw.List [ Raw.Atom "%import"; Raw.Atom p ] -> Some (p, None)
-  | Raw.List [ Raw.Atom "%import"; Raw.Str p; Raw.Atom ":as"; Raw.Atom a ] -> Some (p, Some a)
-  | Raw.List [ Raw.Atom "%import"; Raw.Atom p; Raw.Atom ":as"; Raw.Atom a ] -> Some (p, Some a)
-  | Raw.List (Raw.Atom "%import" :: _) -> fail "Invalid %import form; expected (%import \"path\" [:as alias])"
+  | Raw.List ([ Raw.Atom ("%import", _); Raw.Str (p, _) ], _) -> Some (p, None)
+  | Raw.List ([ Raw.Atom ("%import", _); Raw.Atom (p, _) ], _) -> Some (p, None)
+  | Raw.List ([ Raw.Atom ("%import", _); Raw.Str (p, _); Raw.Atom (":as", _); Raw.Atom (a, _) ], _) -> Some (p, Some a)
+  | Raw.List ([ Raw.Atom ("%import", _); Raw.Atom (p, _); Raw.Atom (":as", _); Raw.Atom (a, _) ], _) -> Some (p, Some a)
+  | Raw.List ((Raw.Atom ("%import", _) :: _), _) -> fail "Invalid %import form; expected (%import \"path\" [:as alias])"
   | _ -> None
 
 let extract_import_target form =
   Option.map (extract_import form) ~f:fst
 
 let extract_module_name = function
-  | Raw.List [ Raw.Atom "%module"; Raw.Atom name ] -> Some name
-  | Raw.List (Raw.Atom "%module" :: _) -> fail "%module expects exactly one atom argument"
+  | Raw.List ([ Raw.Atom ("%module", _); Raw.Atom (name, _) ], _) -> Some name
+  | Raw.List ((Raw.Atom ("%module", _) :: _), _) -> fail "%module expects exactly one atom argument"
   | _ -> None
 
 let strip_module_decl forms =
@@ -152,89 +150,89 @@ let rewrite_atom name_map atom =
 
 let rec rewrite_type_like name_map raw =
   match raw with
-  | Raw.Atom a -> Raw.Atom (rewrite_atom name_map a)
-  | Raw.Str _ -> raw
-  | Raw.List xs -> Raw.List (List.map xs ~f:(rewrite_type_like name_map))
+  | Raw.Atom (a, _) -> Raw.Atom ((rewrite_atom name_map a), None)
+  | Raw.Str (_, _) -> raw
+  | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:(rewrite_type_like name_map)), None)
 
 let rewrite_params name_map = function
-  | Raw.List groups ->
+  | Raw.List (groups, _) ->
       let rewrite_group = function
-        | Raw.List [] -> Raw.List []
-        | Raw.List (ty :: names) -> Raw.List (rewrite_type_like name_map ty :: names)
+        | Raw.List ([], _) -> Raw.List ([], None)
+        | Raw.List ((ty :: names), _) -> Raw.List ((rewrite_type_like name_map ty :: names), None)
         | other -> other
       in
-      Raw.List (List.map groups ~f:rewrite_group)
+      Raw.List ((List.map groups ~f:rewrite_group), None)
   | other -> other
 
 let rewrite_fields name_map fields =
   let rewrite_field = function
-    | Raw.List [ ty; Raw.Atom name ] -> Raw.List [ rewrite_type_like name_map ty; Raw.Atom name ]
+    | Raw.List ([ ty; Raw.Atom (name, _) ], _) -> Raw.List ([ rewrite_type_like name_map ty; Raw.Atom (name, None) ], None)
     | other -> rewrite_type_like name_map other
   in
   List.map fields ~f:rewrite_field
 
 let rewrite_form name_map =
   let rec rw = function
-    | Raw.Atom a -> Raw.Atom (rewrite_atom name_map a)
-    | Raw.Str _ as s -> s
-    | Raw.List (Raw.Atom "quote" :: _) as q -> q
-    | Raw.List (Raw.Atom "quasiquote" :: _) as q -> q
-    | Raw.List (Raw.Atom "%import" :: _ as xs) -> Raw.List xs
-    | Raw.List (Raw.Atom "%module" :: _ as xs) -> Raw.List xs
-    | Raw.List (Raw.Atom "%doc" :: Raw.Atom name :: props) ->
-        Raw.List (Raw.Atom "%doc" :: Raw.Atom (rewrite_atom name_map name) :: List.map props ~f:rw)
-    | Raw.List (Raw.Atom "defn" :: ret :: Raw.Atom name :: params :: body) ->
+    | Raw.Atom (a, _) -> Raw.Atom ((rewrite_atom name_map a), None)
+    | Raw.Str (_, _) as s -> s
+    | Raw.List ((Raw.Atom ("quote", _) :: _), _) as q -> q
+    | Raw.List ((Raw.Atom ("quasiquote", _) :: _), _) as q -> q
+    | Raw.List ((Raw.Atom ("%import", _) :: _ as xs), _) -> Raw.List (xs, None)
+    | Raw.List ((Raw.Atom ("%module", _) :: _ as xs), _) -> Raw.List (xs, None)
+    | Raw.List ((Raw.Atom ("%doc", _) :: Raw.Atom (name, _) :: props), _) ->
+        Raw.List ((Raw.Atom ("%doc", None) :: Raw.Atom ((rewrite_atom name_map name), None) :: List.map props ~f:rw), None)
+    | Raw.List ((Raw.Atom ("defn", _) :: ret :: Raw.Atom (name, _) :: params :: body), _) ->
         Raw.List
-          (Raw.Atom "defn" :: rewrite_type_like name_map ret
-          :: Raw.Atom (rewrite_atom name_map name)
+          ((Raw.Atom ("defn", None) :: rewrite_type_like name_map ret
+          :: Raw.Atom ((rewrite_atom name_map name), None)
           :: rewrite_params name_map params
-          :: List.map body ~f:rw)
-    | Raw.List (Raw.Atom "%def-fn" :: ret :: Raw.Atom name :: params :: body :: []) ->
+          :: List.map body ~f:rw), None)
+    | Raw.List ((Raw.Atom ("%def-fn", _) :: ret :: Raw.Atom (name, _) :: params :: body :: []), _) ->
         Raw.List
-          [ Raw.Atom "%def-fn";
+          ([ Raw.Atom ("%def-fn", None);
             rewrite_type_like name_map ret;
-            Raw.Atom (rewrite_atom name_map name);
+            Raw.Atom ((rewrite_atom name_map name), None);
             rewrite_params name_map params;
             rw body;
-          ]
-    | Raw.List (Raw.Atom "%decl-fn" :: ret :: Raw.Atom name :: params :: []) ->
+          ], None)
+    | Raw.List ((Raw.Atom ("%decl-fn", _) :: ret :: Raw.Atom (name, _) :: params :: []), _) ->
         Raw.List
-          [ Raw.Atom "%decl-fn";
+          ([ Raw.Atom ("%decl-fn", None);
             rewrite_type_like name_map ret;
-            Raw.Atom (rewrite_atom name_map name);
+            Raw.Atom ((rewrite_atom name_map name), None);
             rewrite_params name_map params;
-          ]
-    | Raw.List (Raw.Atom "define" :: Raw.Atom name :: value :: []) ->
-        Raw.List [ Raw.Atom "define"; Raw.Atom (rewrite_atom name_map name); rw value ]
-    | Raw.List (Raw.Atom "%define" :: Raw.Atom name :: value :: []) ->
-        Raw.List [ Raw.Atom "%define"; Raw.Atom (rewrite_atom name_map name); rw value ]
-    | Raw.List (Raw.Atom "struct" :: Raw.Atom name :: items) ->
+          ], None)
+    | Raw.List ((Raw.Atom ("define", _) :: Raw.Atom (name, _) :: value :: []), _) ->
+        Raw.List ([ Raw.Atom ("define", None); Raw.Atom ((rewrite_atom name_map name), None); rw value ], None)
+    | Raw.List ((Raw.Atom ("%define", _) :: Raw.Atom (name, _) :: value :: []), _) ->
+        Raw.List ([ Raw.Atom ("%define", None); Raw.Atom ((rewrite_atom name_map name), None); rw value ], None)
+    | Raw.List ((Raw.Atom ("struct", _) :: Raw.Atom (name, _) :: items), _) ->
         let rec rewrite_struct_items phase acc = function
           | [] -> List.rev acc
-          | Raw.Atom ":fields" :: tl -> rewrite_struct_items `Fields (Raw.Atom ":fields" :: acc) tl
-          | Raw.Atom ":methods" :: tl -> rewrite_struct_items `Methods (Raw.Atom ":methods" :: acc) tl
+          | Raw.Atom (":fields", _) :: tl -> rewrite_struct_items `Fields (Raw.Atom (":fields", None) :: acc) tl
+          | Raw.Atom (":methods", _) :: tl -> rewrite_struct_items `Methods (Raw.Atom (":methods", None) :: acc) tl
           | item :: tl ->
               let item =
                 match phase with
                 | `Fields -> (
                     match item with
-                    | Raw.List [ ty; Raw.Atom field ] -> Raw.List [ rewrite_type_like name_map ty; Raw.Atom field ]
+                    | Raw.List ([ ty; Raw.Atom (field, _) ], _) -> Raw.List ([ rewrite_type_like name_map ty; Raw.Atom (field, None) ], None)
                     | _ -> rw item)
                 | `Methods -> rw item
                 | `Unknown -> rw item
               in
               rewrite_struct_items phase (item :: acc) tl
         in
-        Raw.List (Raw.Atom "struct" :: Raw.Atom (rewrite_atom name_map name) :: rewrite_struct_items `Unknown [] items)
-    | Raw.List (Raw.Atom "union" :: Raw.Atom name :: fields) ->
-        Raw.List (Raw.Atom "union" :: Raw.Atom (rewrite_atom name_map name) :: rewrite_fields name_map fields)
-    | Raw.List (Raw.Atom "%typedef" :: ty :: Raw.Atom name :: []) ->
-        Raw.List [ Raw.Atom "%typedef"; rewrite_type_like name_map ty; Raw.Atom (rewrite_atom name_map name) ]
-    | Raw.List (Raw.Atom ("arrow" | "->" | "dot" | "." | "%arrow" | "%dot" as head) :: first :: fields) ->
+        Raw.List ((Raw.Atom ("struct", None) :: Raw.Atom ((rewrite_atom name_map name), None) :: rewrite_struct_items `Unknown [] items), None)
+    | Raw.List ((Raw.Atom ("union", _) :: Raw.Atom (name, _) :: fields), _) ->
+        Raw.List ((Raw.Atom ("union", None) :: Raw.Atom ((rewrite_atom name_map name), None) :: rewrite_fields name_map fields), None)
+    | Raw.List ((Raw.Atom ("%typedef", _) :: ty :: Raw.Atom (name, _) :: []), _) ->
+        Raw.List ([ Raw.Atom ("%typedef", None); rewrite_type_like name_map ty; Raw.Atom ((rewrite_atom name_map name), None) ], None)
+    | Raw.List ((Raw.Atom (("arrow" | "->" | "dot" | "." | "%arrow" | "%dot" as head), _) :: first :: fields), _) ->
         (* Field-access форма: рерайтим только первый аргумент (объект/указатель);
            остальные позиции — это имена полей, их трогать нельзя. *)
-        Raw.List (Raw.Atom head :: rw first :: fields)
-    | Raw.List xs -> Raw.List (List.map xs ~f:rw)
+        Raw.List ((Raw.Atom (head, None) :: rw first :: fields), None)
+    | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:rw), None)
   in
   rw
 
@@ -243,19 +241,19 @@ let collect_module_defined_names forms =
     if String.is_substring name ~substring:"/" then set else Set.add set name
   in
   let from_typedef_type = function
-    | Raw.List (Raw.Atom "%enum" :: Raw.Atom enum_name :: []) -> Some enum_name
+    | Raw.List ((Raw.Atom ("%enum", _) :: Raw.Atom (enum_name, _) :: []), _) -> Some enum_name
     | _ -> None
   in
   List.fold forms ~init:String.Set.empty ~f:(fun acc form ->
       match form with
-      | Raw.List (Raw.Atom "defn" :: _ :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "%def-fn" :: _ :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "%decl-fn" :: _ :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "define" :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "%define" :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "struct" :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "union" :: Raw.Atom name :: _) -> add_name acc name
-      | Raw.List (Raw.Atom "%typedef" :: ty :: Raw.Atom name :: []) ->
+      | Raw.List ((Raw.Atom ("defn", _) :: _ :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("%def-fn", _) :: _ :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("%decl-fn", _) :: _ :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("define", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("%define", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("struct", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("union", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("%typedef", _) :: ty :: Raw.Atom (name, _) :: []), _) ->
           let acc = add_name acc name in
           Option.value_map (from_typedef_type ty) ~default:acc ~f:(fun n -> add_name acc n)
       | _ -> acc)
@@ -292,9 +290,9 @@ let rewrite_alias_atom aliases a =
   | None -> a
 
 let rec rewrite_alias_form aliases = function
-  | Raw.Atom a -> Raw.Atom (rewrite_alias_atom aliases a)
-  | Raw.Str _ as s -> s
-  | Raw.List xs -> Raw.List (List.map xs ~f:(rewrite_alias_form aliases))
+  | Raw.Atom (a, _) -> Raw.Atom ((rewrite_alias_atom aliases a), None)
+  | Raw.Str (_, _) as s -> s
+  | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:(rewrite_alias_form aliases)), None)
 
 let rewrite_alias_top aliases (tops : top_form list) : top_form list =
   List.map tops ~f:(fun t -> with_form t (rewrite_alias_form aliases t.form))
@@ -305,7 +303,7 @@ let rewrite_alias_top aliases (tops : top_form list) : top_form list =
 let flatten_top_splice (tops : top_form list) : top_form list =
   let rec flat (raw : Raw.t) : Raw.t list =
     match raw with
-    | Raw.List (Raw.Atom "%top-level-splice" :: inner) ->
+    | Raw.List ((Raw.Atom ("%top-level-splice", _) :: inner), _) ->
         List.concat_map inner ~f:flat
     | other -> [ other ]
   in
@@ -328,8 +326,8 @@ let rec load_forms_from_file ~visited ~module_names ~use_prelude path
     let visited = Set.add visited abs in
     let t = now_ns () in
     let source = In_channel.read_all abs in
-    let located = Reader.parse_many_loc ~file:abs source in
-    let tops = top_forms_of_located ~file:abs ~source located in
+    let forms = Reader.parse_many ~file:abs source in
+    let tops = top_forms_of_raws forms in
     logf "load %s (%d forms) — %s" abs (List.length tops) (since t);
     let module_name, tops = strip_module_decl_top tops in
     let module_names = Map.set module_names ~key:abs ~data:module_name in
@@ -434,12 +432,12 @@ let load_prelude_forms () : top_form list =
   tops
 
 let is_macro_decl = function
-  | Raw.List (Raw.Atom "%defmacro" :: _) -> true
-  | Raw.List (Raw.Atom "$defun" :: _) -> true
+  | Raw.List ((Raw.Atom ("%defmacro", _) :: _), _) -> true
+  | Raw.List ((Raw.Atom ("$defun", _) :: _), _) -> true
   | _ -> false
 
 let is_doc_decl = function
-  | Raw.List (Raw.Atom "%doc" :: _) -> true
+  | Raw.List ((Raw.Atom ("%doc", _) :: _), _) -> true
   | _ -> false
 
 let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
@@ -475,7 +473,7 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
       let flattened_raws =
         List.concat_map expanded ~f:(fun raw ->
           let rec flat = function
-            | Raw.List (Raw.Atom "%top-level-splice" :: inner) ->
+            | Raw.List ((Raw.Atom ("%top-level-splice", _) :: inner), _) ->
                 List.concat_map inner ~f:flat
             | other -> [ other ]
           in
@@ -499,9 +497,8 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   c
 
 let compile_source ?(use_prelude = true) source =
-  let file = "<stdin>" in
-  let located = Reader.parse_many_loc ~file source in
-  let tops = top_forms_of_located ~file ~source located in
+  let forms = Reader.parse_many ~file:"<stdin>" source in
+  let tops = top_forms_of_raws forms in
   compile_forms ~use_prelude tops
 
 let compile_file ?(use_prelude = true) path =

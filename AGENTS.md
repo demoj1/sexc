@@ -126,13 +126,28 @@
 | `Sexc_diagnostic` | Любая компиляционная ошибка с известным `file:line:col`. Бросается из Reader напрямую (`fail_diag`) либо "promoted" из bare `Sexc_error` через `Common.promote_error_to_diagnostic`. | `file:line:col: error[phase]: msg` + строка-источник + caret `^` + опц. hint-блок (см. ниже). |
 | `Sexc_error` (legacy) | Bare `fail`/`failf` без локации. Сохранён для глубоких фаз, которые ещё не привязаны к span. | Печатается одной строкой `error: msg` + опц. hint. **Без** usage'а. |
 
-### Источник позиций
+### Источник позиций (deep spans)
 
-- `src/reader.ml:parse_many_loc` парсит файл и возвращает `Reader.located list` с byte-offset'ами для каждой top-level формы.
-- `src/compiler.ml` оборачивает каждую такую форму в `{ form : Raw.t; span : span option }` (`type top_form`). Тип протаскивается через все bulk-фазы (`strip_module_decl_top`, `apply_module_namespace_top`, `rewrite_alias_top`, `flatten_top_splice`) — span у каждой top-формы сохраняется.
-- Перед per-form emission (`emit_one`) span ставится в глобальный `Common.current_top_span` через `with_top_span`. Любая bare `Sexc_error` из глубинных фаз (macro/frontend/codegen) ловится `promote_error_to_diagnostic` и пересоздаётся как `Sexc_diagnostic` с этим span'ом.
+`Raw.t` сам несёт `Common.span option` на КАЖДОМ узле:
+```ocaml
+type t =
+  | Atom of string * Common.span option
+  | Str of string * Common.span option
+  | List of t list * Common.span option
+```
 
-Гранулярность — top-level форма. Если нужно тыкать точно в подвыражение, придётся декорировать `Raw.t` span'ами вглубь (большой рефактор; отложено).
+Каждый pattern-match теперь — `Raw.X (arg, _)`; каждый конструктор — `Raw.X (arg, None)` (или `Raw.X (arg, Some sp)` если span известен). Smart-constructors `Raw.atom`/`Raw.str`/`Raw.list_` (с опциональным `?span`) и accessor `Raw.span_of` есть в `src/raw.ml`.
+
+Откуда берётся span:
+- **`src/reader.ml:parse_many`** — каждый узел пишется с реальным span (`file`/`source`/`start_off`/`end_off`) из cursor state.
+- **Macro синтез** (quasiquote, splice, unquote, литералы внутри тела макроса) — наследует **call-site** span текущего раскрываемого макроса через `Macro.ctx.expand_site_span`. `Macro.apply` устанавливает поле перед `eval_expr m.body`, `eval_quasiquote` читает и проставляет span на синтезированные узлы. Это значит, что ошибки **внутри stdlib-макроса** указывают на пользовательский call-site, а не на `std/c-interop.sexc`.
+- **Top-level fallback** — `Common.current_top_span` остаётся: если deep span не доступен (bare `fail`/`failf` в каком-нибудь helper), `promote_error_to_diagnostic` поднимает ошибку до top-form.
+
+Бросать ошибку с конкретным span:
+- `Common.fail_at ~phase span msg` / `Common.failf_at ~phase span fmt` — если span = Some, бросает `Sexc_diagnostic`; если None, fall back на `Sexc_error` (который потом promoted до top-form).
+- Macro.apply уже использует `failf_at` для arity-ошибок (`Macro X expects N arguments`).
+
+`raw_equal` в `src/macro.ml` пишется span-агностично — pattern-match `Raw.Atom (x, _), Raw.Atom (y, _) -> ...`. Это критично для `$eq?` и `$case`.
 
 ### Контекст активной surface-формы (hint с docs)
 
@@ -144,26 +159,41 @@
 
 ```
 $ echo '(defn int main () (when))' | sexc -
-<stdin>:1:1: error[compile]: Macro when expects at least 1 arguments, got 0
+<stdin>:1:19: error[macro]: Macro when expects at least 1 arguments, got 0
 (defn int main () (when))
-^
+                  ^
 
-hint: документация для `when`:
-Name: when
-Kind: macro
 Signature: (when cond &rest body)
-Source: <root>/std/c-interop.sexc:164:1
-Doc:
-- Execute BODY when COND is truthy.
-Examples:
-- `(when (> x 0) (set y x))`
+Doc: Execute BODY when COND is truthy.
+Example: (when (> x 0) (set y x))
+```
+
+Caret указывает точно на `(when)` (col 19), а не на начало `(defn ...)`.
+
+Глубокая вложенность тоже работает:
+```
+$ cat /tmp/deep.sexc
+(defn int main ()
+  (decl (int sum) 0)
+  (dotimes i 10
+    (when (> i 5)
+      (incf-by)))
+  (return sum))
+$ sexc /tmp/deep.sexc
+/tmp/deep.sexc:5:7: error[macro]: Macro incf-by expects 2 arguments, got 0
+      (incf-by)))
+      ^
+
+Signature: (incf-by x n)
+Doc: Increment X by N.
+Example: (incf-by total 4)
 ```
 
 ### Что NOT делать
 
-- **Не** трогать `Raw.t` (decorating spans на каждый sub-form) — это большой refactor; отложено.
-- **Не** конвертировать все 100+ `fail`/`failf` в `fail_diag` поштучно — `promote_error_to_diagnostic` даёт span "из контекста" автоматически.
+- **Не** конвертировать ВСЕ ~100+ `fail`/`failf` в `fail_at` поштучно. Для типичных сайтов внутри helper'ов (`expect_atom`, `expect_list`) — оставлять bare `fail`; `promote_error_to_diagnostic` поднимет до доступного span'а (top-form или expand_site_span). Точечно `fail_at` ставить там, где конкретная форма очевидна (arity check в `Macro.apply`).
 - **Не** дёргать usage() из не-CLI ошибок — usage остаётся только в ветке `Sexc_cli_error`.
+- **Не** ломать span-агностичность `raw_equal` — `$eq?`/`$case` сравнивают по узлам, без оглядки на позиции.
 
 ## Макросы std/core.sexc (актуальные правила)
 

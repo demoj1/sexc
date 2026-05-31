@@ -1,0 +1,14 @@
+(defn int main ()
+  (decl (int sum) 0)
+  (dotimes i 10
+    (when (> i 5)
+      (incf-by)))
+  (return sum))
+;==EXPECTED-ERROR==
+<stdin>:5:7: error[macro]: Macro incf-by expects 2 arguments, got 0
+      (incf-by)))
+      ^
+
+Signature: (incf-by x n)
+Doc: Increment X by N.
+Example: (incf-by total 4)

@@ -135,6 +135,16 @@ let render_diagnostic d =
 let fail_diag ~phase ~file ~source ~start_off ?(end_off = start_off) message =
   raise (Sexc_diagnostic { phase; message; span = { file; source; start_off; end_off } })
 
+(* Бросает Sexc_diagnostic с готовым span'ом. Если span = None — fall back на
+   обычный Sexc_error, который потом будет promoted до top-form контекста. *)
+let fail_at ~phase (span : span option) (message : string) =
+  match span with
+  | Some sp -> raise (Sexc_diagnostic { phase; message; span = sp })
+  | None -> raise (Sexc_error message)
+
+let failf_at ~phase span fmt =
+  Printf.ksprintf (fun s -> fail_at ~phase span s) fmt
+
 (* Span текущей top-level формы. Устанавливается компилятором перед per-form
    обработкой (macro expand → frontend → codegen) и используется, чтобы
    "promote" любую bare Sexc_error из глубоких фаз в Sexc_diagnostic с

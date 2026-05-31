@@ -61,26 +61,26 @@ let kind_to_string = function
   | Meta -> "meta"
 
 let is_doc_form = function
-  | Raw.List (Raw.Atom "%doc" :: _) -> true
+  | Raw.List ((Raw.Atom ("%doc", _) :: _), _) -> true
   | _ -> false
 
 let is_keyword_atom = function
-  | Raw.Atom a -> String.is_prefix a ~prefix:":"
+  | Raw.Atom (a, _) -> String.is_prefix a ~prefix:":"
   | _ -> false
 
 let rec render_raw = function
-  | Raw.Atom a -> a
-  | Raw.Str s -> "\"" ^ String.escaped s ^ "\""
-  | Raw.List xs -> "(" ^ String.concat ~sep:" " (List.map xs ~f:render_raw) ^ ")"
+  | Raw.Atom (a, _) -> a
+  | Raw.Str (s, _) -> "\"" ^ String.escaped s ^ "\""
+  | Raw.List (xs, _) -> "(" ^ String.concat ~sep:" " (List.map xs ~f:render_raw) ^ ")"
 
 let render_value = function
-  | Raw.Atom a -> a
-  | Raw.Str s -> s
+  | Raw.Atom (a, _) -> a
+  | Raw.Str (s, _) -> s
   | other -> render_raw other
 
 let parse_bool name key = function
-  | Raw.Atom "t" | Raw.Atom "true" | Raw.Atom "1" -> true
-  | Raw.Atom "nil" | Raw.Atom "false" | Raw.Atom "0" -> false
+  | Raw.Atom ("t", _) | Raw.Atom ("true", _) | Raw.Atom ("1", _) -> true
+  | Raw.Atom ("nil", _) | Raw.Atom ("false", _) | Raw.Atom ("0", _) -> false
   | _ -> failf "%%doc key %s for %s expects boolean atom (t/nil)" key name
 
 let parse_doc_props name props =
@@ -100,30 +100,30 @@ let parse_doc_props name props =
           p_deprecated = deprecated;
           p_see = List.rev see;
         }
-    | Raw.Atom ":sig" :: value :: tl ->
+    | Raw.Atom (":sig", _) :: value :: tl ->
         loop (Some (render_raw value)) docs examples internal since deprecated see tl
-    | Raw.Atom ":doc" :: value :: tl ->
+    | Raw.Atom (":doc", _) :: value :: tl ->
         loop sig_opt (render_value value :: docs) examples internal since deprecated see tl
-    | Raw.Atom ":example" :: value :: tl ->
+    | Raw.Atom (":example", _) :: value :: tl ->
         loop sig_opt docs (render_value value :: examples) internal since deprecated see tl
-    | Raw.Atom ":internal" :: value :: tl ->
+    | Raw.Atom (":internal", _) :: value :: tl ->
         loop sig_opt docs examples (parse_bool name ":internal" value) since deprecated see tl
-    | Raw.Atom ":since" :: value :: tl ->
+    | Raw.Atom (":since", _) :: value :: tl ->
         loop sig_opt docs examples internal (Some (render_value value)) deprecated see tl
-    | Raw.Atom ":deprecated" :: value :: tl ->
+    | Raw.Atom (":deprecated", _) :: value :: tl ->
         loop sig_opt docs examples internal since (Some (render_value value)) see tl
-    | Raw.Atom ":see" :: tl ->
+    | Raw.Atom (":see", _) :: tl ->
         let seen, rest = consume_see [] tl in
         loop sig_opt docs examples internal since deprecated (List.rev_append seen see) rest
-    | Raw.Atom key :: _ when String.is_prefix key ~prefix:":" ->
+    | Raw.Atom (key, _) :: _ when String.is_prefix key ~prefix:":" ->
         failf "Unknown %%doc key '%s' for %s" key name
     | _ -> failf "Invalid %%doc payload for %s" name
   in
   loop None [] [] false None None [] props
 
 let extract_import_target = function
-  | Raw.List [ Raw.Atom "%import"; Raw.Str p ] -> Some p
-  | Raw.List [ Raw.Atom "%import"; Raw.Atom p ] -> Some p
+  | Raw.List ([ Raw.Atom ("%import", _); Raw.Str (p, _) ], _) -> Some p
+  | Raw.List ([ Raw.Atom ("%import", _); Raw.Atom (p, _) ], _) -> Some p
   | _ -> None
 
 let resolve_import ~from_file rel =
@@ -196,12 +196,12 @@ let load_project_graph ~use_prelude input_path =
   else user_graph
 
 let defmacro_signature = function
-  | Raw.List (Raw.Atom "%defmacro" :: Raw.Atom name :: Raw.List params :: _body) ->
-      Some (name, render_raw (Raw.List (Raw.Atom name :: params)))
+  | Raw.List ((Raw.Atom ("%defmacro", _) :: Raw.Atom (name, _) :: Raw.List (params, _) :: _body), _) ->
+      Some (name, render_raw (Raw.List ((Raw.Atom (name, None) :: params), None)))
   | _ -> None
 
 let parse_doc_form = function
-  | Raw.List (Raw.Atom "%doc" :: Raw.Atom name :: props) -> Some (parse_doc_props name props)
+  | Raw.List ((Raw.Atom ("%doc", _) :: Raw.Atom (name, _) :: props), _) -> Some (parse_doc_props name props)
   | _ -> None
 
 let entries_from_file ~source_file forms =
