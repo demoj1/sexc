@@ -88,6 +88,7 @@
 
 Куда добавлять:
 - Новый surface/raw-кейс — `tests/cases/<topic>-<name>.sexc-test`, source + `;==EXPECTED==` + (либо руками пишешь expected, либо запускаешь `UPDATE=1 ./tests/run.sh FILTER=<name>` и ревьюишь сгенерированное).
+- Новый **error-кейс** — source + `;==EXPECTED-ERROR==` + ожидаемый stderr (file:line:col + caret + опц. hint-блок с docs). Sexc должен exit'нуть non-zero; stdout игнорируется. Абсолютные пути внутри ROOT нормализуются в `<root>` (через `pwd -P`-нормализацию плюс `sed` в `run_one.sh`), чтобы snapshot был портативным.
 - Новый standalone-пример без внешних зависимостей — добавить путь в `tests/examples/standalone.list`.
 - Examples с экзотическими link-флагами могут указывать их в первой строке: `;; sexc-test-flags: -lm -lpthread`.
 
@@ -115,11 +116,54 @@
 - `:example` можно повторять; выводится в `show-doc` и markdown docs.
 - `:internal t` скрывает символ из `show-doc` и `dump-docs` (для helper-макросов).
 
-## Диагностика ошибок (этап 1)
+## Диагностика ошибок
 
-- Reader ошибки показываются как `file:line:col` + строка + caret `^`.
-- Фаза в сообщении: `error[reader]`.
-- Реализация в `src/common.ml`, `src/reader.ml`, `src/sexc.ml`.
+Три категории исключений, разный рендер:
+
+| Класс | Когда бросается | Что печатается |
+|---|---|---|
+| `Sexc_cli_error` | Невалидный argv / неизвестная подкоманда — только в `src/sexc.ml`. | `error: <msg>` + полный usage() + exit 1. |
+| `Sexc_diagnostic` | Любая компиляционная ошибка с известным `file:line:col`. Бросается из Reader напрямую (`fail_diag`) либо "promoted" из bare `Sexc_error` через `Common.promote_error_to_diagnostic`. | `file:line:col: error[phase]: msg` + строка-источник + caret `^` + опц. hint-блок (см. ниже). |
+| `Sexc_error` (legacy) | Bare `fail`/`failf` без локации. Сохранён для глубоких фаз, которые ещё не привязаны к span. | Печатается одной строкой `error: msg` + опц. hint. **Без** usage'а. |
+
+### Источник позиций
+
+- `src/reader.ml:parse_many_loc` парсит файл и возвращает `Reader.located list` с byte-offset'ами для каждой top-level формы.
+- `src/compiler.ml` оборачивает каждую такую форму в `{ form : Raw.t; span : span option }` (`type top_form`). Тип протаскивается через все bulk-фазы (`strip_module_decl_top`, `apply_module_namespace_top`, `rewrite_alias_top`, `flatten_top_splice`) — span у каждой top-формы сохраняется.
+- Перед per-form emission (`emit_one`) span ставится в глобальный `Common.current_top_span` через `with_top_span`. Любая bare `Sexc_error` из глубинных фаз (macro/frontend/codegen) ловится `promote_error_to_diagnostic` и пересоздаётся как `Sexc_diagnostic` с этим span'ом.
+
+Гранулярность — top-level форма. Если нужно тыкать точно в подвыражение, придётся декорировать `Raw.t` span'ами вглубь (большой рефактор; отложено).
+
+### Контекст активной surface-формы (hint с docs)
+
+- `Common.current_macro_chain : string list ref` — стек активных макросов от самого внешнего к самому глубокому (голова — глубочайший).
+- `Common.with_macro_context name f` пушит `name` на стек, на нормальном return — попит. **На исключении не попит** — стек остаётся "грязным", чтобы CLI-handler в `src/sexc.ml` мог прочитать самую глубокую активную форму и вывести её документацию через `Index.find_by_name` + `Index.render_show_doc`. Процесс всё равно exit'ится после ошибки, leak не проблема.
+- `Macro.apply` уже оборачивается в `with_macro_context m.name`. Дополнительно можно обернуть известные intrinsics во `frontend.ml` (например `Type#` constructor), если хотим hint для них тоже.
+
+### Конкретный пример
+
+```
+$ echo '(defn int main () (when))' | sexc -
+<stdin>:1:1: error[compile]: Macro when expects at least 1 arguments, got 0
+(defn int main () (when))
+^
+
+hint: документация для `when`:
+Name: when
+Kind: macro
+Signature: (when cond &rest body)
+Source: <root>/std/c-interop.sexc:164:1
+Doc:
+- Execute BODY when COND is truthy.
+Examples:
+- `(when (> x 0) (set y x))`
+```
+
+### Что NOT делать
+
+- **Не** трогать `Raw.t` (decorating spans на каждый sub-form) — это большой refactor; отложено.
+- **Не** конвертировать все 100+ `fail`/`failf` в `fail_diag` поштучно — `promote_error_to_diagnostic` даёт span "из контекста" автоматически.
+- **Не** дёргать usage() из не-CLI ошибок — usage остаётся только в ветке `Sexc_cli_error`.
 
 ## Макросы std/core.sexc (актуальные правила)
 

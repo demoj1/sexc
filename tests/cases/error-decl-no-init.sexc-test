@@ -1,0 +1,11 @@
+(defn int main ()
+  (decl (int x))
+  (return x))
+;==EXPECTED-ERROR==
+<stdin>:1:1: error[compile]: Macro decl expects at least 2 arguments, got 1
+(defn int main ()
+^
+
+Signature: (decl binding init &rest rest)
+Doc: Let*-style variable declarations with required initializer.
+Example: (decl (int x) 10 (int y) (+ x 5))

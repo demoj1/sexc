@@ -48,6 +48,14 @@ let with_stage (name : string) (f : unit -> 'a) : 'a =
   logf "%s — %s" name (since t0);
   result
 
+(* Три категории ошибок:
+   - Sexc_cli_error  — невалидный argv / неизвестная команда. Усложная для пользователя
+                       только в этой ветке имеет смысл показывать usage().
+   - Sexc_error      — компиляционная ошибка без локации (legacy). Печатается как
+                       одна строка "error: msg" без портянки usage'а.
+   - Sexc_diagnostic — компиляционная ошибка с file:line:col + caret-сниппетом. *)
+exception Sexc_cli_error of string
+
 exception Sexc_error of string
 
 type span = {
@@ -68,6 +76,10 @@ exception Sexc_diagnostic of diagnostic
 let fail msg = raise (Sexc_error msg)
 
 let failf fmt = Printf.ksprintf (fun s -> raise (Sexc_error s)) fmt
+
+let cli_fail msg = raise (Sexc_cli_error msg)
+
+let cli_failf fmt = Printf.ksprintf (fun s -> raise (Sexc_cli_error s)) fmt
 
 let clamp x ~min_v ~max_v = Int.max min_v (Int.min max_v x)
 
@@ -122,3 +134,39 @@ let render_diagnostic d =
 
 let fail_diag ~phase ~file ~source ~start_off ?(end_off = start_off) message =
   raise (Sexc_diagnostic { phase; message; span = { file; source; start_off; end_off } })
+
+(* Span текущей top-level формы. Устанавливается компилятором перед per-form
+   обработкой (macro expand → frontend → codegen) и используется, чтобы
+   "promote" любую bare Sexc_error из глубоких фаз в Sexc_diagnostic с
+   привязкой к месту вызова в исходнике. *)
+let current_top_span : span option ref = ref None
+
+let with_top_span (sp : span) (f : unit -> 'a) : 'a =
+  let prev = !current_top_span in
+  current_top_span := Some sp;
+  Exn.protect ~f ~finally:(fun () -> current_top_span := prev)
+
+(* Конвертирует bare Sexc_error в Sexc_diagnostic, используя текущий
+   top-form span. Без активного span (вне per-form секции) — просто
+   пробрасывает исходное исключение. *)
+let promote_error_to_diagnostic ~phase f =
+  try f () with
+  | Sexc_error msg as e ->
+      (match !current_top_span with
+       | None -> raise e
+       | Some sp -> raise (Sexc_diagnostic { phase; message = msg; span = sp }))
+
+(* Стек активных surface-форм (макросы из %defmacro, известные intrinsics).
+   Используется CLI-обработчиком чтобы вывести hint с docs+example при ошибке.
+   Голова списка — самый глубокий (вложенный) контекст. *)
+let current_macro_chain : string list ref = ref []
+
+(* Push/pop стек чейна, но на ИСКЛЮЧЕНИИ оставляем чейн "грязным" — это нужно
+   чтобы catch-handler в CLI увидел самую глубокую активную форму и смог
+   распечатать hint с её документацией. Process всё равно exit'ится после
+   ошибки, так что leak не проблема. *)
+let with_macro_context (name : string) (f : unit -> 'a) : 'a =
+  current_macro_chain := name :: !current_macro_chain;
+  let r = f () in
+  current_macro_chain := List.tl !current_macro_chain |> Option.value ~default:[];
+  r

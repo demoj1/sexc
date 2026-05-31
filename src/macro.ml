@@ -541,24 +541,25 @@ let collect forms =
   loop String.Map.empty String.Map.empty [] forms
 
 let apply ctx depth m args =
-  let fixed_len = List.length m.params in
-  let env =
-    match m.rest_param with
-    | None ->
-        if List.length args <> fixed_len then
-          failf "Macro %s expects %d arguments, got %d" m.name fixed_len (List.length args);
-        with_bound String.Map.empty m.params args
-    | Some rest_name ->
-        if List.length args < fixed_len then
-          failf "Macro %s expects at least %d arguments, got %d" m.name fixed_len (List.length args);
-        let fixed_args = List.take args fixed_len in
-        let rest_args = List.drop args fixed_len in
-        Map.set (with_bound String.Map.empty m.params fixed_args) ~key:rest_name ~data:(Raw.List rest_args)
-  in
-  let expanded = eval_expr ctx env m.body in
-  if depth > ctx.max_depth then
-    failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
-  expanded
+  Common.with_macro_context m.name (fun () ->
+    let fixed_len = List.length m.params in
+    let env =
+      match m.rest_param with
+      | None ->
+          if List.length args <> fixed_len then
+            failf "Macro %s expects %d arguments, got %d" m.name fixed_len (List.length args);
+          with_bound String.Map.empty m.params args
+      | Some rest_name ->
+          if List.length args < fixed_len then
+            failf "Macro %s expects at least %d arguments, got %d" m.name fixed_len (List.length args);
+          let fixed_args = List.take args fixed_len in
+          let rest_args = List.drop args fixed_len in
+          Map.set (with_bound String.Map.empty m.params fixed_args) ~key:rest_name ~data:(Raw.List rest_args)
+    in
+    let expanded = eval_expr ctx env m.body in
+    if depth > ctx.max_depth then
+      failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
+    expanded)
 
 let rec expand_eval_form_for_arg ctx ~depth = function
   | Raw.List (Raw.Atom "%eval" :: [ expr ]) ->

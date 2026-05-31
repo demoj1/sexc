@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
 # Run a single snapshot test case.
 #
-# File format (.sexc-test):
+# Two file formats are supported (.sexc-test):
 #
-#   ;; sexc-flags: --no-prelude    (optional first line — disables implicit prelude)
-#   ... SexC source ...
-#   ;==EXPECTED==
-#   ... expected C output (line-for-line) ...
+# 1) Successful compile (default):
 #
-# The marker line is searched verbatim; everything above it is fed to sexc,
-# everything below is the golden output. With UPDATE=1, the expected block is
-# rewritten in place from the current sexc output. By default the implicit
-# prelude is loaded — opt out per-test via the magic comment above.
+#      ;; sexc-flags: --no-prelude    (optional first line)
+#      ... SexC source ...
+#      ;==EXPECTED==
+#      ... expected C stdout ...
+#
+# 2) Compile error (golden stderr):
+#
+#      ... SexC source that should fail to compile ...
+#      ;==EXPECTED-ERROR==
+#      ... expected stderr (file:line:col + caret + optional hint block) ...
+#
+#    Sexc is expected to exit non-zero. stdout is ignored.
+#
+# Paths in stderr that point into the repo are normalized to "<root>" so the
+# golden output is stable across environments.
+#
+# With UPDATE=1 the matching block is rewritten in place.
 #
 # Args: $1 = path to .sexc-test
 # Env:  RESULTS_DIR — auto-set by run.sh
@@ -24,7 +34,8 @@ rel="${case_path#${ROOT}/}"
 slug="case-$(printf '%s' "${rel}" | tr -c 'a-zA-Z0-9' '_')"
 results="${RESULTS_DIR:-/tmp}"
 
-MARKER=';==EXPECTED=='
+OK_MARKER=';==EXPECTED=='
+ERR_MARKER=';==EXPECTED-ERROR=='
 
 flags=(--quiet)
 first_line="$(head -n1 "${case_path}" 2>/dev/null || true)"
@@ -32,8 +43,23 @@ if [[ "${first_line}" =~ sexc-flags:[[:space:]]*--no-prelude ]]; then
     flags=(--quiet --no-prelude)
 fi
 
-# Split file into source / expected via marker.
-marker_line=$(grep -nFx "${MARKER}" "${case_path}" | head -n1 | cut -d: -f1)
+# Detect which marker (if any) the file uses.
+ok_line=$(grep -nFx "${OK_MARKER}" "${case_path}" | head -n1 | cut -d: -f1)
+err_line=$(grep -nFx "${ERR_MARKER}" "${case_path}" | head -n1 | cut -d: -f1)
+
+mode=""
+marker=""
+marker_line=""
+if [[ -n "${err_line}" ]]; then
+    mode="error"
+    marker="${ERR_MARKER}"
+    marker_line="${err_line}"
+elif [[ -n "${ok_line}" ]]; then
+    mode="ok"
+    marker="${OK_MARKER}"
+    marker_line="${ok_line}"
+fi
+
 src_file="${results}/${slug}.src"
 expected_file="${results}/${slug}.expected"
 
@@ -41,30 +67,54 @@ if [[ -z "${marker_line}" ]]; then
     cp "${case_path}" "${src_file}"
     : > "${expected_file}"
     has_expected=0
+    # Default mode is OK so MISS messaging makes sense.
+    mode="${mode:-ok}"
 else
     head -n "$((marker_line - 1))" "${case_path}" > "${src_file}"
     tail -n "+$((marker_line + 1))" "${case_path}" > "${expected_file}"
     has_expected=1
 fi
 
+stdout_file="${results}/${slug}.stdout"
+stderr_file="${results}/${slug}.stderr"
 actual_file="${results}/${slug}.actual"
-err_file="${results}/${slug}.err"
 
-"${SEXC}" "${flags[@]}" - < "${src_file}" > "${actual_file}" 2> "${err_file}"
+"${SEXC}" "${flags[@]}" - < "${src_file}" > "${stdout_file}" 2> "${stderr_file}"
 status=$?
 
-if [[ ${status} -ne 0 ]]; then
-    {
-        printf '\033[31mFAIL\033[0m %s (sexc exit %d)\n' "${rel}" "${status}"
-        sed 's/^/    /' "${err_file}" | head -20
-    } | tee "${results}/${slug}.fail"
-    exit 0
-fi
+# Normalize repo-root paths in stderr → "<root>" so golden output is portable.
+normalize() {
+    sed -e "s|${ROOT}|<root>|g" "$1"
+}
+
+case "${mode}" in
+    ok)
+        if [[ ${status} -ne 0 ]]; then
+            {
+                printf '\033[31mFAIL\033[0m %s (sexc exit %d, expected success)\n' "${rel}" "${status}"
+                sed 's/^/    /' "${stderr_file}" | head -20
+            } | tee "${results}/${slug}.fail"
+            exit 0
+        fi
+        cp "${stdout_file}" "${actual_file}"
+        ;;
+    error)
+        if [[ ${status} -eq 0 ]]; then
+            {
+                printf '\033[31mFAIL\033[0m %s (sexc exit 0, expected non-zero)\n' "${rel}"
+                printf '    stdout was:\n'
+                sed 's/^/      /' "${stdout_file}" | head -10
+            } | tee "${results}/${slug}.fail"
+            exit 0
+        fi
+        normalize "${stderr_file}" > "${actual_file}"
+        ;;
+esac
 
 if [[ -n "${UPDATE}" ]]; then
     {
         cat "${src_file}"
-        printf '%s\n' "${MARKER}"
+        printf '%s\n' "${marker:-${OK_MARKER}}"
         cat "${actual_file}"
     } > "${case_path}.tmp"
     mv "${case_path}.tmp" "${case_path}"
@@ -75,7 +125,7 @@ fi
 
 if [[ ${has_expected} -eq 0 ]]; then
     {
-        printf '\033[33mMISS\033[0m %s (no %s marker; run UPDATE=1 to create)\n' "${rel}" "${MARKER}"
+        printf '\033[33mMISS\033[0m %s (no %s marker; run UPDATE=1 to create)\n' "${rel}" "${marker:-${OK_MARKER}}"
     } | tee "${results}/${slug}.fail"
     exit 0
 fi

@@ -1,0 +1,6 @@
+;; sexc-flags: --no-prelude
+(%def-fn int main () (%block (%bogus-intrinsic 1)))
+;==EXPECTED-ERROR==
+<stdin>:2:1: error[compile]: Unknown intrinsic expression: %bogus-intrinsic
+(%def-fn int main () (%block (%bogus-intrinsic 1)))
+^

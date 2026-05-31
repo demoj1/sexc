@@ -91,7 +91,7 @@ let parse_complete_args use_prelude args =
   match rest with
   | prefix :: [] -> Complete { use_prelude; json; prefix; input_path = "-" }
   | prefix :: input :: [] -> Complete { use_prelude; json; prefix; input_path = input }
-  | _ -> fail "complete expects: sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]"
+  | _ -> cli_fail "complete expects: sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]"
 
 let parse_xref_args use_prelude args =
   let json, rest =
@@ -101,7 +101,7 @@ let parse_xref_args use_prelude args =
   in
   match rest with
   | symbol :: input :: [] -> Xref { use_prelude; json; symbol; input_path = input }
-  | _ -> fail "xref expects: sexc [--no-prelude] xref --json <symbol> <input.sexc>"
+  | _ -> cli_fail "xref expects: sexc [--no-prelude] xref --json <symbol> <input.sexc>"
 
 let parse_command args =
   let rec parse_flags use_prelude = function
@@ -119,34 +119,34 @@ let parse_command args =
   let use_prelude, rest = parse_flags true args in
   match rest with
   | "dump-docs" :: input :: out_dir :: [] -> Dump_docs { use_prelude; input_path = input; out_dir }
-  | "dump-docs" :: _ -> fail "dump-docs expects: sexc [--no-prelude] dump-docs <input.sexc> <out-dir>"
+  | "dump-docs" :: _ -> cli_fail "dump-docs expects: sexc [--no-prelude] dump-docs <input.sexc> <out-dir>"
   | "dump-stdlib-docs" :: out_dir :: [] -> Dump_stdlib_docs { out_dir }
-  | "dump-stdlib-docs" :: _ -> fail "dump-stdlib-docs expects: sexc dump-stdlib-docs <out-dir>"
+  | "dump-stdlib-docs" :: _ -> cli_fail "dump-stdlib-docs expects: sexc dump-stdlib-docs <out-dir>"
   | "show-doc" :: name :: [] -> Show_doc { use_prelude; name; input_path = None }
   | "show-doc" :: name :: input :: [] -> Show_doc { use_prelude; name; input_path = Some input }
-  | "show-doc" :: _ -> fail "show-doc expects: sexc [--no-prelude] show-doc <name> [input.sexc]"
+  | "show-doc" :: _ -> cli_fail "show-doc expects: sexc [--no-prelude] show-doc <name> [input.sexc]"
   | "complete" :: tl -> parse_complete_args use_prelude tl
   | "xref" :: tl -> parse_xref_args use_prelude tl
   | "print-cache-dump" :: [] -> Print_cache_dump
-  | "print-cache-dump" :: _ -> fail "print-cache-dump expects no arguments"
+  | "print-cache-dump" :: _ -> cli_fail "print-cache-dump expects no arguments"
   | "m-dump" :: "--json" :: input :: [] -> M_dump { use_prelude; input_path = input; json = true }
   | "m-dump" :: input :: [] -> M_dump { use_prelude; input_path = input; json = false }
-  | "m-dump" :: _ -> fail "m-dump expects: sexc [--no-prelude] m-dump [--json] <input.sexc>"
-  | [] -> fail "missing input file"
+  | "m-dump" :: _ -> cli_fail "m-dump expects: sexc [--no-prelude] m-dump [--json] <input.sexc>"
+  | [] -> cli_fail "missing input file"
   | input :: tail -> (
       match tail with
       | [] -> Compile { use_prelude; input_path = input; compile_cmd = None }
       | "-C" :: cmd when not (List.is_empty cmd) ->
           Compile { use_prelude; input_path = input; compile_cmd = Some cmd }
-      | "-C" :: [] -> fail "-C requires a command"
-      | _ -> fail "unsupported arguments; expected optional '--no-prelude' and '-C <command...>'")
+      | "-C" :: [] -> cli_fail "-C requires a command"
+      | _ -> cli_fail "unsupported arguments; expected optional '--no-prelude' and '-C <command...>'")
 
 let replace_placeholder cmd tmp_c_path =
   let replaced =
     List.map cmd ~f:(fun arg -> if String.equal arg "%" then tmp_c_path else arg)
   in
   if List.exists cmd ~f:(String.equal "%") then replaced
-  else fail "-C command must include '%' placeholder for the generated C file"
+  else cli_fail "-C command must include '%' placeholder for the generated C file"
 
 let run_shell_command argv =
   let command_line =
@@ -182,6 +182,32 @@ let compile_input ~use_prelude input_path =
     Compiler.compile_source ~use_prelude source
   else Compiler.compile_file ~use_prelude input_path
 
+(* Если в момент ошибки активен macro_chain — печатаем краткую справку по
+   самой глубокой surface-форме. Только Signature/Doc/Example, без шапки и
+   meta-полей. Тихо игнорируем ошибки индекса (например когда stdlib не
+   находится). *)
+let render_macro_hint () =
+  match !Common.current_macro_chain with
+  | [] -> ()
+  | name :: _ ->
+      let entries =
+        try Index.find_by_name ~use_prelude:true name with _ -> []
+      in
+      (match entries with
+       | [] -> ()
+       | (first : Index.symbol) :: _ ->
+           let lines =
+             [ Option.map first.signature ~f:(fun s -> "Signature: " ^ s);
+               Option.map first.doc ~f:(fun d -> "Doc: " ^ d);
+               Option.map first.example ~f:(fun e -> "Example: " ^ e);
+             ]
+             |> List.filter_opt
+           in
+           if not (List.is_empty lines) then begin
+             prerr_endline "";
+             List.iter lines ~f:prerr_endline
+           end)
+
 let () =
   Random.self_init ();
   let argv = Sys.get_argv () in
@@ -201,7 +227,7 @@ let () =
             logf "total — %s" (since t0);
             if status <> 0 then exit status)
     | Dump_docs { use_prelude; input_path; out_dir } ->
-        if String.equal input_path "-" then fail "dump-docs does not support stdin input ('-')";
+        if String.equal input_path "-" then cli_fail "dump-docs does not support stdin input ('-')";
         Docs.dump_docs_for_input ~use_prelude ~input_path ~out_dir
     | Dump_stdlib_docs { out_dir } -> Docs.dump_stdlib_docs ~out_dir
     | Show_doc { use_prelude; name; input_path } ->
@@ -223,7 +249,7 @@ let () =
         Out_channel.output_string stdout (Index.render_cache_dump ());
         Out_channel.newline stdout
     | M_dump { use_prelude; input_path; json } ->
-        if String.equal input_path "-" then fail "m-dump does not support stdin input ('-')";
+        if String.equal input_path "-" then cli_fail "m-dump does not support stdin input ('-')";
         let meta = Compiler.metadata_of_file ~use_prelude input_path in
         let out =
           if json then Macro.format_meta_json meta
@@ -235,10 +261,15 @@ let () =
   with
   | Sexc_diagnostic d ->
       prerr_endline (render_diagnostic d);
+      render_macro_hint ();
+      exit 1
+  | Sexc_cli_error msg ->
+      prerr_endline ("error: " ^ msg);
+      usage ();
       exit 1
   | Sexc_error msg ->
       prerr_endline ("error: " ^ msg);
-      usage ();
+      render_macro_hint ();
       exit 1
   | exn ->
       prerr_endline ("error: " ^ Exn.to_string exn);

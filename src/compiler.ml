@@ -16,6 +16,29 @@ open Common
    - Keep import/prelude behavior centralized here.
 *)
 
+(* Top-level форма с привязкой к месту в исходнике. Используется при загрузке
+   через [Reader.parse_many_loc] и протаскивается через все bulk-трансформы
+   (module rewrite, alias rewrite, splice flatten) до per-form emission, где
+   span ставится в [Common.current_top_span] и любая bare [Sexc_error] из
+   деепфаз "поднимается" в [Sexc_diagnostic] с привязкой к файлу/строке. *)
+type top_form = {
+  form : Raw.t;
+  span : Common.span option;
+}
+
+let raw_only (tops : top_form list) : Raw.t list = List.map tops ~f:(fun t -> t.form)
+
+let with_form (t : top_form) (form : Raw.t) : top_form = { t with form }
+
+let attach_span (sp : Common.span option) (form : Raw.t) : top_form = { form; span = sp }
+
+(* Конвертирует Reader.located-список в top_form-список, прикрепляя span. *)
+let top_forms_of_located ~file ~source (locs : Reader.located list) : top_form list =
+  List.map locs ~f:(fun l ->
+    let off = Reader.loc_of l in
+    let span : Common.span = { file; source; start_off = off; end_off = off } in
+    { form = Reader.to_raw l; span = Some span })
+
 let default_stdlib_dir = "/usr/local/include/sexc/std"
 
 let stdlib_env_var = "SEXC_STDLIB_DIR"
@@ -92,6 +115,21 @@ let strip_module_decl forms =
             | Some _ -> fail "Only one %module declaration is allowed per file"))
   in
   loop None [] forms
+
+(* То же, но над top_form-списком — сохраняет span каждой не-%module формы. *)
+let strip_module_decl_top (tops : top_form list) : string option * top_form list =
+  let rec loop module_name acc = function
+    | [] -> (module_name, List.rev acc)
+    | t :: tl -> (
+        match extract_module_name t.form with
+        | None -> loop module_name (t :: acc) tl
+        | Some name -> (
+            match module_name with
+            | None -> loop (Some name) acc tl
+            | Some prev when String.equal prev name -> loop module_name acc tl
+            | Some _ -> fail "Only one %module declaration is allowed per file"))
+  in
+  loop None [] tops
 
 let qualify_name module_name name =
   if String.is_substring name ~substring:"/" || String.is_prefix name ~prefix:"%"
@@ -232,6 +270,16 @@ let apply_module_namespace module_name forms =
     in
     List.map forms ~f:(rewrite_form name_map)
 
+let apply_module_namespace_top module_name (tops : top_form list) : top_form list =
+  let names = collect_module_defined_names (raw_only tops) in
+  if Set.is_empty names then tops
+  else
+    let name_map =
+      Set.fold names ~init:String.Map.empty ~f:(fun acc name ->
+          Map.set acc ~key:name ~data:(qualify_name module_name name))
+    in
+    List.map tops ~f:(fun t -> with_form t (rewrite_form name_map t.form))
+
 (* Replace each atom `alias/X[/Y/...]` with `real-module-name/X[/Y/...]`.
    Tree-walks everything (incl. quoted contents) since aliases are pure
    compile-time shorthand with no runtime semantics. *)
@@ -248,6 +296,22 @@ let rec rewrite_alias_form aliases = function
   | Raw.Str _ as s -> s
   | Raw.List xs -> Raw.List (List.map xs ~f:(rewrite_alias_form aliases))
 
+let rewrite_alias_top aliases (tops : top_form list) : top_form list =
+  List.map tops ~f:(fun t -> with_form t (rewrite_alias_form aliases t.form))
+
+(* Top-level %top-level-splice flattening: дочерние формы наследуют span
+   родителя — это разумный fallback, т.к. сами они синтезированы макросом
+   и не имеют собственного offset'а в исходнике. *)
+let flatten_top_splice (tops : top_form list) : top_form list =
+  let rec flat (raw : Raw.t) : Raw.t list =
+    match raw with
+    | Raw.List (Raw.Atom "%top-level-splice" :: inner) ->
+        List.concat_map inner ~f:flat
+    | other -> [ other ]
+  in
+  List.concat_map tops ~f:(fun t ->
+    List.map (flat t.form) ~f:(fun form -> with_form t form))
+
 (* Загружает forms из path, гарантируя что каждый файл попадёт в результат
    ровно один раз — даже если он импортируется из нескольких мест. visited
    глобально аккумулирует уже загруженные пути; sibling-ветки видят
@@ -256,24 +320,26 @@ let rec rewrite_alias_form aliases = function
    module_names — мапа path → module name (если есть %module). Нужна для
    разрешения :as-алиасов: импортирующий файл должен знать имя модуля
    того, кого импортирует, даже если файл уже загружен другой веткой. *)
-let rec load_forms_from_file ~visited ~module_names ~use_prelude path =
+let rec load_forms_from_file ~visited ~module_names ~use_prelude path
+    : String.Set.t * string option Map.M(String).t * top_form list =
   let abs = path in
   if Set.mem visited abs then (visited, module_names, [])
   else
     let visited = Set.add visited abs in
     let t = now_ns () in
     let source = In_channel.read_all abs in
-    let forms = Reader.parse_many ~file:abs source in
-    logf "load %s (%d forms) — %s" abs (List.length forms) (since t);
-    let module_name, forms = strip_module_decl forms in
+    let located = Reader.parse_many_loc ~file:abs source in
+    let tops = top_forms_of_located ~file:abs ~source located in
+    logf "load %s (%d forms) — %s" abs (List.length tops) (since t);
+    let module_name, tops = strip_module_decl_top tops in
     let module_names = Map.set module_names ~key:abs ~data:module_name in
 
     (* 1. Резолвим импорты рекурсивно, попутно собирая alias-map. *)
-    let visited, module_names, imported_forms, aliases =
-      List.fold forms
+    let visited, module_names, imported_tops, aliases =
+      List.fold tops
         ~init:(visited, module_names, [], String.Map.empty)
-        ~f:(fun (v, m, acc, aliases) form ->
-          match extract_import form with
+        ~f:(fun (v, m, acc, aliases) top ->
+          match extract_import top.form with
           | Some (rel, alias_opt) ->
               if use_prelude && is_prelude_import_target rel then (v, m, acc, aliases)
               else
@@ -293,24 +359,24 @@ let rec load_forms_from_file ~visited ~module_names ~use_prelude path =
     in
 
     (* 2. Свои not-import формы. *)
-    let own_forms =
-      List.filter forms ~f:(fun f -> Option.is_none (extract_import f))
+    let own_tops =
+      List.filter tops ~f:(fun t -> Option.is_none (extract_import t.form))
     in
 
     (* 3. Раскрываем алиасы ДО %module namespace, чтобы наши `alias/X` стали `real/X`. *)
-    let own_forms =
-      if Map.is_empty aliases then own_forms
-      else List.map own_forms ~f:(rewrite_alias_form aliases)
+    let own_tops =
+      if Map.is_empty aliases then own_tops
+      else rewrite_alias_top aliases own_tops
     in
 
     (* 4. Применяем свой %module к собственным определениям. *)
-    let own_forms =
+    let own_tops =
       match module_name with
-      | None -> own_forms
-      | Some name -> apply_module_namespace name own_forms
+      | None -> own_tops
+      | Some name -> apply_module_namespace_top name own_tops
     in
 
-    (visited, module_names, imported_forms @ own_forms)
+    (visited, module_names, imported_tops @ own_tops)
 
 let rec load_graph_from_file ~visited ~use_prelude path =
   (* Import graph flow:
@@ -356,96 +422,115 @@ let load_std_graph () =
   let core_path = Filename.concat stdlib_dir "core.sexc" in
   load_graph ~use_prelude:false core_path
 
-let load_prelude_forms () =
+let load_prelude_forms () : top_form list =
   let stdlib_dir = resolve_stdlib_dir () in
   let core_path = Filename.concat stdlib_dir "core.sexc" in
-  let _, _, forms =
+  let _, _, tops =
     load_forms_from_file
       ~visited:String.Set.empty
       ~module_names:String.Map.empty
       ~use_prelude:false core_path
   in
-  forms
+  tops
 
-let compile_forms ?(use_prelude = true) forms =
+let is_macro_decl = function
+  | Raw.List (Raw.Atom "%defmacro" :: _) -> true
+  | Raw.List (Raw.Atom "$defun" :: _) -> true
+  | _ -> false
+
+let is_doc_decl = function
+  | Raw.List (Raw.Atom "%doc" :: _) -> true
+  | _ -> false
+
+let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   (* Core compile pipeline (in order):
      1) normalize %module names
      2) prepend prelude (optional)
      3) drop %doc metadata (docs are handled out-of-band)
-     4) collect+expand macros
-     5) flatten top-level splice forms
-     6) parse frontend AST
-     7) emit C text. *)
-  let module_name, forms = strip_module_decl forms in
-  let forms =
+     4) collect macros (builds mctx; macro-decl top_forms отбрасываем для emit)
+     5) per top_form: install span, expand, flatten splice, parse, emit C.
+        Любая bare Sexc_error внутри per-form секции автоматически
+        "поднимается" в Sexc_diagnostic с привязкой к файлу/строке. *)
+  let module_name, tops = strip_module_decl_top tops in
+  let tops =
     match module_name with
-    | None -> forms
-    | Some name -> apply_module_namespace name forms
+    | None -> tops
+    | Some name -> apply_module_namespace_top name tops
   in
-  let is_doc_form = function
-    | Raw.List (Raw.Atom "%doc" :: _) -> true
-    | _ -> false
-  in
-  let rec flatten_top_forms xs = List.concat_map xs ~f:flatten_top_form
-  and flatten_top_form = function
-    | Raw.List (Raw.Atom "%top-level-splice" :: inner) -> flatten_top_forms inner
-    | other -> [ other ]
-  in
-  let prelude_forms =
+  let prelude_tops =
     if use_prelude then with_stage "prelude" (fun () -> load_prelude_forms ()) else []
   in
-  let non_doc = List.filter (prelude_forms @ forms) ~f:(fun f -> not (is_doc_form f)) in
+  let all_tops = prelude_tops @ tops in
+  let non_doc_tops = List.filter all_tops ~f:(fun t -> not (is_doc_decl t.form)) in
   let t = now_ns () in
-  let mctx, non_macro = Macro.collect non_doc in
-  logf "macro collect: %d forms — %s" (List.length non_doc) (since t);
+  (* mctx собираем из всех raw-форм (включая prelude). Macro.collect одновременно
+     фильтрует %defmacro/$defun из списка, но нам нужен версия с tops — поэтому
+     повторяем фильтр здесь, чтобы сохранить span. *)
+  let mctx, _ = Macro.collect (raw_only non_doc_tops) in
+  let non_macro_tops = List.filter non_doc_tops ~f:(fun t -> not (is_macro_decl t.form)) in
+  logf "macro collect: %d forms — %s" (List.length non_doc_tops) (since t);
+  let emit_one (top : top_form) : string =
+    let run () =
+      let expanded = Macro.expand_program mctx [ top.form ] in
+      let flattened_raws =
+        List.concat_map expanded ~f:(fun raw ->
+          let rec flat = function
+            | Raw.List (Raw.Atom "%top-level-splice" :: inner) ->
+                List.concat_map inner ~f:flat
+            | other -> [ other ]
+          in
+          flat raw)
+      in
+      let parsed = List.map flattened_raws ~f:Frontend.parse_top in
+      List.map parsed ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n"
+    in
+    let run_with_promotion () =
+      Common.promote_error_to_diagnostic ~phase:"compile" run
+    in
+    match top.span with
+    | None -> run_with_promotion ()
+    | Some sp -> Common.with_top_span sp run_with_promotion
+  in
   let t = now_ns () in
-  let expanded = Macro.expand_program mctx non_macro in
-  logf "macro expand: %d forms, %d macros — %s"
-    (List.length non_macro) (Map.length mctx.defs) (since t);
-  let flattened = flatten_top_forms expanded in
-  let t = now_ns () in
-  let parsed = List.map flattened ~f:Frontend.parse_top in
-  logf "frontend parse: %d top-level forms — %s" (List.length flattened) (since t);
-  let t = now_ns () in
-  let c = parsed |> List.map ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n" in
-  logf "codegen C: %d bytes — %s" (String.length c) (since t);
+  let chunks = List.map non_macro_tops ~f:emit_one in
+  let c = String.concat ~sep:"\n\n" (List.filter chunks ~f:(fun s -> not (String.is_empty s))) in
+  logf "compile per-form (%d tops) — %s" (List.length non_macro_tops) (since t);
+  logf "codegen C: %d bytes" (String.length c);
   c
 
 let compile_source ?(use_prelude = true) source =
-  let forms = Reader.parse_many ~file:"<memory>" source in
-  compile_forms ~use_prelude forms
+  let file = "<stdin>" in
+  let located = Reader.parse_many_loc ~file source in
+  let tops = top_forms_of_located ~file ~source located in
+  compile_forms ~use_prelude tops
 
 let compile_file ?(use_prelude = true) path =
-  let _, _, forms =
+  let _, _, tops =
     load_forms_from_file
       ~visited:String.Set.empty
       ~module_names:String.Map.empty
       ~use_prelude path
   in
-  compile_forms ~use_prelude forms
+  compile_forms ~use_prelude tops
 
 (* Прогоняет тот же пайплайн что compile_forms, но останавливается после
    macro expansion и возвращает накопленную compile-time metadata
    (ctx.sym_meta). Используется CLI-командой m-dump. *)
 let metadata_of_file ?(use_prelude = true) path =
-  let _, _, forms =
+  let _, _, tops =
     load_forms_from_file
       ~visited:String.Set.empty
       ~module_names:String.Map.empty
       ~use_prelude path
   in
-  let module_name, forms = strip_module_decl forms in
-  let forms =
+  let module_name, tops = strip_module_decl_top tops in
+  let tops =
     match module_name with
-    | None -> forms
-    | Some name -> apply_module_namespace name forms
+    | None -> tops
+    | Some name -> apply_module_namespace_top name tops
   in
-  let is_doc_form = function
-    | Raw.List (Raw.Atom "%doc" :: _) -> true
-    | _ -> false
-  in
-  let prelude_forms = if use_prelude then load_prelude_forms () else [] in
-  let non_doc = List.filter (prelude_forms @ forms) ~f:(fun f -> not (is_doc_form f)) in
+  let prelude_tops = if use_prelude then load_prelude_forms () else [] in
+  let non_doc = List.filter (raw_only (prelude_tops @ tops)) ~f:(fun f -> not (is_doc_decl f)) in
   let mctx, non_macro = Macro.collect non_doc in
   let _ = Macro.expand_program mctx non_macro in
   mctx.sym_meta
