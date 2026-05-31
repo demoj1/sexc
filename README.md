@@ -48,7 +48,7 @@ int (*sort_cmp)(const void *, const void *);
 void (*sig_handlers[16])(int);
 char *(*strdup_fn)(const char *);
 ```
-```sexc
+```lisp
 (decl (%ptr (%fn int ((%ptr (%const void)) (%ptr (%const void))))) sort_cmp)
 (decl (%array (%ptr (%fn void (int))) 16)                          sig_handlers)
 (decl (%ptr (%fn (%ptr char) ((%ptr (%const char)))))              strdup_fn)
@@ -74,7 +74,7 @@ int main(void) {
     printf("(%f, %f)\n", c.x, c.y);
 }
 ```
-```sexc
+```lisp
 (struct Vec2
   :fields
   (float x)
@@ -102,7 +102,7 @@ are zero-initialised.
 ```c
 length(strdup(trim(to_upper(input))));
 ```
-```sexc
+```lisp
 (|> input to_upper trim strdup length)
 ```
 
@@ -118,7 +118,7 @@ int x = 1, y = 2, z = 3;
 struct point p;
 p.x = 0; p.y = 0; p.z = 0;
 ```
-```sexc
+```lisp
 (decl (int x) 1 (int y) 2 (int z) 3)
 (set (. p x) 0 (. p y) 0 (. p z) 0)
 ```
@@ -131,7 +131,7 @@ if (x > 0)        sign = 1;
 else if (x < 0)   sign = -1;
 else              sign = 0;
 ```
-```sexc
+```lisp
 (decl (int sign)
   (cond ((> x 0)  1)
         ((< x 0) -1)
@@ -143,13 +143,13 @@ else              sign = 0;
 
 ### Modules and import
 
-```sexc
+```lisp
 ; ring-buffer.sexc
 (%module ring)
 (struct Buffer :fields (int cap) (int head))
 (defn void init (((%ptr Buffer) b) (int c)) ...)
 ```
-```sexc
+```lisp
 ; main.sexc
 (%import "./ring-buffer" :as r)
 (decl (r/Buffer buf) (zero-init))   ; ring/Buffer + alias
@@ -171,7 +171,7 @@ The macro system has a per-symbol metadata table:
 ```
 
 Declarative forms populate the table automatically. Writing
-```sexc
+```lisp
 (struct Buffer
   :fields
   ((%ptr float) data)
@@ -193,7 +193,7 @@ code from them.
 From `examples/audio-viz/auto-derive.sexc`. Reads the
 `:fields` metadata of a type and emits `Type/print`:
 
-```sexc
+```lisp
 (%defmacro auto-print (type-name)
   ($let ((fields  ($m-get type-name :fields))
          (fn-name ($symcat type-name "/print"))
@@ -220,7 +220,7 @@ each field type (`int → %d`, `float → %f`, anything else →
 `%p` with a `void*` cast).
 
 Usage:
-```sexc
+```lisp
 (struct Buffer
   :fields
   (int x)
@@ -376,7 +376,7 @@ int (*sort_cmp)(const void *, const void *);
 void (*sig_handlers[16])(int);
 char *(*strdup_fn)(const char *);
 ```
-```sexc
+```lisp
 (decl (%ptr (%fn int ((%ptr (%const void)) (%ptr (%const void))))) sort_cmp)
 (decl (%array (%ptr (%fn void (int))) 16)                          sig_handlers)
 (decl (%ptr (%fn (%ptr char) ((%ptr (%const char)))))              strdup_fn)
@@ -402,7 +402,7 @@ int main(void) {
     printf("(%f, %f)\n", c.x, c.y);
 }
 ```
-```sexc
+```lisp
 (struct Vec2
   :fields
   (float x)
@@ -429,7 +429,7 @@ codegen — `MathOps/add`, `Vec2/add`. `Type#` — конструктор
 ```c
 length(strdup(trim(to_upper(input))));
 ```
-```sexc
+```lisp
 (|> input to_upper trim strdup length)
 ```
 
@@ -445,7 +445,7 @@ int x = 1, y = 2, z = 3;
 struct point p;
 p.x = 0; p.y = 0; p.z = 0;
 ```
-```sexc
+```lisp
 (decl (int x) 1 (int y) 2 (int z) 3)
 (set (. p x) 0 (. p y) 0 (. p z) 0)
 ```
@@ -458,7 +458,7 @@ if (x > 0)        sign = 1;
 else if (x < 0)   sign = -1;
 else              sign = 0;
 ```
-```sexc
+```lisp
 (decl (int sign)
   (cond ((> x 0)  1)
         ((< x 0) -1)
@@ -470,13 +470,13 @@ else              sign = 0;
 
 ### Модули и import
 
-```sexc
+```lisp
 ; ring-buffer.sexc
 (%module ring)
 (struct Buffer :fields (int cap) (int head))
 (defn void init (((%ptr Buffer) b) (int c)) ...)
 ```
-```sexc
+```lisp
 ; main.sexc
 (%import "./ring-buffer" :as r)
 (decl (r/Buffer buf) (zero-init))   ; ring/Buffer + alias
@@ -499,7 +499,7 @@ Macro-система ведёт таблицу метадаты на кажды�
 
 Декларативные формы заполняют таблицу автоматически. Когда
 вы пишете
-```sexc
+```lisp
 (struct Buffer
   :fields
   ((%ptr float) data)
@@ -521,7 +521,7 @@ Macro-система ведёт таблицу метадаты на кажды�
 Из `examples/audio-viz/auto-derive.sexc`. Читает `:fields`
 типа и эмитит `Type/print`:
 
-```sexc
+```lisp
 (%defmacro auto-print (type-name)
   ($let ((fields  ($m-get type-name :fields))
          (fn-name ($symcat type-name "/print"))
@@ -548,7 +548,7 @@ Macro-система ведёт таблицу метадаты на кажды�
 `void*`).
 
 Использование:
-```sexc
+```lisp
 (struct Buffer
   :fields
   (int x)
