@@ -14,27 +14,28 @@
 ; ─── Compile-time helpers: формат printf по типу поля ───────────────────────
 
 ($defun $fmt-for-type (ty)
-  ; атомарные типы → конкретные форматы; всё остальное (указатели, struct'ы) → %p
-  ($if ($atom? ty)
-    ($if ($eq? ty 'int)    "%d"
-      ($if ($eq? ty 'float)  "%f"
-        ($if ($eq? ty 'double) "%lf"
-          ($if ($eq? ty 'char)   "%c"
-            ($if ($eq? ty 'size_t) "%zu"
-              "%p")))))
-    "%p"))
+  ; Атомарные типы → конкретные форматы; всё остальное (указатели, struct'ы) → %p.
+  ; $cond с lazy-evaluation — нет каскада вложенных $if.
+  ($cond
+    (($not ($atom? ty))   "%p")
+    (($eq? ty 'int)       "%d")
+    (($eq? ty 'float)     "%f")
+    (($eq? ty 'double)    "%lf")
+    (($eq? ty 'char)      "%c")
+    (($eq? ty 'size_t)    "%zu")
+    (else                 "%p")))
 
 ; Не-атомарные типы и pointer-ы — кастим аргумент в (%ptr void),
 ; иначе printf будет ругаться на несовпадение со спецификатором %p.
 ($defun $cast-for-type (ty arg)
-  ($if ($atom? ty)
-    ($if ($eq? ty 'int)    arg
-      ($if ($eq? ty 'float)  arg
-        ($if ($eq? ty 'double) arg
-          ($if ($eq? ty 'char)   arg
-            ($if ($eq? ty 'size_t) arg
-              `(cast (%ptr void) ,arg))))))
-    `(cast (%ptr void) ,arg)))
+  ($cond
+    (($not ($atom? ty))   `(cast (%ptr void) ,arg))
+    (($eq? ty 'int)       arg)
+    (($eq? ty 'float)     arg)
+    (($eq? ty 'double)    arg)
+    (($eq? ty 'char)      arg)
+    (($eq? ty 'size_t)    arg)
+    (else                 `(cast (%ptr void) ,arg))))
 
 ; ─── Сам макрос auto-print ──────────────────────────────────────────────────
 

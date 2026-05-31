@@ -192,7 +192,7 @@
   - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
-  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
   - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`

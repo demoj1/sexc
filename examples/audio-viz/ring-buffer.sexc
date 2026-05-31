@@ -18,12 +18,12 @@
 (struct Buffer
   :fields
   ((%ptr float) data)
-  (int          capacity)
+  (int          cap)
   (int          head)
   (int          count))
 
 (defn void init (((%ptr Buffer) b) (int c))
-  (set (-> b capacity)   c
+  (set (-> b cap)   c
        (-> b head)  0
        (-> b count) 0
        (-> b data)  (cast (%ptr float) (calloc c (sizeof-type float)))))
@@ -31,26 +31,26 @@
 (defn void push (((%ptr Buffer) b) (float v))
   (decl (int slot) (-> b head))
   (set (aref (-> b data) slot) v
-       (-> b head) (%% (%+ slot 1) (-> b capacity)))
-  (when (%< (-> b count) (-> b capacity))
+       (-> b head) (%% (%+ slot 1) (-> b cap)))
+  (when (%< (-> b count) (-> b cap))
     (incf (-> b count))))
 
 (defn float get (((%ptr Buffer) b) (int idx))
   ; idx: 0 → самый старый сэмпл, count-1 → самый свежий.
   ; head указывает на следующую запись; самый старый = head - count (mod cap).
-  (decl (int real) (%% (%+ (%+ (-> b head) (%- (-> b capacity) (-> b count))) idx)
-                       (-> b capacity)))
+  (decl (int real) (%% (%+ (%+ (-> b head) (%- (-> b cap) (-> b count))) idx)
+                       (-> b cap)))
   (return (aref (-> b data) real)))
 
 (defn int size (((%ptr Buffer) b))
   (return (-> b count)))
 
 (defn int cap (((%ptr Buffer) b))
-  (return (-> b capacity)))
+  (return (-> b cap)))
 
 (defn void release (((%ptr Buffer) b))
   (free (-> b data))
   (set (-> b data)  (cast (%ptr float) 0)
-       (-> b capacity)   0
+       (-> b cap)   0
        (-> b head)  0
        (-> b count) 0))

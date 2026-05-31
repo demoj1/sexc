@@ -102,6 +102,11 @@ let rec eval_expr ctx env expr =
       if is_falsey (eval_expr ctx env cond) then eval_expr ctx env no else eval_expr ctx env yes
   | Raw.List (Raw.Atom "$if" :: [ cond; yes ]) ->
       if is_falsey (eval_expr ctx env cond) then Raw.Atom "nil" else eval_expr ctx env yes
+  | Raw.List (Raw.Atom "$cond" :: clauses) -> eval_cond ctx env clauses
+  | Raw.List (Raw.Atom "$case" :: scrut :: clauses) ->
+      let v = eval_expr ctx env scrut in
+      eval_case ctx env v clauses
+  | Raw.List (Raw.Atom "$case" :: _) -> fail "$case expects: ($case scrutinee clause...)"
   | Raw.List (Raw.Atom "$cons" :: [ hd; tl ]) ->
       let h = eval_expr ctx env hd in
       let t = expect_list (eval_expr ctx env tl) in
@@ -350,6 +355,40 @@ let rec eval_expr ctx env expr =
       in
       eval_expr ctx call_env f.body
   | Raw.List xs -> Raw.List (List.map xs ~f:(eval_expr ctx env))
+
+and eval_body_last ctx env = function
+  | [] -> Raw.Atom "nil"
+  | [ x ] -> eval_expr ctx env x
+  | x :: tl ->
+      ignore (eval_expr ctx env x);
+      eval_body_last ctx env tl
+
+and eval_cond ctx env = function
+  | [] -> Raw.Atom "nil"
+  | Raw.List (Raw.Atom "else" :: body) :: rest ->
+      if not (List.is_empty rest) then fail "$cond: else must be the last clause";
+      if List.is_empty body then fail "$cond: else clause must have a body";
+      eval_body_last ctx env body
+  | Raw.List (test :: body) :: rest ->
+      if List.is_empty body then fail "$cond: clause must have a body";
+      if is_falsey (eval_expr ctx env test) then eval_cond ctx env rest
+      else eval_body_last ctx env body
+  | Raw.List [] :: _ -> fail "$cond: clause must be (test body...) or (else body...)"
+  | _ -> fail "$cond: each clause must be a list"
+
+and eval_case ctx env scrutinee = function
+  | [] -> Raw.Atom "nil"
+  | Raw.List (Raw.Atom "else" :: body) :: rest ->
+      if not (List.is_empty rest) then fail "$case: else must be the last clause";
+      if List.is_empty body then fail "$case: else clause must have a body";
+      eval_body_last ctx env body
+  | Raw.List (pattern :: body) :: rest ->
+      if List.is_empty body then fail "$case: clause must have a body";
+      let pv = eval_expr ctx env pattern in
+      if raw_equal scrutinee pv then eval_body_last ctx env body
+      else eval_case ctx env scrutinee rest
+  | Raw.List [] :: _ -> fail "$case: clause must be (pattern body...) or (else body...)"
+  | _ -> fail "$case: each clause must be a list"
 
 and eval_quasiquote ctx env ~depth expr =
   match expr with

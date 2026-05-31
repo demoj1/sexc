@@ -4,7 +4,7 @@
 
 (%module graph)
 
-; ring-buffer импортируется из main.sexc; здесь только ссылаемся на ring/Buffer
+(%import "./ring-buffer.sexc")
 
 (include <raylib.h>)
 (include <math.h>)

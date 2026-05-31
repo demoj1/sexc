@@ -38,6 +38,16 @@
   :doc "Compile-time conditional."
   :example "($if ($eq? mode fast) (quote A) (quote B))")
 
+(%doc $cond
+  :sig ($cond (test body...)... [(else body...)])
+  :doc "Compile-time multi-branch conditional with lazy evaluation. Tests are evaluated until one is truthy; only that clause's body is evaluated. Body may have multiple forms — value of the last is returned. else clause must be last when present."
+  :example "($cond (($eq? ty 'int) \"%d\") (($eq? ty 'float) \"%f\") (else \"%p\"))")
+
+(%doc $case
+  :sig ($case scrutinee (pattern body...)... [(else body...)])
+  :doc "Compile-time value dispatch. Scrutinee is compared via structural equality (raw_equal) against each pattern's evaluated value; first match wins. else clause must be last when present."
+  :example "($case ty ('int \"%d\") ('float \"%f\") (else \"%p\"))")
+
 (%doc $list
   :sig ($list form...)
   :doc "Build a list from evaluated items. Defined as $defun in std/meta.sexc."
