@@ -151,18 +151,32 @@ let failf_at ~phase span fmt =
    привязкой к месту вызова в исходнике. *)
 let current_top_span : span option ref = ref None
 
+(* Span формы, которую СЕЙЧАС вычисляет $-evaluator (macro.eval_expr).
+   Обновляется на каждом рекурсивном шаге, поэтому в момент ошибки содержит
+   span самой глубокой обрабатываемой подформы. На нормальном возврате
+   восстанавливается; на исключении остаётся "грязным", что нам и нужно —
+   promote подхватит самую точную локацию. Имеет приоритет над
+   current_top_span. *)
+let current_eval_span : span option ref = ref None
+
 let with_top_span (sp : span) (f : unit -> 'a) : 'a =
   let prev = !current_top_span in
   current_top_span := Some sp;
+  current_eval_span := None;
   Exn.protect ~f ~finally:(fun () -> current_top_span := prev)
 
-(* Конвертирует bare Sexc_error в Sexc_diagnostic, используя текущий
-   top-form span. Без активного span (вне per-form секции) — просто
-   пробрасывает исходное исключение. *)
+(* Конвертирует bare Sexc_error в Sexc_diagnostic. Приоритет локации:
+   current_eval_span (самая глубокая вычисляемая форма) → current_top_span
+   (top-level форма). Без span'а — пробрасывает исходное исключение. *)
 let promote_error_to_diagnostic ~phase f =
   try f () with
   | Sexc_error msg as e ->
-      (match !current_top_span with
+      let span =
+        match !current_eval_span with
+        | Some _ as s -> s
+        | None -> !current_top_span
+      in
+      (match span with
        | None -> raise e
        | Some sp -> raise (Sexc_diagnostic { phase; message = msg; span = sp }))
 

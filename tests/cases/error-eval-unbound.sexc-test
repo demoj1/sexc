@@ -1,0 +1,12 @@
+(struct Foo :fields (int x) (int y))
+
+(defn int main ()
+  (%evals
+    ($for (field ($m-get 'Foo :fields))
+          ($let ((name ($car field)))
+                `(printf "%s\n" ,($strrr name)))))
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:7:35: error[macro-eval]: Unbound variable in macro eval: $strrr
+                `(printf "%s\n" ,($strrr name)))))
+                                  ^

@@ -90,13 +90,26 @@ let is_self_evaluating_atom a =
   || Option.is_some (Int.of_string_opt a)
   || Option.is_some (Float.of_string_opt a)
 
+(* Обёртка: запоминает span текущей вычисляемой формы в Common.current_eval_span,
+   чтобы bare Sexc_error из любого места eval_expr_inner promote'ился до точной
+   локации подформы (а не до top-level формы). На исключении ref остаётся
+   грязным намеренно — это самая глубокая форма на момент падения. *)
 let rec eval_expr ctx env expr =
+  let prev = !Common.current_eval_span in
+  (match Raw.span_of expr with
+   | Some _ as s -> Common.current_eval_span := s
+   | None -> ());
+  let r = eval_expr_inner ctx env expr in
+  Common.current_eval_span := prev;
+  r
+
+and eval_expr_inner ctx env expr =
   match expr with
-  | Raw.Atom (a, _) -> (
+  | Raw.Atom (a, sp) -> (
       match Map.find env a with
       | Some v -> v
       | None when is_self_evaluating_atom a -> expr
-      | None -> failf "Unbound variable in macro eval: %s" a)
+      | None -> Common.failf_at ~phase:"macro-eval" sp "Unbound variable in macro eval: %s" a)
   | Raw.Str (_, _) -> expr
   | Raw.List ([], _) -> Raw.List ([], None)
   | Raw.List ((Raw.Atom ("quote", _) :: [ body ]), _) -> body

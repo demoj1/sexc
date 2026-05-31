@@ -141,11 +141,15 @@ type t =
 Откуда берётся span:
 - **`src/reader.ml:parse_many`** — каждый узел пишется с реальным span (`file`/`source`/`start_off`/`end_off`) из cursor state.
 - **Macro синтез** (quasiquote, splice, unquote, литералы внутри тела макроса) — наследует **call-site** span текущего раскрываемого макроса через `Macro.ctx.expand_site_span`. `Macro.apply` устанавливает поле перед `eval_expr m.body`, `eval_quasiquote` читает и проставляет span на синтезированные узлы. Это значит, что ошибки **внутри stdlib-макроса** указывают на пользовательский call-site, а не на `std/c-interop.sexc`.
-- **Top-level fallback** — `Common.current_top_span` остаётся: если deep span не доступен (bare `fail`/`failf` в каком-нибудь helper), `promote_error_to_diagnostic` поднимает ошибку до top-form.
+
+Три уровня приоритета локации (от точного к грубому), `promote_error_to_diagnostic` выбирает первый доступный:
+1. **`Common.current_eval_span`** — span формы, которую СЕЙЧАС вычисляет `$`-evaluator. `eval_expr` обёрнут так, что на каждом рекурсивном шаге пишет `Raw.span_of expr` в этот ref; на исключении ref остаётся грязным (= самая глубокая упавшая подформа). Это покрывает ошибки compile-time Lisp'а внутри `%eval`/`%evals`/`$defun` (например опечатка `$for222222` или unbound `$strrr` глубоко внутри quasiquote). Сбрасывается в None в начале каждой top-формы (`with_top_span`).
+2. **`Common.current_top_span`** — span top-level формы. Fallback для bare `fail`/`failf` в helper'ах без span'а.
+3. None → пробрасывается как есть `Sexc_error`.
 
 Бросать ошибку с конкретным span:
-- `Common.fail_at ~phase span msg` / `Common.failf_at ~phase span fmt` — если span = Some, бросает `Sexc_diagnostic`; если None, fall back на `Sexc_error` (который потом promoted до top-form).
-- Macro.apply уже использует `failf_at` для arity-ошибок (`Macro X expects N arguments`).
+- `Common.fail_at ~phase span msg` / `Common.failf_at ~phase span fmt` — если span = Some, бросает `Sexc_diagnostic`; если None, fall back на `Sexc_error` (который потом promoted).
+- `Macro.apply` использует `failf_at` для arity-ошибок surface-макросов; `eval_expr_inner` использует `failf_at` для unbound-variable (span самого атома).
 
 `raw_equal` в `src/macro.ml` пишется span-агностично — pattern-match `Raw.Atom (x, _), Raw.Atom (y, _) -> ...`. Это критично для `$eq?` и `$case`.
 
