@@ -1,8 +1,15 @@
 ; std/meta.sexc
-; Generic surface helpers built on top of c-interop macros.
 ;
-; Add reusable high-level helpers here (iteration sugar, convenience forms, etc).
-; Avoid putting C-specific low-level wrappers in this file.
+; Compile-time / structural primitives. Содержимое этого файла НЕ
+; разворачивается в %-IR напрямую — оно живёт на уровне макросистемы
+; и манипулирует формами.
+;
+; Сюда добавлять:
+; - $defun-функции для работы с Raw-формами на этапе раскрытия макросов
+; - структурный сахар, не привязанный к C (threading, substitution и т.п.)
+;
+; C-mirror sugar (control flow / loops / assignment patterns) живёт в
+; std/c-interop.sexc.
 
 ; ─── Compile-time functions ($defun) ────────────────────────────────────────
 
@@ -41,91 +48,7 @@
       ($car lst)
       ($nth ($cdr lst) ($- idx 1)))))
 
-; ─── Surface macros ──────────────────────────────────────────────────────────
-
-; when
-; (when cond form...)
-; => (%if cond (%block form...))
-(%doc when
-  :doc "Execute BODY when COND is truthy."
-  :example "(when (> x 0) (set y x))")
-(%defmacro when (cond &rest body)
-  `(%if ,cond (%block ,@body)))
-
-; unless
-; (unless cond form...)
-; => (%if (%! cond) (%block form...))
-(%doc unless
-  :doc "Execute BODY when COND is falsey."
-  :example "(unless done (set done 1))")
-(%defmacro unless (cond &rest body)
-  `(%if (%! ,cond) (%block ,@body)))
-
-; incf / decf
-; (incf x) => (set x (+ x 1))
-; (decf x) => (set x (- x 1))
-(%doc incf
-  :doc "Increment X by 1."
-  :example "(incf i)")
-(%defmacro incf (x)
-  `(%set ,x (%+ ,x 1)))
-
-(%doc decf
-  :doc "Decrement X by 1."
-  :example "(decf i)")
-(%defmacro decf (x)
-  `(%set ,x (%- ,x 1)))
-
-; incf-by / decf-by
-; (incf-by x n) => (set x (+ x n))
-; (decf-by x n) => (set x (- x n))
-(%doc incf-by
-  :doc "Increment X by N."
-  :example "(incf-by total 4)")
-(%defmacro incf-by (x n)
-  `(%set ,x (%+ ,x ,n)))
-
-(%doc decf-by
-  :doc "Decrement X by N."
-  :example "(decf-by total 4)")
-(%defmacro decf-by (x n)
-  `(%set ,x (%- ,x ,n)))
-
-; dotimes
-; (dotimes i n form...)
-; => for i in [0, n)
-(%doc dotimes
-  :doc "Loop I from 0 to N-1."
-  :example "(dotimes i 10 (post-inc sum))")
-(%defmacro dotimes (i n &rest body)
-  `(%for (%decl int ,i 0) (%< ,i ,n) (%post-inc ,i) (%block ,@body)))
-
-; for-range
-; (for-range i start stop form...)
-; => for i in [start, stop)
-(%doc for-range
-  :doc "Loop I from START to STOP-1."
-  :example "(for-range i 3 7 (set last i))")
-(%defmacro for-range (i start stop &rest body)
-  `(%for (%decl int ,i ,start) (%< ,i ,stop) (%post-inc ,i) (%block ,@body)))
-
-; repeat
-; (repeat n form...)
-; Repeats body n times without exposing an index variable.
-(%doc repeat
-  :doc "Repeat BODY N times without exposing an index variable."
-  :example "(repeat 3 (post-inc ticks))")
-(%defmacro repeat (n &rest body)
-  `(repeat-expand ,($gensym "repeat_i_") ,n (block ,@body)))
-
-(%doc repeat-expand
-  :doc "Internal helper used by repeat expansion."
-  :internal t)
-(%defmacro repeat-expand (i n body)
-  `(%for (%decl int ,i 0)
-         (%< ,i ,n)
-         (%post-inc ,i)
-         ,body))
+; ─── Threading macros (generic structural sugar) ─────────────────────────────
 
 ; |> (thread-first, like Clojure ->)
 ; (|> x (f a) (g b)) => (g (f x a) b)

@@ -35,9 +35,11 @@
 ## Карта stdlib (SexC)
 
 - `std/core.sexc` — агрегатор prelude (`%import` цепочки), сюда не добавлять большую логику.
-- `std/c-interop.sexc` — C-facing surface DSL (defn/decl/struct/operators и т.п.). Декларативные макросы (`defn`, `decl`, `adecl`, `struct`, `union`, `define`) дополнительно населяют compile-time metadata через `$m-put`.
-- `std/meta.sexc` — generic helpers (when/unless/dotimes/repeat/`|>` и т.п.) **плюс** compile-time функции через `$defun` (`$append`, `$length`, `$reverse`, `$nth`, `$list`, `$subst`).
+- `std/c-interop.sexc` — **всё, что (в конечном счёте) разворачивается в `%`-IR**. От прямых C-mirror (`defn`/`decl`/`adecl`/`struct`/`union`/операторы) до высокоуровневого C-statement sugar (`when`/`unless`/`incf`/`decf`/`incf-by`/`decf-by`/`dotimes`/`for-range`/`repeat`). Декларативные макросы (`defn`, `decl`, `adecl`, `struct`, `union`, `define`) дополнительно населяют compile-time metadata через `$m-put`.
+- `std/meta.sexc` — **то, что НЕ привязано к C**. Compile-time `$defun` библиотека (`$list`, `$append`, `$subst`, `$length`, `$reverse`, `$nth`, `$--reverse-aux`) и generic structural sugar (`|>`, `||>`, `|as>`).
 - `std/ocaml-api.sexc` — docs-only `%doc` записи для OCaml-only символов (`%...`, `$...`) и для `$defun`-функций из meta.sexc.
+
+Правило для размещения нового макроса: *развернётся ли это (в итоге) в `%`-IR форму?* Да → `c-interop.sexc`. Нет (compile-time / form manipulation) → `meta.sexc`.
 
 Куда добавлять макросы:
 - макрос напрямую про C/interop/низкоуровневый surface синтаксис -> `std/c-interop.sexc`.
@@ -193,8 +195,8 @@
   - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - C-interop: `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `while`, `for`, `return`, `set`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
-  - Generic/meta helpers: `when`, `unless`, `incf`, `decf`, `incf-by`, `decf-by`, `dotimes`, `for-range`, `repeat`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
+  - `std/meta.sexc` (не привязано к C): `|>`, `||>`, `|as>` (threading)
 
 ## Полезные sugar-макросы
 
