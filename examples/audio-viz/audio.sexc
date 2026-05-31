@@ -1,8 +1,70 @@
-; audio.sexc — внешние биндинги к audio_impl.c.
+; audio.sexc — захват микрофонного потока через miniaudio.
 ;
-; Объявляем три extern C-функции. Никакого %module здесь — он
-; переименовал бы и сами %decl-fn, что сломало бы линковку.
+; Раньше тут были только биндинги к audio_impl.c. Теперь реализация
+; целиком на SexC: подключаем header-only miniaudio, объявляем static-глобалы,
+; пишем callback и три обёртки. audio_impl.c больше не нужен.
 
-(%decl-fn int   audio_start     ())
-(%decl-fn float audio_get_level ())
-(%decl-fn void  audio_stop      ())
+(%define MINIAUDIO_IMPLEMENTATION 1)
+(include <miniaudio.h>)
+(include <math.h>)
+(include <stdlib.h>)
+
+; --- Static globals ---------------------------------------------------------
+;
+; g_device / g_running обновляются из main-треда (audio_start / audio_stop);
+; g_level пишется из audio-треда в on_capture, читается из main-треда.
+; volatile float достаточно для визуального сглаживания: aligned 32-bit
+; load/store атомарен на всех платформах raylib, лочить не нужно.
+
+(decl ((%static ma_device)         g_device)  (zero-init))
+(decl ((%static int)               g_running) 0)
+(decl ((%static (%volatile float)) g_level)   0.0f)
+
+; --- Audio thread callback --------------------------------------------------
+;
+; miniaudio дёргает on_capture с куском audio frames. Считаем RMS уровень
+; и сохраняем в g_level. Никаких блокировок — main-тред читает то что есть.
+
+(defn void on_capture (((%ptr ma_device)         dev)
+                       ((%ptr void)              output)
+                       ((%ptr (%const void))     input)
+                       (ma_uint32                frames))
+  ; гасим unused-warning'и: callback signature шире чем нам нужно
+  (cast void dev)
+  (cast void output)
+
+  (when (and (not= input NULL) (> frames 0))
+    (decl ((%ptr (%const float)) samples) (cast (%ptr (%const float)) input)
+          (float                 sum)     0.0f)
+    (dotimes i frames
+      (decl (float s) (aref samples i))
+      (incf-by sum (* s s)))
+    (set g_level (sqrtf (/ sum (cast float frames))))))
+
+; --- Public API (linker exposes these to main.sexc) -------------------------
+
+(defn int audio_start ()
+  (when g_running (return 1))
+
+  (decl (ma_device_config cfg) (ma_device_config_init ma_device_type_capture))
+  (set (. cfg capture format)   ma_format_f32
+       (. cfg capture channels) 1
+       (. cfg sampleRate)        48000
+       (. cfg dataCallback)      on_capture)
+
+  (when (not= (ma_device_init  NULL (%addr cfg) (%addr g_device)) MA_SUCCESS)
+    (return 0))
+  (when (not= (ma_device_start (%addr g_device)) MA_SUCCESS)
+    (ma_device_uninit (%addr g_device))
+    (return 0))
+
+  (set g_running 1)
+  (return 1))
+
+(defn float audio_get_level ()
+  (return g_level))
+
+(defn void audio_stop ()
+  (when (not g_running) (%return))
+  (ma_device_uninit (%addr g_device))
+  (set g_running 0))

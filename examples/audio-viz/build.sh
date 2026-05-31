@@ -26,9 +26,10 @@ fi
 
 OUT="${DIR}/audio-viz"
 
-# 1. SexC → main.c (через -C, передаём gcc нужные флаги).
+# SexC → C → линк. Реализация miniaudio тоже в SexC
+# (audio.sexc делает MINIAUDIO_IMPLEMENTATION+include), отдельного .c нет.
 exec "${SEXC}" "${DIR}/main.sexc" -C \
-    gcc % "${DIR}/audio_impl.c" \
+    gcc % \
         -I"${DIR}/vendor/miniaudio" \
         -O2 -Wall \
         -lraylib -lm -lpthread -ldl \
