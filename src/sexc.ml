@@ -33,6 +33,7 @@ let usage () =
   prerr_endline "  sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]";
   prerr_endline "  sexc [--no-prelude] xref --json <symbol> <input.sexc>";
   prerr_endline "  sexc print-cache-dump";
+  prerr_endline "  sexc [--no-prelude] m-dump [--json] <input.sexc>";
   prerr_endline "";
   prerr_endline "By default, std/core.sexc is auto-loaded from stdlib path (implicit prelude).";
   prerr_endline "Use --no-prelude to disable auto prelude.";
@@ -73,6 +74,11 @@ type command =
       input_path : string;
     }
   | Print_cache_dump
+  | M_dump of {
+      use_prelude : bool;
+      input_path : string;
+      json : bool;
+    }
 
 let parse_complete_args use_prelude args =
   let json, rest =
@@ -113,6 +119,9 @@ let parse_command args =
   | "xref" :: tl -> parse_xref_args use_prelude tl
   | "print-cache-dump" :: [] -> Print_cache_dump
   | "print-cache-dump" :: _ -> fail "print-cache-dump expects no arguments"
+  | "m-dump" :: "--json" :: input :: [] -> M_dump { use_prelude; input_path = input; json = true }
+  | "m-dump" :: input :: [] -> M_dump { use_prelude; input_path = input; json = false }
+  | "m-dump" :: _ -> fail "m-dump expects: sexc [--no-prelude] m-dump [--json] <input.sexc>"
   | [] -> fail "missing input file"
   | input :: tail -> (
       match tail with
@@ -195,6 +204,16 @@ let () =
     | Print_cache_dump ->
         Out_channel.output_string stdout (Index.render_cache_dump ());
         Out_channel.newline stdout
+    | M_dump { use_prelude; input_path; json } ->
+        if String.equal input_path "-" then fail "m-dump does not support stdin input ('-')";
+        let meta = Compiler.metadata_of_file ~use_prelude input_path in
+        let out =
+          if json then Macro.format_meta_json meta
+          else Macro.format_meta_text meta
+        in
+        Out_channel.output_string stdout out;
+        if not json then ()
+        else Out_channel.newline stdout
   with
   | Sexc_diagnostic d ->
       prerr_endline (render_diagnostic d);

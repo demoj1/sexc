@@ -148,6 +148,16 @@
   :doc "Concatenate parts into a string literal (returns Raw.Str). Use for building printf format strings or other compile-time string values."
   :example "($str \"  \" field-name \" = %d\\n\")")
 
+(%doc $namespace-of
+  :sig ($namespace-of qualified-name)
+  :doc "Return the namespace of a qualified atom — everything before the last '/'. Returns nil if there's no '/'. Used by declarative macros (defn, struct, union, define) to register themselves under their parent namespace's :fns / :types / :defines lists."
+  :example "($namespace-of 'ring/Buffer/init) ; → ring/Buffer")
+
+(%doc $m-append
+  :sig ($m-append sym key item)
+  :doc "Append ITEM to the list stored at SYM/KEY in compile-time metadata. Handles the case where the key doesn't exist yet (starts a new list). Defined as $defun in std/meta.sexc."
+  :example "($m-append 'ring :fns 'ring/init)")
+
 (%doc $--map
   :sig ($--map expr list)
   :doc "Map LIST with implicit 'it' binding."

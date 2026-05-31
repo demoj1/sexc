@@ -170,6 +170,33 @@
 - `(%m-dump)` — top-level интринсик, разворачивается в `(%comment "...")` с отсортированным дампом всей метадаты на момент expand'а. Поставить в конце файла, чтобы увидеть финальное состояние.
 - `(%comment "text")` — новая top-level форма, эмитит `/*text*/` (parse в `frontend.ml`, codegen в `codegen_c.ml`).
 
+### Module-level metadata (auto-populated)
+
+Декларативные макросы дополнительно регистрируют себя в **родительском namespace**'е через `$namespace-of` + `$m-append`. Тогда модуль или struct становятся контейнером своих членов:
+
+- `defn name ...` → `($m-append (namespace-of name) :fns name)`
+- `define name ...` → `:defines`
+- `struct name ...` → `:types` родителя; **каждый метод** из `:methods` → `:fns` самой структуры (плюс собственная `$m-put` запись)
+- `union name ...` → `:types`
+
+Примеры:
+```sexc
+($m-get 'ring :types)         ; → ('ring/Buffer ...) — все struct/union модуля
+($m-get 'ring/Buffer :fns)    ; → ('ring/Buffer/init 'ring/Buffer/push ...) — методы
+($m-get 'mymod :fns)          ; → top-level defn'ы (не methods)
+($m-get 'mymod :defines)      ; → константы define
+```
+
+Намespace разбивается по **последнему** `/` — каждое имя попадает в свой непосредственный родительский namespace.
+
+### CLI: `sexc m-dump`
+
+```
+sexc [--no-prelude] m-dump [--json] <input.sexc>
+```
+
+Прогоняет macro expansion и дампит `ctx.sym_meta`. JSON-вариант — для tooling. Реализовано через `Compiler.metadata_of_file` (то же что `compile_forms`, но останавливается после expand и возвращает sym_meta). Форматтеры: `Macro.format_meta_text`, `Macro.format_meta_json`.
+
 ## File-level module namespace
 
 - Поддержан `%module` на уровне файла: `(%module foo)`.
@@ -192,7 +219,7 @@
   - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
-  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
   - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`

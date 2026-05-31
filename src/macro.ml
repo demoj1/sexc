@@ -138,6 +138,15 @@ let rec eval_expr ctx env expr =
         |> String.concat ~sep:""
       in
       Raw.Str text
+  | Raw.List (Raw.Atom "$namespace-of" :: [ x ]) ->
+      (* "a/b/c" → "a/b"; "x" → nil. Split on LAST '/' — каждое имя
+         попадает в свой непосредственный родительский namespace. *)
+      let s = expect_atom_or_string (eval_expr ctx env x) in
+      (match String.rsplit2 s ~on:'/' with
+       | Some (prefix, _) -> Raw.Atom prefix
+       | None -> Raw.Atom "nil")
+  | Raw.List (Raw.Atom "$namespace-of" :: _) ->
+      fail "$namespace-of expects exactly one argument"
   | Raw.List (Raw.Atom "$let" :: Raw.List binds :: body) ->
       let rec bind env = function
         | [] -> env
@@ -463,6 +472,54 @@ let format_meta_dump sym_meta =
               (Printf.sprintf "\n *     %s = %s" key (raw_to_sexp data))));
   Buffer.add_string buf "\n ";
   escape_for_c_comment (Buffer.contents buf)
+
+(* Plain текстовый дамп без C-комментарной обёртки — для CLI. *)
+let format_meta_text sym_meta =
+  if Map.is_empty sym_meta then "(no symbols recorded)\n"
+  else
+    let buf = Buffer.create 512 in
+    Map.iteri sym_meta ~f:(fun ~key:sym ~data:meta ->
+        Buffer.add_string buf (Printf.sprintf "%s:\n" sym);
+        Map.iteri meta ~f:(fun ~key ~data ->
+            Buffer.add_string buf
+              (Printf.sprintf "  %s = %s\n" key (raw_to_sexp data))));
+    Buffer.contents buf
+
+(* JSON-сериализация. Атомы → строка; Raw.Str → строка с маркером (чтобы
+   tooling мог отличить "foo" от foo); списки → массивы. *)
+let json_escape s =
+  let buf = Buffer.create (String.length s) in
+  String.iter s ~f:(fun c ->
+      match c with
+      | '\"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c when Char.to_int c < 0x20 ->
+          Buffer.add_string buf (Printf.sprintf "\\u%04x" (Char.to_int c))
+      | c -> Buffer.add_char buf c);
+  Buffer.contents buf
+
+let rec raw_to_json = function
+  | Raw.Atom s -> Printf.sprintf "\"%s\"" (json_escape s)
+  | Raw.Str s -> Printf.sprintf "{\"str\":\"%s\"}" (json_escape s)
+  | Raw.List xs ->
+      "[" ^ String.concat ~sep:"," (List.map xs ~f:raw_to_json) ^ "]"
+
+let format_meta_json sym_meta =
+  let entries =
+    Map.to_alist sym_meta
+    |> List.map ~f:(fun (sym, kv) ->
+           let pairs =
+             Map.to_alist kv
+             |> List.map ~f:(fun (k, v) ->
+                    Printf.sprintf "\"%s\":%s" (json_escape k) (raw_to_json v))
+             |> String.concat ~sep:","
+           in
+           Printf.sprintf "\"%s\":{%s}" (json_escape sym) pairs)
+  in
+  "{" ^ String.concat ~sep:"," entries ^ "}"
 
 let collect forms =
   let rec loop defs ct_fns normal = function

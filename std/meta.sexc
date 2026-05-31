@@ -48,6 +48,16 @@
       ($car lst)
       ($nth ($cdr lst) ($- idx 1)))))
 
+; ─── Symbol metadata helpers ────────────────────────────────────────────────
+
+; append item в list-валюэ метадату sym/key.
+; Если ключа ещё нет — стартует с пустого списка.
+($defun $m-append (sym key item)
+  ($let ((cur ($m-get sym key)))
+    ($m-put sym key
+            ($append ($if ($null? cur) ($list) cur)
+                     ($list item)))))
+
 ; ─── Threading macros (generic structural sugar) ─────────────────────────────
 
 ; |> (thread-first, like Clojure ->)

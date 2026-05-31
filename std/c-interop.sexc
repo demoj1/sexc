@@ -30,6 +30,8 @@
 (%defmacro define (name value)
   ($do
     ($m-put name :kind 'define :value value)
+    ($let ((ns ($namespace-of name)))
+      ($if ($null? ns) nil ($m-append ns :defines name)))
     `(%define ,name ,value)))
 
 ; defn
@@ -41,6 +43,8 @@
 (%defmacro defn (ret name params &rest body)
   ($do
     ($m-put name :kind 'fn :return-type ret :params params)
+    ($let ((ns ($namespace-of name)))
+      ($if ($null? ns) nil ($m-append ns :fns name)))
     `(%def-fn ,ret ,name ,params (%block ,@body))))
 
 ; decl
@@ -331,6 +335,9 @@
          (methods ($|> state $cdr $cdr $car)))
     ($assert ($not ($eq? phase 'start)) "struct expects ':fields' section")
     ($m-put name :kind 'struct :fields fields :methods methods)
+    ; Регистрация структуры в parent namespace ('s :types).
+    ($let ((ns ($namespace-of name)))
+      ($if ($null? ns) nil ($m-append ns :types name)))
     `(%top-level-splice
        (%typedef (%struct ,name ,@fields) ,name)
        ,@($map
@@ -344,7 +351,12 @@
                     (params ($|> it $cdr $cdr $cdr $car))
                     (body   ($|> it $cdr $cdr $cdr $cdr)))
                ($assert ($atom? mname) "struct method name must be an atom")
-               `(%def-fn ,ret ,($symcat name "/" mname) ,params (%block ,@body))))
+               ($let ((fq ($symcat name "/" mname)))
+                 ($do
+                   ; Каждый метод регистрируется как функция + добавляется в (Type :fns).
+                   ($m-put fq :kind 'fn :return-type ret :params params)
+                   ($m-append name :fns fq)
+                   `(%def-fn ,ret ,fq ,params (%block ,@body))))))
            methods))))
 
 ; union
@@ -356,6 +368,8 @@
 (%defmacro union (name &rest fields)
   ($do
     ($m-put name :kind 'union :fields fields)
+    ($let ((ns ($namespace-of name)))
+      ($if ($null? ns) nil ($m-append ns :types name)))
     `(%typedef (%union ,name ,@fields) ,name)))
 
 ; zero-init

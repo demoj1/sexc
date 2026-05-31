@@ -411,3 +411,29 @@ let compile_file ?(use_prelude = true) path =
       ~use_prelude path
   in
   compile_forms ~use_prelude forms
+
+(* Прогоняет тот же пайплайн что compile_forms, но останавливается после
+   macro expansion и возвращает накопленную compile-time metadata
+   (ctx.sym_meta). Используется CLI-командой m-dump. *)
+let metadata_of_file ?(use_prelude = true) path =
+  let _, _, forms =
+    load_forms_from_file
+      ~visited:String.Set.empty
+      ~module_names:String.Map.empty
+      ~use_prelude path
+  in
+  let module_name, forms = strip_module_decl forms in
+  let forms =
+    match module_name with
+    | None -> forms
+    | Some name -> apply_module_namespace name forms
+  in
+  let is_doc_form = function
+    | Raw.List (Raw.Atom "%doc" :: _) -> true
+    | _ -> false
+  in
+  let prelude_forms = if use_prelude then load_prelude_forms () else [] in
+  let non_doc = List.filter (prelude_forms @ forms) ~f:(fun f -> not (is_doc_form f)) in
+  let mctx, non_macro = Macro.collect non_doc in
+  let _ = Macro.expand_program mctx non_macro in
+  mctx.sym_meta
