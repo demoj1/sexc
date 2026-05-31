@@ -17,41 +17,41 @@
 
 ; нормализованный уровень [0..1] → Y-координата (низ = большой уровень)
 (defn int level->y ((float lvl) (int height))
-  (decl (int usable) (%- height (%* GRAPH_PAD 2))
-        (int bot)    (%- height GRAPH_PAD))
-  (return (%- bot (cast int (%* lvl (cast float usable))))))
+  (decl (int usable) (- height (* GRAPH_PAD 2))
+        (int bot)    (- height GRAPH_PAD))
+  (return (- bot (cast int (* lvl (cast float usable))))))
 
 ; --- Public API: graph/draw -------------------------------------------------
 
 (defn void draw (((%ptr ring/Buffer) buf) (int width) (int height))
   ; рамка
   (DrawRectangleLines GRAPH_PAD GRAPH_PAD
-                      (%- width  (%* GRAPH_PAD 2))
-                      (%- height (%* GRAPH_PAD 2))
+                      (- width  (* GRAPH_PAD 2))
+                      (- height (* GRAPH_PAD 2))
                       DARKGRAY)
 
   ; разметка по горизонтали на уровнях 0.25 / 0.5 / 0.75 / 1.0
-  (decl (int plot-h) (%- height (%* GRAPH_PAD 2))
+  (decl (int plot-h) (- height (* GRAPH_PAD 2))
         (int plot-x) GRAPH_PAD
-        (int plot-w) (%- width  (%* GRAPH_PAD 2)))
+        (int plot-w) (- width  (* GRAPH_PAD 2)))
   (for-range gi 1 4
-    (decl (int gy) (%+ GRAPH_PAD (%/ (%* gi plot-h) 4)))
-    (DrawLine plot-x gy (%+ plot-x plot-w) gy
+    (decl (int gy) (+ GRAPH_PAD (/ (* gi plot-h) 4)))
+    (DrawLine plot-x gy (+ plot-x plot-w) gy
               (ColorFromHSV 0.0f 0.0f 0.18f)))
 
   ; полилиния по сэмплам
-  (decl (int n) (ring/size buf))
-  (when (%> n 1)
-    (decl (float step-x) (%/ (cast float plot-w) (cast float (%- n 1))))
-    (for-range i 0 (%- n 1)
-      (decl (float l0) (ring/get buf i)
-            (float l1) (ring/get buf (%+ i 1))
-            (int   x0) (%+ plot-x (cast int (%* (cast float i)       step-x)))
-            (int   x1) (%+ plot-x (cast int (%* (cast float (%+ i 1)) step-x)))
+  (decl (int n) (ring/Buffer/size buf))
+  (when (> n 1)
+    (decl (float step-x) (/ (cast float plot-w) (cast float (- n 1))))
+    (for-range i 0 (- n 1)
+      (decl (float l0) (ring/Buffer/get buf i)
+            (float l1) (ring/Buffer/get buf (+ i 1))
+            (int   x0) (+ plot-x (cast int (* (cast float i)       step-x)))
+            (int   x1) (+ plot-x (cast int (* (cast float (+ i 1)) step-x)))
             (int   y0) (level->y l0 height)
             (int   y1) (level->y l1 height)
             ; зелёный→жёлтый→красный по среднему уровню сегмента
-            (float avg)  (%/ (%+ l0 l1) 2.0f)
-            (float hue)  (%- 120.0f (%* avg 120.0f))
+            (float avg)  (/ (+ l0 l1) 2.0f)
+            (float hue)  (- 120.0f (* avg 120.0f))
             (Color clr)  (ColorFromHSV hue 0.85f 0.95f))
       (DrawLine x0 y0 x1 y1 clr))))

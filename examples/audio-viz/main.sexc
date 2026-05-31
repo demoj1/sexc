@@ -32,11 +32,11 @@
 
 (defn int main ()
   (decl (ring/Buffer buf) (zero-init))
-  (ring/init (%addr buf) HISTORY_LEN)
+  (ring/Buffer/init (%addr buf) HISTORY_LEN)
 
-  (when (%! (audio_start))
+  (when (not (audio_start))
     (fprintf stderr "Failed to start audio capture\n")
-    (ring/release (%addr buf))
+    (ring/Buffer/release (%addr buf))
     (return 1))
 
   (InitWindow WIDTH HEIGHT "SexC audio level visualizer")
@@ -46,10 +46,10 @@
   (printf "Started with buffer:\n")
   (ring/Buffer/print (%addr buf))
 
-  (while (%! (WindowShouldClose))
+  (while (not (WindowShouldClose))
     ; ||> читается как: уровень → push в буфер (последний аргумент)
     (||> (audio_get_level)
-         (ring/push (%addr buf)))
+         (ring/Buffer/push (%addr buf)))
 
     (BeginDrawing)
       (ClearBackground BLACK)
@@ -59,12 +59,12 @@
       (decl (float lvl) (audio_get_level))
       (DrawText (TextFormat "level: %.4f   history: %ds" lvl HISTORY_SECONDS)
                 12 4 18 RAYWHITE)
-      (DrawText "press ESC to quit" (%- WIDTH 180) 4 14 GRAY)
+      (DrawText "press ESC to quit" (- WIDTH 180) 4 14 GRAY)
     (EndDrawing))
 
   (CloseWindow)
   (audio_stop)
-  (ring/release (%addr buf))
+  (ring/Buffer/release (%addr buf))
   (return 0))
 
 ; --- Compile-time дамп метадаты в виде C-комментария -----------------------
