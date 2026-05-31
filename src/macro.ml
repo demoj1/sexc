@@ -127,6 +127,12 @@ let rec eval_expr ctx env expr =
         |> String.concat ~sep:""
       in
       Raw.Atom text
+  | Raw.List (Raw.Atom "$str" :: parts) ->
+      let text =
+        List.map parts ~f:(fun p -> eval_expr ctx env p |> expect_atom_or_string)
+        |> String.concat ~sep:""
+      in
+      Raw.Str text
   | Raw.List (Raw.Atom "$let" :: Raw.List binds :: body) ->
       let rec bind env = function
         | [] -> env

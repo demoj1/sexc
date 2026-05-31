@@ -1,0 +1,64 @@
+; auto-derive.sexc — code-gen макросы поверх compile-time метадаты.
+;
+; struct-макрос автоматически кладёт :fields в ($m-get type :fields).
+; Здесь читаем эту метадату и генерим вспомогательные функции вроде
+; Type/print без рукописных stub-ов.
+;
+; Использование:
+;   (struct Vec3 :fields (float x) (float y) (float z))
+;   (auto-print Vec3)
+;   ; → defines Vec3/print : (%ptr Vec3) → void
+
+(include <stdio.h>)
+
+; ─── Compile-time helpers: формат printf по типу поля ───────────────────────
+
+($defun $fmt-for-type (ty)
+  ; атомарные типы → конкретные форматы; всё остальное (указатели, struct'ы) → %p
+  ($if ($atom? ty)
+    ($if ($eq? ty 'int)    "%d"
+      ($if ($eq? ty 'float)  "%f"
+        ($if ($eq? ty 'double) "%lf"
+          ($if ($eq? ty 'char)   "%c"
+            ($if ($eq? ty 'size_t) "%zu"
+              "%p")))))
+    "%p"))
+
+; Не-атомарные типы и pointer-ы — кастим аргумент в (%ptr void),
+; иначе printf будет ругаться на несовпадение со спецификатором %p.
+($defun $cast-for-type (ty arg)
+  ($if ($atom? ty)
+    ($if ($eq? ty 'int)    arg
+      ($if ($eq? ty 'float)  arg
+        ($if ($eq? ty 'double) arg
+          ($if ($eq? ty 'char)   arg
+            ($if ($eq? ty 'size_t) arg
+              `(cast (%ptr void) ,arg))))))
+    `(cast (%ptr void) ,arg)))
+
+; ─── Сам макрос auto-print ──────────────────────────────────────────────────
+
+(%doc auto-print
+  :sig (auto-print type-name)
+  :doc "Generate Type/print debug printer from the :fields metadata recorded by struct.")
+(%defmacro auto-print (type-name)
+  ($let ((fields  ($m-get type-name :fields))
+         (fn-name ($symcat type-name "/print"))
+         (ptr-ty  ($list '%ptr type-name)))
+    ($if ($null? fields)
+      ($error "auto-print: no :fields metadata for this type")
+      `(%def-fn void ,fn-name
+                ((,ptr-ty x))
+                (%block
+                  (printf ,($str type-name " {\n"))
+                  ,@($map
+                       ($let ((ty   ($car it))
+                              (name ($car ($cdr it))))
+                         ; явная сборка `(printf "  name = %x\n" (-> x name))`
+                         ; через $list вместо вложенного quasi-quote — проще
+                         ; и не требует ",,arg" для прокола второго уровня.
+                         ($list 'printf
+                                ($str "  " name " = " ($fmt-for-type ty) "\n")
+                                ($cast-for-type ty ($list '%arrow 'x name))))
+                       fields)
+                  (printf "}\n"))))))

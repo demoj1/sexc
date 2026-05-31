@@ -1,0 +1,8 @@
+; audio.sexc — внешние биндинги к audio_impl.c.
+;
+; Объявляем три extern C-функции. Никакого %module здесь — он
+; переименовал бы и сами %decl-fn, что сломало бы линковку.
+
+(%decl-fn int   audio_start     ())
+(%decl-fn float audio_get_level ())
+(%decl-fn void  audio_stop      ())

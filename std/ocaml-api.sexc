@@ -130,8 +130,13 @@
 
 (%doc $symcat
   :sig ($symcat part...)
-  :doc "Concatenate parts into a symbol name."
+  :doc "Concatenate parts into a symbol name (returns Raw.Atom)."
   :example "($symcat Name \"/\" method)")
+
+(%doc $str
+  :sig ($str part...)
+  :doc "Concatenate parts into a string literal (returns Raw.Str). Use for building printf format strings or other compile-time string values."
+  :example "($str \"  \" field-name \" = %d\\n\")")
 
 (%doc $--map
   :sig ($--map expr list)
