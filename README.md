@@ -215,6 +215,38 @@ Every top-level symbol of a module is namespaced to
 `module-name/...`. `:as` adds an alias. Cycles are detected
 and reported.
 
+### Compile-time evaluation: `$defun`, `%eval`, `%evals`
+
+Beyond `%defmacro`, there's a small Lisp that runs *during* expansion —
+the `$...` evaluator (call-by-value, with `$if`/`$let`/`$for`/`$map`/
+`$car`/`$cdr`/`$cons`/arithmetic/quasiquote). Two intrinsics splice its
+results into your code:
+
+- **`(%eval EXPR)`** — evaluate `EXPR` to **one** form and splice it.
+- **`(%evals EXPR)`** — evaluate `EXPR` to a **list** and splice each
+  element into the surrounding list context.
+
+```lisp
+; $defun — a compile-time function (no runtime cost)
+($defun $square (n) ($* n n))
+
+; %eval: splice one computed form
+(define BUF_SIZE (%eval ($square 8)))      ; => #define BUF_SIZE 64
+
+; %evals: generate many forms from data
+(%evals
+  ($for (row '((inc 1) (dec -1)))
+    `(defn int ,($car row) ((int x))
+       (return (+ x ,($car ($cdr row)))))))
+; => int inc(int x){ return x + 1; }
+;    int dec(int x){ return x + -1; }
+```
+
+`%eval` works in top-level, statement, and even expression position
+(`(+ (%eval ...) y)`); `%evals` is for list contexts (a function body,
+a top level, an argument list). Most of `std/meta.sexc` is `$defun`s —
+the compiler core stays small, the language grows in itself.
+
 ### Compile-time reflection
 
 The macro system has a per-symbol metadata table:
@@ -613,6 +645,37 @@ else              sign = 0;
 Все top-level символы модуля неймспейсятся в
 `module-name/...`. `:as` добавляет алиас. Циклы детектятся
 и репортятся.
+
+### Compile-time вычисления: `$defun`, `%eval`, `%evals`
+
+Кроме `%defmacro`, есть маленький Lisp, исполняемый *во время* раскрытия —
+`$...` evaluator (call-by-value: `$if`/`$let`/`$for`/`$map`/`$car`/`$cdr`/
+`$cons`/арифметика/quasiquote). Два интринсика сплайсят его результат в код:
+
+- **`(%eval EXPR)`** — вычислить `EXPR` в **одну** форму и вставить.
+- **`(%evals EXPR)`** — вычислить в **список** и вставить каждый элемент в
+  окружающий list-контекст.
+
+```lisp
+; $defun — compile-time функция (без рантайм-стоимости)
+($defun $square (n) ($* n n))
+
+; %eval: вставить одну вычисленную форму
+(define BUF_SIZE (%eval ($square 8)))      ; => #define BUF_SIZE 64
+
+; %evals: сгенерить много форм из данных
+(%evals
+  ($for (row '((inc 1) (dec -1)))
+    `(defn int ,($car row) ((int x))
+       (return (+ x ,($car ($cdr row)))))))
+; => int inc(int x){ return x + 1; }
+;    int dec(int x){ return x + -1; }
+```
+
+`%eval` работает в top-level, statement и даже expression-позиции
+(`(+ (%eval ...) y)`); `%evals` — для list-контекстов (тело функции,
+top level, список аргументов). Бо́льшая часть `std/meta.sexc` — это `$defun`:
+ядро компилятора остаётся маленьким, язык растёт в себе.
 
 ### Compile-time рефлексия
 
