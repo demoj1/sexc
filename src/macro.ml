@@ -640,7 +640,9 @@ and expand_one ctx ~depth raw =
           let out = apply ctx (depth + 1) m ~call_span args in
           expand_one ctx ~depth:(depth + 1) out
       | None -> Raw.List ((Raw.Atom (head, head_sp) :: expand_list_items ctx ~depth args), list_sp))
-  | Raw.List (xs, _) -> Raw.List ((expand_list_items ctx ~depth xs), None)
+  (* Список, голова которого не атом (напр. ((%ptr char) name) — поле struct).
+     Сохраняем span — это форма из исходника, её локация нужна для #line. *)
+  | Raw.List (xs, sp) -> Raw.List ((expand_list_items ctx ~depth xs), sp)
 
 and expand_list_items ctx ~depth xs =
   List.concat_map xs ~f:(fun x ->

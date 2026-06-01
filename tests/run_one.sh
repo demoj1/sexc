@@ -37,10 +37,18 @@ results="${RESULTS_DIR:-/tmp}"
 OK_MARKER=';==EXPECTED=='
 ERR_MARKER=';==EXPECTED-ERROR=='
 
+# Флаги собираем из заголовка (первая строка):
+# - по умолчанию добавляем --no-line: обычные snapshot-тесты проверяют
+#   C-семантику, а не #line-директивы (зависят от номеров строк).
+# - `sexc-keep-line` оставляет #line в выводе — для тестов самого маппинга строк.
+# - `--no-prelude` отключает неявную прелюдию.
 flags=(--quiet)
 first_line="$(head -n1 "${case_path}" 2>/dev/null || true)"
-if [[ "${first_line}" =~ sexc-flags:[[:space:]]*--no-prelude ]]; then
-    flags=(--quiet --no-prelude)
+if [[ "${first_line}" != *"sexc-keep-line"* ]]; then
+    flags+=(--no-line)
+fi
+if [[ "${first_line}" == *"--no-prelude"* ]]; then
+    flags+=(--no-prelude)
 fi
 
 # Detect which marker (if any) the file uses.

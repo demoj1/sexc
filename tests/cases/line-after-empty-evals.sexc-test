@@ -1,0 +1,14 @@
+;; sexc-keep-line
+;; (%evals ($list)) раскрывается в ноль форм — следующий defn не дрейфует.
+(%evals ($list))
+
+(defn int main ()
+  (return 0))
+;==EXPECTED==
+#line 5 "<stdin>"
+int main(void)
+#line 5 "<stdin>"
+{
+#line 6 "<stdin>"
+  return 0;
+}

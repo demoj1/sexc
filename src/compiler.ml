@@ -480,7 +480,14 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
           flat raw)
       in
       let parsed = List.map flattened_raws ~f:Frontend.parse_top in
-      List.map parsed ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n"
+      let body = List.map parsed ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n" in
+      (* Top-level #line — покрывает строку сигнатуры функции / определения
+         struct (сами стейтменты тела получают свои #line через SAt). *)
+      if String.is_empty body then body
+      else
+        match top.span with
+        | Some sp -> Codegen_c.line_directive sp ^ body
+        | None -> body
     in
     let run_with_promotion () =
       Common.promote_error_to_diagnostic ~phase:"compile" run
@@ -489,8 +496,26 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
     | None -> run_with_promotion ()
     | Some sp -> Common.with_top_span sp run_with_promotion
   in
+  (* Multi-error: ловим ошибку каждой top-формы, копим и продолжаем — так
+     пользователь видит все проблемы за один прогон, а не по одной. Hint-имя
+     (голову macro-chain) фиксируем в момент ошибки, т.к. глобальный ref потом
+     перезатрётся следующей формой. *)
+  let errors = ref [] in
+  let hint_head () = List.hd !Common.current_macro_chain in
+  let emit_safe (top : top_form) : string =
+    try emit_one top with
+    | Common.Sexc_diagnostic d ->
+        errors := { Common.err_diag = Some d; err_message = d.message; err_hint = hint_head () } :: !errors;
+        ""
+    | Common.Sexc_error msg ->
+        errors := { Common.err_diag = None; err_message = msg; err_hint = hint_head () } :: !errors;
+        ""
+  in
   let t = now_ns () in
-  let chunks = List.map non_macro_tops ~f:emit_one in
+  let chunks = List.map non_macro_tops ~f:emit_safe in
+  (match List.rev !errors with
+   | [] -> ()
+   | items -> raise (Common.Sexc_errors items));
   let c = String.concat ~sep:"\n\n" (List.filter chunks ~f:(fun s -> not (String.is_empty s))) in
   logf "compile per-form (%d tops) — %s" (List.length non_macro_tops) (since t);
   logf "codegen C: %d bytes" (String.length c);

@@ -89,9 +89,12 @@
 
 Куда добавлять:
 - Новый surface/raw-кейс — `tests/cases/<topic>-<name>.sexc-test`, source + `;==EXPECTED==` + (либо руками пишешь expected, либо запускаешь `UPDATE=1 ./tests/run.sh FILTER=<name>` и ревьюишь сгенерированное).
-- Новый **error-кейс** — source + `;==EXPECTED-ERROR==` + ожидаемый stderr (file:line:col + caret + опц. hint-блок с docs). Sexc должен exit'нуть non-zero; stdout игнорируется. Абсолютные пути внутри ROOT нормализуются в `<root>` (через `pwd -P`-нормализацию плюс `sed` в `run_one.sh`), чтобы snapshot был портативным.
+- Новый **error-кейс** — source + `;==EXPECTED-ERROR==` + ожидаемый stderr (file:line:col + caret + опц. hint-блок с docs). Sexc должен exit'нуть non-zero; stdout игнорируется. Абсолютные пути внутри ROOT нормализуются в `<root>` (через `pwd -P`-нормализацию плюс `sed` в `run_one.sh`), чтобы snapshot был портативным. Multi-error кейс просто кладёт несколько ошибочных top-форм.
+- Новый **#line-кейс** — заголовок `;; sexc-keep-line` (отменяет дефолтный `--no-line` раннера), source + `;==EXPECTED==` + C-вывод **с** `#line`-директивами. Так тестируется сам source-mapping (см. `line-struct-fields`, `line-after-macro-def`, `line-after-empty-evals` — последние два проверяют, что не-эмитящие формы не сдвигают нумерацию).
+- Заголовок первой строки управляет флагами раннера: `sexc-keep-line` (оставить `#line`), `--no-prelude` (без прелюдии). По умолчанию: `--quiet --no-line`.
 - Новый standalone-пример без внешних зависимостей — добавить путь в `tests/examples/standalone.list`.
 - Examples с экзотическими link-флагами могут указывать их в первой строке: `;; sexc-test-flags: -lm -lpthread`.
+- `sexc check` exit-коды покрыты smoke-секцией в `run.sh` (не отдельные файлы).
 
 ## CLI фича `-C`
 
@@ -126,6 +129,15 @@
 | `Sexc_cli_error` | Невалидный argv / неизвестная подкоманда — только в `src/sexc.ml`. | `error: <msg>` + полный usage() + exit 1. |
 | `Sexc_diagnostic` | Любая компиляционная ошибка с известным `file:line:col`. Бросается из Reader напрямую (`fail_diag`) либо "promoted" из bare `Sexc_error` через `Common.promote_error_to_diagnostic`. | `file:line:col: error[phase]: msg` + строка-источник + caret `^` + опц. hint-блок (см. ниже). |
 | `Sexc_error` (legacy) | Bare `fail`/`failf` без локации. Сохранён для глубоких фаз, которые ещё не привязаны к span. | Печатается одной строкой `error: msg` + опц. hint. **Без** usage'а. |
+| `Sexc_errors` (multi) | Несколько накопленных ошибок: `compile_forms` ловит ошибку каждой top-формы, копит и продолжает, в конце бросает агрегат. | Все диагностики через пустую строку. Для единственной ошибки вывод идентичен одиночному пути. |
+
+### Multi-error
+
+`compile_forms` обрабатывает каждую top-форму в `try` (`emit_safe`): ошибка одной формы (`Sexc_diagnostic`/`Sexc_error`) пишется в аккумулятор `error_item` (с захваченной головой macro-chain для hint), форма пропускается, обработка продолжается. После прохода — если ошибки есть, бросается `Sexc_errors items`; C **не** эмитится (ни stdout, ни `-C gcc`). Так пользователь видит все проблемы за один прогон. Ошибки до per-form цикла (reader, `Macro.collect`) остаются одиночными.
+
+### `sexc check`
+
+`sexc [--no-prelude] check <input.sexc|->` — гоняет полный pipeline, отбрасывает C, печатает диагностику (через те же `Sexc_errors`/`Sexc_diagnostic`), exit nonzero при ошибках, тихо при успехе. Для CI/редакторов чище, чем `compile` с игнором stdout. Emacs flymake мог бы переключиться на `check`, но сейчас использует обычный stdin-compile (эквивалентно по диагностике).
 
 ### Источник позиций (deep spans)
 
@@ -151,6 +163,21 @@ type t =
 Бросать ошибку с конкретным span:
 - `Common.fail_at ~phase span msg` / `Common.failf_at ~phase span fmt` — если span = Some, бросает `Sexc_diagnostic`; если None, fall back на `Sexc_error` (который потом promoted).
 - `Macro.apply` использует `failf_at` для arity-ошибок surface-макросов; `eval_expr_inner` использует `failf_at` для unbound-variable (span самого атома).
+
+**Важно при macro expansion:** `expand_one` НЕ должен стирать спаны при пересборке пользовательских форм. Финальный fallthrough `Raw.List (xs, sp) -> Raw.List (..., sp)` сохраняет span (раньше ставил None → поля struct с list-типом вроде `((%ptr char) name)` теряли локацию и `#line` дрейфовал).
+
+### `#line` директивы (source maps для C-компилятора)
+
+Генерируемый C несёт `#line N "file"`, чтобы ошибки самого gcc указывали на `.sexc`, а не на временный `.c`. По умолчанию вкл; `--no-line` отключает (тест-раннер его передаёт, чтобы golden-вывод не зависел от номеров строк — opt-in обратно через заголовок `;; sexc-keep-line`).
+
+Гранулярность — точная, не top-form:
+- **Стейтменты**: frontend оборачивает каждый в `SAt of span * stmt` (`parse_stmt_or_decl` вешает span исходной Raw-формы); `Codegen_c.emit_stmt` для `SAt` эмитит `line_directive` перед телом.
+- **Поля struct/union**: `field.f_span` + `Codegen_c.emit_fields` ставит `#line` перед каждым полем (иначе не-эмитящий `:fields` сдвигал бы нумерацию).
+- **Top-форма**: `compile_forms` префиксит чанк `#line` от `top.span` — покрывает строку сигнатуры функции / `typedef`.
+
+Дрейф от не-эмитящих форм (`%defmacro`, `%doc`, `(%evals ($list))` → ноль форм, blank/comment) не страшен на top-level: каждая следующая top-форма ре-якорится своим `#line`. Внутри функции — каждый стейтмент ре-якорится через `SAt`. Покрыто тестами `line-*.sexc-test`.
+
+`Codegen_c.line_directive sp` — общий хелпер; гейтится `Common.emit_line_directives`.
 
 `raw_equal` в `src/macro.ml` пишется span-агностично — pattern-match `Raw.Atom (x, _), Raw.Atom (y, _) -> ...`. Это критично для `$eq?` и `$case`.
 

@@ -26,6 +26,7 @@ let usage () =
   prerr_endline "Usage:";
   prerr_endline "  sexc [--no-prelude] [--quiet] <input.sexc>";
   prerr_endline "  sexc [--no-prelude] [--quiet] <input.sexc> -C <command...>";
+  prerr_endline "  sexc [--no-prelude] check <input.sexc|->";
   prerr_endline "  sexc [--no-prelude] -";
   prerr_endline "  sexc [--no-prelude] dump-docs <input.sexc> <out-dir>";
   prerr_endline "  sexc dump-stdlib-docs <out-dir>";
@@ -39,6 +40,8 @@ let usage () =
   prerr_endline "Use --no-prelude to disable auto prelude.";
   prerr_endline "Compile/build stages are logged to stderr by default;";
   prerr_endline "use --quiet (or SEXC_QUIET=1) to suppress them.";
+  prerr_endline "Generated C carries #line directives so C-compiler errors map back";
+  prerr_endline "to the .sexc source; pass --no-line to omit them.";
   prerr_endline "Set SEXC_STDLIB_DIR to override stdlib lookup directory.";
   prerr_endline "Use '-' as input to read source from stdin.";
   prerr_endline "";
@@ -51,6 +54,10 @@ type command =
       use_prelude : bool;
       input_path : string;
       compile_cmd : string list option;
+    }
+  | Check of {
+      use_prelude : bool;
+      input_path : string;
     }
   | Dump_docs of {
       use_prelude : bool;
@@ -109,6 +116,9 @@ let parse_command args =
     | "--quiet" :: tl | "-q" :: tl ->
         quiet := true;
         parse_flags use_prelude tl
+    | "--no-line" :: tl ->
+        emit_line_directives := false;
+        parse_flags use_prelude tl
     | rest -> (use_prelude, rest)
   in
   (* SEXC_QUIET=1 env var отключает stage-логи без флага (для редакторских
@@ -132,6 +142,8 @@ let parse_command args =
   | "m-dump" :: "--json" :: input :: [] -> M_dump { use_prelude; input_path = input; json = true }
   | "m-dump" :: input :: [] -> M_dump { use_prelude; input_path = input; json = false }
   | "m-dump" :: _ -> cli_fail "m-dump expects: sexc [--no-prelude] m-dump [--json] <input.sexc>"
+  | "check" :: input :: [] -> Check { use_prelude; input_path = input }
+  | "check" :: _ -> cli_fail "check expects: sexc [--no-prelude] check <input.sexc|->"
   | [] -> cli_fail "missing input file"
   | input :: tail -> (
       match tail with
@@ -182,31 +194,40 @@ let compile_input ~use_prelude input_path =
     Compiler.compile_source ~use_prelude source
   else Compiler.compile_file ~use_prelude input_path
 
-(* Если в момент ошибки активен macro_chain — печатаем краткую справку по
-   самой глубокой surface-форме. Только Signature/Doc/Example, без шапки и
-   meta-полей. Тихо игнорируем ошибки индекса (например когда stdlib не
+(* Печатает краткую справку по surface-форме NAME: Signature/Doc/Example, без
+   шапки и meta-полей. Тихо игнорирует ошибки индекса (например когда stdlib не
    находится). *)
+let render_hint_for name =
+  let entries =
+    try Index.find_by_name ~use_prelude:true name with _ -> []
+  in
+  match entries with
+  | [] -> ()
+  | (first : Index.symbol) :: _ ->
+      let lines =
+        [ Option.map first.signature ~f:(fun s -> "Signature: " ^ s);
+          Option.map first.doc ~f:(fun d -> "Doc: " ^ d);
+          Option.map first.example ~f:(fun e -> "Example: " ^ e);
+        ]
+        |> List.filter_opt
+      in
+      if not (List.is_empty lines) then begin
+        prerr_endline "";
+        List.iter lines ~f:prerr_endline
+      end
+
+(* Hint по голове глобального macro_chain (для single-error путей). *)
 let render_macro_hint () =
   match !Common.current_macro_chain with
   | [] -> ()
-  | name :: _ ->
-      let entries =
-        try Index.find_by_name ~use_prelude:true name with _ -> []
-      in
-      (match entries with
-       | [] -> ()
-       | (first : Index.symbol) :: _ ->
-           let lines =
-             [ Option.map first.signature ~f:(fun s -> "Signature: " ^ s);
-               Option.map first.doc ~f:(fun d -> "Doc: " ^ d);
-               Option.map first.example ~f:(fun e -> "Example: " ^ e);
-             ]
-             |> List.filter_opt
-           in
-           if not (List.is_empty lines) then begin
-             prerr_endline "";
-             List.iter lines ~f:prerr_endline
-           end)
+  | name :: _ -> render_hint_for name
+
+(* Печатает один накопленный error_item (multi-error). *)
+let render_error_item (item : Common.error_item) =
+  (match item.err_diag with
+   | Some d -> prerr_endline (render_diagnostic d)
+   | None -> prerr_endline ("error: " ^ item.err_message));
+  Option.iter item.err_hint ~f:render_hint_for
 
 let () =
   Random.self_init ();
@@ -226,6 +247,11 @@ let () =
             let status = run_with_temp_c c cmd in
             logf "total — %s" (since t0);
             if status <> 0 then exit status)
+    | Check { use_prelude; input_path } ->
+        (* Гоняем полный pipeline, отбрасываем C. Любые ошибки выпадут как
+           Sexc_errors/Sexc_diagnostic и распечатаются ниже; молчим при успехе. *)
+        let _ : string = compile_input ~use_prelude input_path in
+        ()
     | Dump_docs { use_prelude; input_path; out_dir } ->
         if String.equal input_path "-" then cli_fail "dump-docs does not support stdin input ('-')";
         Docs.dump_docs_for_input ~use_prelude ~input_path ~out_dir
@@ -259,6 +285,13 @@ let () =
         if not json then ()
         else Out_channel.newline stdout
   with
+  | Sexc_errors items ->
+      (* Multi-error: печатаем все накопленные диагностики, разделяя пустой
+         строкой. Для единственной ошибки вывод совпадает с одиночным путём. *)
+      List.iteri items ~f:(fun i item ->
+          if i > 0 then prerr_endline "";
+          render_error_item item);
+      exit 1
   | Sexc_diagnostic d ->
       prerr_endline (render_diagnostic d);
       render_macro_hint ();

@@ -84,6 +84,14 @@ let qual_to_c = function
   | Volatile -> "volatile"
   | Restrict -> "restrict"
 
+(* `#line N "file"` директива на колонке 0. Возвращает "" если директивы
+   отключены (--no-line) или span бесполезен (нет файла). *)
+let line_directive (sp : Common.span) =
+  if not !Common.emit_line_directives || String.is_empty sp.file then ""
+  else
+    let line, _ = Common.line_col sp.source sp.start_off in
+    Printf.sprintf "#line %d %S\n" line sp.file
+
 let rec emit_type_base = function
   | TBuiltin s -> s
   | TNamed s -> mangle_ident s
@@ -91,17 +99,9 @@ let rec emit_type_base = function
   | TUnion (name, None) -> "union " ^ mangle_ident name
   | TEnum name -> "enum " ^ mangle_ident name
   | TStruct (name, Some fields) ->
-      let body =
-        List.map fields ~f:(fun f -> "  " ^ emit_decl_of_type f.f_ty (mangle_ident f.f_name) ^ ";")
-        |> String.concat ~sep:"\n"
-      in
-      "struct " ^ mangle_ident name ^ " {\n" ^ body ^ "\n}"
+      "struct " ^ mangle_ident name ^ " {\n" ^ emit_fields fields ^ "\n}"
   | TUnion (name, Some fields) ->
-      let body =
-        List.map fields ~f:(fun f -> "  " ^ emit_decl_of_type f.f_ty (mangle_ident f.f_name) ^ ";")
-        |> String.concat ~sep:"\n"
-      in
-      "union " ^ mangle_ident name ^ " {\n" ^ body ^ "\n}"
+      "union " ^ mangle_ident name ^ " {\n" ^ emit_fields fields ^ "\n}"
   | _ -> fail "emit_type_base received non-base type"
 
 and emit_decl_of_type tyv name =
@@ -136,6 +136,15 @@ and emit_decl_of_type tyv name =
   | _ ->
       let b = emit_type_base tyv in
       if String.is_empty name then b else b ^ " " ^ name
+
+(* Поля struct/union: каждое со своим #line, чтобы ошибки gcc в типе поля
+   (например unknown type name) указывали на правильную строку — иначе
+   единственный top-level #line дрейфует на не-эмитящих формах вроде :fields. *)
+and emit_fields fields =
+  List.map fields ~f:(fun f ->
+      let directive = Option.value_map f.f_span ~default:"" ~f:line_directive in
+      directive ^ "  " ^ emit_decl_of_type f.f_ty (mangle_ident f.f_name) ^ ";")
+  |> String.concat ~sep:"\n"
 
 let emit_decl_signature d =
   let stor =
@@ -234,6 +243,7 @@ let emit_for_init = function
 let rec emit_stmt ?(lvl = 0) s =
   let i = indent lvl in
   match s with
+  | SAt (sp, inner) -> line_directive sp ^ emit_stmt ~lvl inner
   | SNop -> i ^ ";"
   | SBlock stmts ->
       let body = List.map stmts ~f:(fun st -> emit_stmt ~lvl:(lvl + 2) st) |> String.concat ~sep:"\n" in

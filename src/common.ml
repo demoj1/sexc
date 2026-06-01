@@ -21,6 +21,12 @@ open Core
    логи не нужны (например в редакторских интеграциях). *)
 let quiet : bool ref = ref false
 
+(* Эмитить ли `#line N "file"` директивы в генерируемый C, чтобы ошибки gcc
+   указывали на исходный .sexc, а не на временный .c. По умолчанию вкл;
+   отключается флагом --no-line (например в snapshot-тестах, где golden-вывод
+   не должен зависеть от номеров строк). *)
+let emit_line_directives : bool ref = ref true
+
 let logf fmt =
   if !quiet then Printf.ksprintf (fun _ -> ()) fmt
   else Printf.ksprintf (fun s -> prerr_endline ("[sexc] " ^ s)) fmt
@@ -72,6 +78,18 @@ type diagnostic = {
 }
 
 exception Sexc_diagnostic of diagnostic
+
+(* Несколько накопленных ошибок компиляции (multi-error). Каждый элемент несёт
+   опц. macro-chain head, захваченный в момент ошибки — чтобы CLI мог показать
+   doc-hint для нужной формы (глобальный current_macro_chain отражает только
+   последнюю ошибку, поэтому фиксируем per-item). *)
+type error_item = {
+  err_diag : diagnostic option;  (* None → locationless (см. err_message) *)
+  err_message : string;          (* для locationless Sexc_error *)
+  err_hint : string option;      (* имя активной формы для doc-hint *)
+}
+
+exception Sexc_errors of error_item list
 
 let fail msg = raise (Sexc_error msg)
 

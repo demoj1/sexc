@@ -75,6 +75,35 @@ if [[ ${#example_files[@]} -gt 0 ]]; then
         xargs -P "${JOBS}" -I{} "${DIR}/run_example.sh" "{}"
 fi
 
+# 3. CLI smoke checks — `sexc check` exit codes + silent-on-success.
+if [[ -z "${FILTER}" ]]; then
+    printf '(defn int main () (return 0))\n' > "${results_dir}/ok.sexc"
+    printf '(defn int main () (when))\n'     > "${results_dir}/bad.sexc"
+    smoke() {
+        local name="$1" expected="$2"; shift 2
+        local slug="smoke-${name}"
+        local out; out="$("${SEXC}" "$@" 2>/dev/null)"; local got=$?
+        if [[ "${got}" -eq "${expected}" ]]; then
+            printf '\033[32mPASS\033[0m smoke %s\n' "${name}"
+            touch "${results_dir}/${slug}.pass"
+        else
+            printf '\033[31mFAIL\033[0m smoke %s (exit %s, expected %s)\n' \
+                "${name}" "${got}" "${expected}" | tee "${results_dir}/${slug}.fail"
+        fi
+        # stash stdout for the silent-success assertion below
+        printf '%s' "${out}" > "${results_dir}/${slug}.out"
+    }
+    smoke "check-ok"  0 --quiet check "${results_dir}/ok.sexc"
+    smoke "check-bad" 1 --quiet check "${results_dir}/bad.sexc"
+    if [[ -s "${results_dir}/smoke-check-ok.out" ]]; then
+        printf '\033[31mFAIL\033[0m smoke check-ok-silent (stdout not empty)\n' \
+            | tee "${results_dir}/smoke-check-ok-silent.fail"
+    else
+        printf '\033[32mPASS\033[0m smoke check-ok-silent\n'
+        touch "${results_dir}/smoke-check-ok-silent.pass"
+    fi
+fi
+
 end_ns=$(date +%s%N)
 elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
 

@@ -40,6 +40,7 @@ type ty =
 and field = {
   f_ty : ty;
   f_name : string;
+  f_span : Common.span option;  (* для per-field #line внутри struct/union *)
 }
 
 type decl = {
@@ -87,6 +88,7 @@ and switch_clause =
 
 and stmt =
   | SNop
+  | SAt of Common.span * stmt  (* statement с привязкой к источнику; codegen эмитит #line *)
   | SBlock of stmt list
   | SIf of expr * stmt * stmt option
   | SWhile of expr * stmt
@@ -158,7 +160,7 @@ and apply_qual q tyv =
   | _ -> TQual (q, tyv)
 
 and parse_field = function
-  | Raw.List ([ ty_s; Raw.Atom (name, _) ], _) -> { f_ty = parse_type ty_s; f_name = name }
+  | Raw.List ([ ty_s; Raw.Atom (name, _) ], sp) -> { f_ty = parse_type ty_s; f_name = name; f_span = sp }
   | _ -> fail "Struct/union field must be (type name)"
 
 and parse_type = function
@@ -368,24 +370,32 @@ let parse_decl args =
   | _ -> fail "%decl must be (%decl type name [init])"
 
 let rec parse_stmt_or_decl raw =
-  match raw with
-  | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> SDecl (parse_decl args)
-  | Raw.List ((Raw.Atom ("%decl-many", _) :: forms), _) ->
-      let parse_one = function
-        | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> parse_decl args
-        | Raw.List ((Raw.Atom ("%decl-many", _) :: _), _) ->
-            fail "%decl-many cannot be nested as a declaration item"
-        | Raw.List ((Raw.Atom ("decl", _) :: _), _) -> fail "%decl-many contains unexpanded decl macro"
-        | _ -> fail "%decl-many expects only (%decl type name init) forms"
-      in
-      let rec flatten acc = function
-        | [] -> List.rev acc
-        | Raw.List ((Raw.Atom ("%decl-many", _) :: inner), _) :: tl -> flatten (List.rev_append (flatten [] inner) acc) tl
-        | x :: tl -> flatten (parse_one x :: acc) tl
-      in
-      if List.is_empty forms then fail "%decl-many requires at least one declaration"
-      else SDeclMany (flatten [] forms)
-  | _ -> parse_stmt raw
+  let stmt =
+    match raw with
+    | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> SDecl (parse_decl args)
+    | Raw.List ((Raw.Atom ("%decl-many", _) :: forms), _) ->
+        let parse_one = function
+          | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> parse_decl args
+          | Raw.List ((Raw.Atom ("%decl-many", _) :: _), _) ->
+              fail "%decl-many cannot be nested as a declaration item"
+          | Raw.List ((Raw.Atom ("decl", _) :: _), _) -> fail "%decl-many contains unexpanded decl macro"
+          | _ -> fail "%decl-many expects only (%decl type name init) forms"
+        in
+        let rec flatten acc = function
+          | [] -> List.rev acc
+          | Raw.List ((Raw.Atom ("%decl-many", _) :: inner), _) :: tl -> flatten (List.rev_append (flatten [] inner) acc) tl
+          | x :: tl -> flatten (parse_one x :: acc) tl
+        in
+        if List.is_empty forms then fail "%decl-many requires at least one declaration"
+        else SDeclMany (flatten [] forms)
+    | _ -> parse_stmt raw
+  in
+  (* Привязываем стейтмент к источнику для #line. Span берём с самой формы
+     (reader проставил), либо None для синтезированных макросом без локации —
+     тогда #line не эмитим, остаётся предыдущая привязка. *)
+  match Raw.span_of raw with
+  | Some sp -> SAt (sp, stmt)
+  | None -> stmt
 
 and parse_switch_clause = function
   | Raw.List ((Raw.Atom ("%case", _) :: cond :: body), _) ->

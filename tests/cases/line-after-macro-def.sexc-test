@@ -1,0 +1,18 @@
+;; sexc-keep-line
+;; %defmacro не порождает C — #line следующего defn не должен дрейфовать.
+(%defmacro unused (x)
+  `(%+ ,x 1))
+
+(defn int main ()
+  (decl (int z) 0)
+  (return z))
+;==EXPECTED==
+#line 6 "<stdin>"
+int main(void)
+#line 6 "<stdin>"
+{
+#line 7 "<stdin>"
+  int z = 0;
+#line 8 "<stdin>"
+  return z;
+}
