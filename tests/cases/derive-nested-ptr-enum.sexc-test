@@ -1,0 +1,45 @@
+; print-as/eq-as: вложенный struct (рекурсия), enum (%d), указатель (opaque %p).
+(struct Point :fields (int x) (int y))
+(enum Dir :variants N E S W)
+(struct Node
+  :fields
+  (Point pos)
+  (Dir facing)
+  ((%ptr char) label))
+
+(defn void node-print ((Node n)) (print-as Node n))
+(defn int node-eq ((Node a) (Node b)) (return (eq-as Node a b)))
+;==EXPECTED==
+typedef struct Point {
+  int x;
+  int y;
+} Point;
+
+typedef enum Dir { N, E, S, W } Dir;
+
+typedef struct Node {
+  Point pos;
+  Dir facing;
+  char *label;
+} Node;
+
+void node_u002D_print(Node n)
+{
+  {
+    printf("Node {\n");
+    {
+      printf("Point {\n");
+      printf("  x = %d\n", n.pos.x);
+      printf("  y = %d\n", n.pos.y);
+      printf("}\n");
+    }
+    printf("  facing = %d\n", n.facing);
+    printf("  label = %p\n", (void *)n.label);
+    printf("}\n");
+  }
+}
+
+int node_u002D_eq(Node a, Node b)
+{
+  return a.pos.x == b.pos.x && a.pos.y == b.pos.y && a.facing == b.facing && a.label == b.label;
+}

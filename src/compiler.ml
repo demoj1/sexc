@@ -241,7 +241,7 @@ let collect_module_defined_names forms =
     if String.is_substring name ~substring:"/" then set else Set.add set name
   in
   let from_typedef_type = function
-    | Raw.List ((Raw.Atom ("%enum", _) :: Raw.Atom (enum_name, _) :: []), _) -> Some enum_name
+    | Raw.List ((Raw.Atom ("%enum", _) :: Raw.Atom (enum_name, _) :: _), _) -> Some enum_name
     | _ -> None
   in
   List.fold forms ~init:String.Set.empty ~f:(fun acc form ->

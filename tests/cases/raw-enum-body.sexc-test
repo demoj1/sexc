@@ -1,0 +1,10 @@
+;; sexc-flags: --no-prelude
+(%typedef (%enum Color Red (Green 5) Blue) Color)
+(%typedef (%enum Flags (A (%<< 1 1)) (B (%- 0 1))) Flags)
+(%typedef (%enum Ref) Ref)
+;==EXPECTED==
+typedef enum Color { Red, Green = 5, Blue } Color;
+
+typedef enum Flags { A = 1 << 1, B = 0 - 1 } Flags;
+
+typedef enum Ref Ref;

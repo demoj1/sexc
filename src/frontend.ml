@@ -35,12 +35,19 @@ type ty =
   | TQual of qualifier * ty
   | TStruct of string * field list option
   | TUnion of string * field list option
-  | TEnum of string
+  | TEnum of string * enum_variant list  (* [] = ссылка `enum Name`; иначе определение тела *)
 
 and field = {
   f_ty : ty;
   f_name : string;
   f_span : Common.span option;  (* для per-field #line внутри struct/union *)
+}
+
+and enum_variant = {
+  ev_name : string;
+  (* Константное значение варианта (к codegen-времени уже %-IR, т.к. macro phase
+     отработал). None = авто-нумерация (C продолжает от предыдущего). *)
+  ev_value : Raw.t option;
 }
 
 type decl = {
@@ -163,6 +170,11 @@ and parse_field = function
   | Raw.List ([ ty_s; Raw.Atom (name, _) ], sp) -> { f_ty = parse_type ty_s; f_name = name; f_span = sp }
   | _ -> fail "Struct/union field must be (type name)"
 
+and parse_enum_variant = function
+  | Raw.Atom (v, _) -> { ev_name = v; ev_value = None }
+  | Raw.List ([ Raw.Atom (v, _); value ], _) -> { ev_name = v; ev_value = Some value }
+  | _ -> fail "enum variant must be NAME or (NAME value)"
+
 and parse_type = function
   | Raw.Atom (a, _) ->
       if Set.mem builtin_words a then TBuiltin a else TNamed a
@@ -190,7 +202,7 @@ and parse_type = function
       | "%union", Raw.Atom (name, _) :: fields ->
           let fs = List.map fields ~f:parse_field in
           TUnion (name, if List.is_empty fs then None else Some fs)
-      | "%enum", [ Raw.Atom (name, _) ] -> TEnum name
+      | "%enum", Raw.Atom (name, _) :: variants -> TEnum (name, List.map variants ~f:parse_enum_variant)
       | _ -> parse_type_from_elems (Raw.Atom (head, None) :: rest))
   | Raw.List (elems, _) -> parse_type_from_elems elems
 

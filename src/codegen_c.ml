@@ -92,16 +92,58 @@ let line_directive (sp : Common.span) =
     let line, _ = Common.line_col sp.source sp.start_off in
     Printf.sprintf "#line %d %S\n" line sp.file
 
+let c_escape_string s =
+  let b = Buffer.create (String.length s + 8) in
+  String.iter s ~f:(function
+    | '"' -> Buffer.add_string b "\\\""
+    | '\\' -> Buffer.add_string b "\\\\"
+    | '\n' -> Buffer.add_string b "\\n"
+    | '\r' -> Buffer.add_string b "\\r"
+    | '\t' -> Buffer.add_string b "\\t"
+    | c -> Buffer.add_char b c);
+  Buffer.contents b
+
+let precedence_of_expr = function
+  | EComma _ -> 1
+  | EAssign _ -> 2
+  | ETernary _ -> 3
+  | ENary ("||", _) -> 4
+  | ENary ("&&", _) -> 5
+  | ENary ("|", _) -> 6
+  | ENary ("^", _) -> 7
+  | ENary ("&", _) -> 8
+  | ENary (("==" | "!="), _) -> 9
+  | ENary (("<" | "<=" | ">" | ">="), _) -> 10
+  | ENary (("<<" | ">>"), _) -> 11
+  | ENary (("+" | "-"), _) -> 12
+  | ENary (("*" | "/" | "%"), _) -> 13
+  | ENary _ -> 12
+  | EUnary _ | ECast _ | ESizeofType _ | ESizeofExpr _ -> 14
+  | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ | ECompoundLiteral _ -> 15
+  | EAtom _ | EString _ | ERaw _ -> 16
+
+(* emit_type_base..emit_expr — одна рекурсивная группа: типы и выражения
+   взаимно-рекурсивны (cast/sizeof несут тип; enum-вариант несёт выражение). *)
 let rec emit_type_base = function
   | TBuiltin s -> s
   | TNamed s -> mangle_ident s
   | TStruct (name, None) -> "struct " ^ mangle_ident name
   | TUnion (name, None) -> "union " ^ mangle_ident name
-  | TEnum name -> "enum " ^ mangle_ident name
+  | TEnum (name, []) -> "enum " ^ mangle_ident name
   | TStruct (name, Some fields) ->
       "struct " ^ mangle_ident name ^ " {\n" ^ emit_fields fields ^ "\n}"
   | TUnion (name, Some fields) ->
       "union " ^ mangle_ident name ^ " {\n" ^ emit_fields fields ^ "\n}"
+  | TEnum (name, variants) ->
+      let vs =
+        List.map variants ~f:(fun v ->
+            let base = mangle_ident v.ev_name in
+            match v.ev_value with
+            | None -> base
+            (* значение уже %-IR (macro phase отработал) → парсим и эмитим как выражение *)
+            | Some raw -> base ^ " = " ^ emit_expr (parse_expr raw))
+      in
+      "enum " ^ mangle_ident name ^ " { " ^ String.concat ~sep:", " vs ^ " }"
   | _ -> fail "emit_type_base received non-base type"
 
 and emit_decl_of_type tyv name =
@@ -146,44 +188,7 @@ and emit_fields fields =
       directive ^ "  " ^ emit_decl_of_type f.f_ty (mangle_ident f.f_name) ^ ";")
   |> String.concat ~sep:"\n"
 
-let emit_decl_signature d =
-  let stor =
-    if List.is_empty d.d_storage then ""
-    else (List.map d.d_storage ~f:storage_to_c |> String.concat ~sep:" ") ^ " "
-  in
-  stor ^ emit_decl_of_type d.d_ty (mangle_ident d.d_name)
-
-let c_escape_string s =
-  let b = Buffer.create (String.length s + 8) in
-  String.iter s ~f:(function
-    | '"' -> Buffer.add_string b "\\\""
-    | '\\' -> Buffer.add_string b "\\\\"
-    | '\n' -> Buffer.add_string b "\\n"
-    | '\r' -> Buffer.add_string b "\\r"
-    | '\t' -> Buffer.add_string b "\\t"
-    | c -> Buffer.add_char b c);
-  Buffer.contents b
-
-let precedence_of_expr = function
-  | EComma _ -> 1
-  | EAssign _ -> 2
-  | ETernary _ -> 3
-  | ENary ("||", _) -> 4
-  | ENary ("&&", _) -> 5
-  | ENary ("|", _) -> 6
-  | ENary ("^", _) -> 7
-  | ENary ("&", _) -> 8
-  | ENary (("==" | "!="), _) -> 9
-  | ENary (("<" | "<=" | ">" | ">="), _) -> 10
-  | ENary (("<<" | ">>"), _) -> 11
-  | ENary (("+" | "-"), _) -> 12
-  | ENary (("*" | "/" | "%"), _) -> 13
-  | ENary _ -> 12
-  | EUnary _ | ECast _ | ESizeofType _ | ESizeofExpr _ -> 14
-  | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ | ECompoundLiteral _ -> 15
-  | EAtom _ | EString _ | ERaw _ -> 16
-
-let rec emit_expr ?(ctx = 0) e =
+and emit_expr ?(ctx = 0) e =
   let p = precedence_of_expr e in
   let body =
     match e with
@@ -222,6 +227,13 @@ let rec emit_expr ?(ctx = 0) e =
         emit_expr ~ctx:p callee ^ "(" ^ (List.map args ~f:emit_expr |> String.concat ~sep:", ") ^ ")"
   in
   if p < ctx then "(" ^ body ^ ")" else body
+
+let emit_decl_signature d =
+  let stor =
+    if List.is_empty d.d_storage then ""
+    else (List.map d.d_storage ~f:storage_to_c |> String.concat ~sep:" ") ^ " "
+  in
+  stor ^ emit_decl_of_type d.d_ty (mangle_ident d.d_name)
 
 let indent n = String.make n ' '
 

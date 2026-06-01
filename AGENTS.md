@@ -307,6 +307,8 @@ Example: (incf-by total 4)
   - `adecl (ty name) size ...` → `:kind 'var`, `:c-type (%ptr ty)`, `:allocated t`
   - `struct name :fields ... :methods ...` → `:kind 'struct`, `:fields`, `:methods`
   - `union name fields...` → `:kind 'union`, `:fields`
+  - `typedef ty name` → `:kind 'typedef`, `:underlying ty` (алиас несёт структуру → указатель за typedef виден из меты)
+  - `enum name :variants ... :methods ...` → `:kind 'enum`, `:variants` (имена), `:methods`
 - `(%m-dump)` — top-level интринсик, разворачивается в `(%comment "...")` с отсортированным дампом всей метадаты на момент expand'а. Поставить в конце файла, чтобы увидеть финальное состояние.
 - `(%comment "text")` — новая top-level форма, эмитит `/*text*/` (parse в `frontend.ml`, codegen в `codegen_c.ml`).
 
@@ -362,7 +364,8 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn`, `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`
+  - `std/derive.sexc` (in-place рефлексия по метадате): `eq-as`, `print-as` (+ compile-time `$type-kind`/`$pointer?`/`$rem-mods`/`$fmt-for-type`)
   - `std/meta.sexc` (не привязано к C): `|>`, `||>`, `|as>` (threading)
 
 ## Полезные sugar-макросы
@@ -381,6 +384,41 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - `(Roots# (x1 5) (x2 7))` -> `(Roots){ .x1 = 5, .x2 = 7 }`
   - `(Roots# 0)` -> zero-init `(Roots){ 0 }`
   - `(Roots# X)` при `X != 0` запрещено.
+
+## typedef и enum
+
+- `(typedef ty name)` -> `typedef <ty> name;`. Тип первым (как в C/в `%typedef` IR).
+  Пишет `:kind 'typedef`/`:underlying` — алиас несёт структуру в мете.
+- `(enum Name :variants ... :methods ...)` — параллельно struct:
+  - `:variants` (обязательна, первая): атом (авто-нумерация) | `(имя выражение)`
+    (явное значение — любое выражение: `(%<< 1 1)`, отриц., `(+ A 10)`; C сам
+    продолжает нумерацию). -> `typedef enum Name { ... } Name;`
+  - `:methods` (опц.): `defn` -> функции `Name/method` (паттерн struct).
+  - Мета: `:kind 'enum`, `:variants` (имена), `:methods`, `Name :fns`.
+- IR: `%enum` несёт тело вариантов: `TEnum of string * (string * Raw.t option) list`
+  (frontend + codegen). `(%enum Name)` без тела = ссылка `enum Name` (backward-compat).
+  Значение варианта — `Raw.t` (уже `%`-IR после macro phase); codegen рендерит
+  через `emit_expr (parse_expr raw)`. Для этого `emit_type_base`↔`emit_expr` в
+  codegen объединены в одну рекурсивную группу (типы↔выражения взаимно-рекурсивны:
+  cast/sizeof/enum-значение).
+
+## derive: in-place `print-as` / `eq-as` (`std/derive.sexc`)
+
+Рефлексия по метадате типов, БЕЗ генерации именованных функций — их пользователь
+делает однострочной обёрткой.
+- `(eq-as Type a b)` — ВЫРАЖЕНИЕ: `a.f == b.f && ...`; вложенный struct → рекурсивно
+  `(eq-as S ...)`; scalar/enum/ptr → `==`; array/union → `$error` (follow-up).
+- `(print-as Type x)` — СТЕЙТМЕНТ: `(block (printf "T {") <поля> (printf "}"))`;
+  scalar → printf по `$fmt-for-type`; struct → рекурсия; enum → `%d`; ptr/fn →
+  `%p`+cast; array/union → `$error`.
+- Обёртка: `(defn int Foo/eq ((%ptr Foo) a) ((%ptr Foo) b) (return (eq-as Foo (%deref a) (%deref b))))`.
+- `$type-kind ty` → `scalar|ptr|array|fn|struct|union|enum`: атом резолвит через
+  `$m-get :kind` (typedef → рекурсия по `:underlying`), список — по голове
+  (`%ptr`/`%array`/…), не-`%`-голова = многословный скаляр (`(unsigned long)`).
+- `$fmt-for-type` — printf-формат по man (int→%d, (unsigned long)→%lu, double→%f,
+  size_t→%zu, …; многословные матчатся структурно `$eq?`); неизвестный скаляр → `$error`.
+- В prelude (`core.sexc` импортирует `derive.sexc`). Генерит surface-формы.
+- Follow-up: печать enum по имени (через `:variants`), полный обход массивов.
 
 ## Функции
 

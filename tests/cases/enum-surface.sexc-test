@@ -1,0 +1,16 @@
+(enum Dir
+  :variants
+  North East South West
+  :methods
+  (defn (%ptr char) name ((Dir d)) (return "dir")))
+
+(enum Status :variants (Ok 0) (Err -1))
+;==EXPECTED==
+typedef enum Dir { North, East, South, West } Dir;
+
+char *Dir_u002F_name(Dir d)
+{
+  return "dir";
+}
+
+typedef enum Status { Ok = 0, Err = -1 } Status;

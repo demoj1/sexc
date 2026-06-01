@@ -1,0 +1,127 @@
+; std/derive.sexc — in-place рефлексия по compile-time метадате типов.
+;
+; struct/enum кладут :fields/:variants + :kind в мету; typedef — :underlying.
+; Здесь — макросы, разворачивающие обход ПО МЕСТУ:
+;   (eq-as Type a b)  → выражение: a.f1 == b.f1 && ...   (вложенные struct рекурсивно)
+;   (print-as Type x) → стейтмент: блок printf по полям
+; Именованную функцию пользователь делает сам однострочной обёрткой:
+;   (defn int Foo/eq ((%ptr Foo) a) ((%ptr Foo) b) (return (eq-as Foo (%deref a) (%deref b))))
+;
+; Генерим SURFACE-формы (block/printf/dot/=/&&/cast), не %-IR.
+; Дефолты: указатели/функции → opaque %p; массивы пока НЕ поддержаны (→ $error);
+; enum → %d; неизвестный скаляр в print → $error.
+
+; ─── классификатор типа ─────────────────────────────────────────────────────
+
+; снять квалификаторы (%const/%volatile/%restrict T) → базовый тип
+($defun $rem-mods (ty)
+  ($if ($atom? ty)
+    ty
+    ($let ((h ($car ty)))
+      ($if ($eq? h '%const)    ($rem-mods ($|> ty $cdr $car))
+        ($if ($eq? h '%volatile) ($rem-mods ($|> ty $cdr $car))
+          ($if ($eq? h '%restrict) ($rem-mods ($|> ty $cdr $car))
+            ty))))))
+
+; → scalar | ptr | array | fn | struct | union | enum
+; Атом: смотрим :kind в мете (struct/union/enum/typedef→резолв :underlying),
+;       иначе scalar (builtin/неизвестный именованный). Список: по голове;
+;       не-%-голова (напр. (unsigned long)) = многословный скаляр.
+($defun $type-kind (ty)
+  ($if ($atom? ty)
+    ($let ((k ($m-get ty :kind)))
+      ($cond
+        (($eq? k 'struct)  'struct)
+        (($eq? k 'union)   'union)
+        (($eq? k 'enum)    'enum)
+        (($eq? k 'typedef) ($type-kind ($m-get ty :underlying)))
+        (else              'scalar)))
+    ($let ((h ($car ty)))
+      ($cond
+        (($eq? h '%ptr)      'ptr)
+        (($eq? h '%array)    'array)
+        (($eq? h '%fn)       'fn)
+        (($eq? h '%struct)   'struct)
+        (($eq? h '%union)    'union)
+        (($eq? h '%enum)     'enum)
+        (($eq? h '%const)    ($type-kind ($|> ty $cdr $car)))
+        (($eq? h '%volatile) ($type-kind ($|> ty $cdr $car)))
+        (($eq? h '%restrict) ($type-kind ($|> ty $cdr $car)))
+        (else                'scalar)))))   ; (unsigned long) и пр. многословные
+
+($defun $pointer? (ty) ($eq? ($type-kind ty) 'ptr))
+
+; ─── printf-формат для скалярного типа (по man 3 printf) ────────────────────
+; Учитывает varargs-промоцию (float→double→%f, char/short→int→%c/%d).
+; Многословные типы — списки, сравниваем структурно ($eq? глубокий).
+($defun $fmt-for-type (ty)
+  ($let ((b ($rem-mods ty)))
+    ($cond
+      (($eq? b 'int)              "%d")
+      (($eq? b 'char)            "%c")
+      (($eq? b 'short)           "%d")
+      (($eq? b 'long)            "%ld")
+      (($eq? b 'float)           "%f")
+      (($eq? b 'double)          "%f")
+      (($eq? b 'size_t)          "%zu")
+      (($eq? b 'bool)            "%d")
+      (($eq? b '_Bool)           "%d")
+      (($eq? b '(unsigned))      "%u")
+      (($eq? b '(unsigned int))  "%u")
+      (($eq? b '(long long))     "%lld")
+      (($eq? b '(unsigned long)) "%lu")
+      (($eq? b '(long double))   "%Lf")
+      (else ($error ($str "print: нет printf-формата для типа " b
+                          " (поддержи аннотацией/добавь в $fmt-for-type)"))))))
+
+; ─── eq-as ──────────────────────────────────────────────────────────────────
+
+; выражение сравнения одного поля
+($defun $eq-one (a b fty fname)
+  ($let ((k ($type-kind fty)))
+    ($cond
+      (($eq? k 'struct) ($list 'eq-as fty ($list 'dot a fname) ($list 'dot b fname)))
+      (($eq? k 'union)  ($error ($str "eq-as: union-поле " fname " пока не поддержано")))
+      (($eq? k 'array)  ($error ($str "eq-as: array-поле " fname " пока не поддержано (follow-up)")))
+      (else             ($list '= ($list 'dot a fname) ($list 'dot b fname))))))  ; scalar/enum/ptr/fn → ==
+
+(%doc eq-as
+  :sig (eq-as Type a b)
+  :doc "In-place structural equality expression: a.f == b.f && ... Recurses into nested structs; pointers/enums compared by value."
+  :example "(defn int Point/eq ((%ptr Point) a) ((%ptr Point) b) (return (eq-as Point (%deref a) (%deref b))))")
+(%defmacro eq-as (ty a b)
+  ($let ((fields ($m-get ty :fields)))
+    ($if ($null? fields)
+      '1
+      ($let ((parts ($map ($eq-one a b ($car it) ($|> it $cdr $car)) fields)))
+        ($if ($null? ($cdr parts))
+          ($car parts)
+          ($cons '&& parts))))))
+
+; ─── print-as ────────────────────────────────────────────────────────────────
+
+; стейтмент печати одного поля
+($defun $print-one (x fty fname)
+  ($let ((k ($type-kind fty)))
+    ($cond
+      (($eq? k 'struct) ($list 'print-as fty ($list 'dot x fname)))
+      (($eq? k 'enum)   ($list 'printf ($str "  " fname " = %d\n") ($list 'dot x fname)))
+      (($eq? k 'scalar) ($list 'printf ($str "  " fname " = " ($fmt-for-type fty) "\n")
+                               ($list 'dot x fname)))
+      (($eq? k 'array)  ($error ($str "print-as: array-поле " fname " пока не поддержано (follow-up)")))
+      (($eq? k 'union)  ($error ($str "print-as: union-поле " fname " пока не поддержано")))
+      (else             ($list 'printf ($str "  " fname " = %p\n")           ; ptr/fn → opaque
+                               ($list 'cast '(%ptr void) ($list 'dot x fname)))))))
+
+(%doc print-as
+  :sig (print-as Type x)
+  :doc "In-place statement printing a struct's fields via printf. Recurses into nested structs; pointers as %p, enums as %d."
+  :example "(defn void Point/print ((%ptr Point) p) (print-as Point (%deref p)))")
+(%defmacro print-as (ty x)
+  ($let ((fields ($m-get ty :fields)))
+    ($if ($null? fields)
+      ($error "print-as: no :fields metadata for this type")
+      `(block
+         (printf ,($str ty " {\n"))
+         ,@($map ($print-one x ($car it) ($|> it $cdr $car)) fields)
+         (printf "}\n")))))

@@ -292,6 +292,21 @@
 (%defmacro cast (ty expr)
   `(%cast ,ty ,expr))
 
+; typedef
+; (typedef ty name) => typedef <ty> name;  (тип первым, как в C и в %typedef IR)
+; Пишет :kind 'typedef + :underlying в мету, чтобы алиас нёс свою структуру
+; (указатель/массив за typedef'ом виден из метадаты).
+(%doc typedef
+  :doc "Define a type alias; records :underlying type in metadata."
+  :example "(typedef (%ptr char) String)")
+(%defmacro typedef (ty name)
+  ($do
+    ($assert ($atom? name) "typedef: name must be an atom")
+    ($m-put name :kind 'typedef :underlying ty)
+    ($let ((ns ($namespace-of name)))
+      ($if ($null? ns) nil ($m-append ns :types name)))
+    `(%typedef ,ty ,name)))
+
 ; struct
 ; Strict section syntax:
 ; (struct Name
@@ -371,6 +386,69 @@
     ($let ((ns ($namespace-of name)))
       ($if ($null? ns) nil ($m-append ns :types name)))
     `(%typedef (%union ,name ,@fields) ,name)))
+
+; enum (параллельно struct: секции :variants + :methods)
+; (enum Color
+;   :variants
+;   Red (Green 5) Blue          ; атом = авто-нумерация, (имя выражение) = явно
+;   :methods
+;   (defn ret method params body...))
+; => typedef enum Color { Red, Green = 5, Blue } Color;  + методы Color/method
+(%doc enum
+  :doc "Define typedef enum with :variants and optional :methods sections."
+  :example "(enum Dir :variants North East South West)")
+(%defmacro enum (name &rest items)
+  ($let ((state
+          ($reduce
+            ($let ((phase ($car acc))
+                   (vvals ($|> acc $cdr $car))
+                   (mvals ($|> acc $cdr $cdr $car)))
+              ($if ($eq? it :variants)
+                ($do
+                  ($assert ($eq? phase 'start) "':variants' section must appear only once and first")
+                  ($list 'variants vvals mvals))
+                ($if ($eq? it :methods)
+                  ($do
+                    ($assert ($eq? phase 'variants) "':methods' section must appear after ':variants' and only once")
+                    ($list 'methods vvals mvals))
+                  ($do
+                    ($assert ($not ($eq? phase 'start)) "enum must start with ':variants' section")
+                    ($if ($eq? phase 'variants)
+                      ($list phase ($append vvals ($list it)) mvals)
+                      ($do
+                        ($assert ($not ($atom? it)) "only defn forms are allowed in ':methods' section")
+                        ($assert ($eq? ($car it) 'defn) "only defn forms are allowed in ':methods' section")
+                        ($list phase vvals ($append mvals ($list it)))))))))
+            ($list 'start ($list) ($list))
+            items))
+         (phase ($car state))
+         (vvals ($|> state $cdr $car))
+         (mvals ($|> state $cdr $cdr $car)))
+    ($assert ($not ($eq? phase 'start)) "enum expects ':variants' section")
+    ; имена вариантов в мету (значения для печати-по-имени не нужны: switch case Red:)
+    ($let ((vnames ($map ($if ($atom? it) it ($car it)) vvals)))
+      ($m-put name :kind 'enum :variants vnames :methods mvals))
+    ($let ((ns ($namespace-of name)))
+      ($if ($null? ns) nil ($m-append ns :types name)))
+    `(%top-level-splice
+       (%typedef (%enum ,name ,@vvals) ,name)
+       ,@($map
+           ($do
+             ($assert ($not ($atom? it))                      "enum method must be a list: (defn ret name params body...)")
+             ($assert ($not ($null? ($|> it $cdr)))           "enum method must include return type")
+             ($assert ($not ($null? ($|> it $cdr $cdr)))      "enum method must include method name")
+             ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "enum method must include parameter list")
+             ($let ((ret    ($|> it $cdr $car))
+                    (mname  ($|> it $cdr $cdr $car))
+                    (params ($|> it $cdr $cdr $cdr $car))
+                    (body   ($|> it $cdr $cdr $cdr $cdr)))
+               ($assert ($atom? mname) "enum method name must be an atom")
+               ($let ((fq ($symcat name "/" mname)))
+                 ($do
+                   ($m-put fq :kind 'fn :return-type ret :params params)
+                   ($m-append name :fns fq)
+                   `(%def-fn ,ret ,fq ,params (%block ,@body))))))
+           mvals))))
 
 ; zero-init
 ; (zero-init) => {0}

@@ -97,6 +97,37 @@ Methods declared inside `struct` are namespaced as
 `Type#` form is a named-field constructor; missing fields
 are zero-initialised.
 
+### typedef, enum, and in-place reflection
+
+`typedef` and `enum` mirror `struct`: they emit the C type
+and record faithful metadata (`enum` is parallel to `struct`
+with `:variants` + optional `:methods`).
+
+```lisp
+(typedef (%ptr char) String)
+
+(enum Dir
+  :variants
+  North (East 5) South West       ; atom = auto, (name expr) = explicit
+  :methods
+  (defn (%ptr char) name ((Dir d)) (return "...")))
+```
+
+Because the metadata is faithful, macros can reflect over a
+type in place. `std/derive.sexc` ships `print-as` (a printf
+block) and `eq-as` (a boolean expression) that walk a type's
+`:fields` — picking printf specifiers per field type, recursing
+into nested structs, treating pointers as opaque `%p`:
+
+```lisp
+(defn void Point/print ((%ptr Point) p) (print-as Point (%deref p)))
+(defn int  Point/eq ((%ptr Point) a) ((%ptr Point) b)
+  (return (eq-as Point (%deref a) (%deref b))))
+```
+
+No named "derive" is generated — you wrap the in-place macro in
+a one-line function when you want one.
+
 ### Threading instead of nested calls
 
 ```c
@@ -441,6 +472,37 @@ int main(void) {
 Методы внутри `struct` неймспейсятся в `Type/method` на
 codegen — `MathOps/add`, `Vec2/add`. `Type#` — конструктор
 с именованными полями; пропущенные поля zero-init.
+
+### typedef, enum и in-place рефлексия
+
+`typedef` и `enum` симметричны `struct`: эмитят C-тип и пишут
+faithful-метадату (`enum` параллелен `struct` — секции
+`:variants` + опц. `:methods`).
+
+```lisp
+(typedef (%ptr char) String)
+
+(enum Dir
+  :variants
+  North (East 5) South West       ; атом = авто, (имя выраж) = явно
+  :methods
+  (defn (%ptr char) name ((Dir d)) (return "...")))
+```
+
+Раз метадата faithful, макросы могут рефлексировать тип по
+месту. `std/derive.sexc` даёт `print-as` (блок printf) и
+`eq-as` (булево выражение): обходят `:fields`, подбирают
+printf-спецификатор по типу поля, рекурсятся во вложенные
+struct, указатели печатают как `%p`:
+
+```lisp
+(defn void Point/print ((%ptr Point) p) (print-as Point (%deref p)))
+(defn int  Point/eq ((%ptr Point) a) ((%ptr Point) b)
+  (return (eq-as Point (%deref a) (%deref b))))
+```
+
+Именованный «derive» не генерится — оборачиваешь in-place
+макрос в однострочную функцию, когда нужна именованная.
 
 ### Threading вместо вложенных вызовов
 

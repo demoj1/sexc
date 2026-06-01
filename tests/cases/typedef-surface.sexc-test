@@ -1,0 +1,9 @@
+(typedef (%ptr char) String)
+(typedef int Id)
+(typedef (unsigned long) Size)
+;==EXPECTED==
+typedef char *String;
+
+typedef int Id;
+
+typedef unsigned long Size;

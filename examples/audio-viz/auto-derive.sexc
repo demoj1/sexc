@@ -13,7 +13,7 @@
 
 ; ─── Compile-time helpers: формат printf по типу поля ───────────────────────
 
-($defun $fmt-for-type (ty)
+($defun $av-fmt-for-type (ty)
   ; Атомарные типы → конкретные форматы; всё остальное (указатели, struct'ы) → %p.
   ; $cond с lazy-evaluation — нет каскада вложенных $if.
   ($cond
@@ -27,7 +27,7 @@
 
 ; Не-атомарные типы и pointer-ы — кастим аргумент в (%ptr void),
 ; иначе printf будет ругаться на несовпадение со спецификатором %p.
-($defun $cast-for-type (ty arg)
+($defun $av-cast-for-type (ty arg)
   ($cond
     (($not ($atom? ty))   `(cast (%ptr void) ,arg))
     (($eq? ty 'int)       arg)
@@ -59,7 +59,7 @@
                          ; через $list вместо вложенного quasi-quote — проще
                          ; и не требует ",,arg" для прокола второго уровня.
                          ($list 'printf
-                                ($str "  " name " = " ($fmt-for-type ty) "\n")
-                                ($cast-for-type ty ($list '%arrow 'x name))))
+                                ($str "  " name " = " ($av-fmt-for-type ty) "\n")
+                                ($av-cast-for-type ty ($list '%arrow 'x name))))
                        fields)
                   (printf "}\n"))))))

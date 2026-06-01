@@ -1,0 +1,55 @@
+; print-as покрывает все известные скалярные C-типы → printf-формат по man.
+(struct All
+  :fields
+  (int            i)
+  (char           c)
+  (short          sh)
+  ((unsigned)     u)
+  ((unsigned int) ui)
+  (long           l)
+  ((long long)    ll)
+  ((unsigned long) ul)
+  (float          f)
+  (double         d)
+  ((long double)  ld)
+  (size_t         z)
+  (bool           b))
+
+(defn void all-print ((All a)) (print-as All a))
+;==EXPECTED==
+typedef struct All {
+  int i;
+  char c;
+  short sh;
+  unsigned u;
+  unsigned int ui;
+  long l;
+  long long ll;
+  unsigned long ul;
+  float f;
+  double d;
+  long double ld;
+  size_t z;
+  bool b;
+} All;
+
+void all_u002D_print(All a)
+{
+  {
+    printf("All {\n");
+    printf("  i = %d\n", a.i);
+    printf("  c = %c\n", a.c);
+    printf("  sh = %d\n", a.sh);
+    printf("  u = %u\n", a.u);
+    printf("  ui = %u\n", a.ui);
+    printf("  l = %ld\n", a.l);
+    printf("  ll = %lld\n", a.ll);
+    printf("  ul = %lu\n", a.ul);
+    printf("  f = %f\n", a.f);
+    printf("  d = %f\n", a.d);
+    printf("  ld = %Lf\n", a.ld);
+    printf("  z = %zu\n", a.z);
+    printf("  b = %d\n", a.b);
+    printf("}\n");
+  }
+}
