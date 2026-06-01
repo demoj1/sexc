@@ -15,11 +15,13 @@
 ;; - Convenience compile command (`sexc/compile')
 ;; - Expand whole buffer to C (`sexc/expand')
 ;; - Eldoc symbol help in echo area
+;; - On-the-fly diagnostics via Flymake (`sexc-flymake')
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'eldoc)
+(require 'flymake)
 (require 'json)
 (require 'lisp-mode)
 (require 'subr-x)
@@ -167,6 +169,15 @@ When nil, only `sexc/eldoc-docs` is used."
 
 (defcustom sexc/enable-xref t
   "When non-nil, enable simple xref definitions backend for SexC files."
+  :type 'boolean
+  :group 'sexc)
+
+(defcustom sexc/enable-flymake t
+  "When non-nil, enable Flymake diagnostics backed by the SexC compiler.
+
+The backend pipes the current buffer through `sexc --quiet -' and parses
+its `file:line:col: error[phase]: message' diagnostics.  Flymake runs it
+after edits settle and on save."
   :type 'boolean
   :group 'sexc)
 
@@ -864,6 +875,96 @@ FILE is optional source path for project-aware lookup."
 (cl-defmethod xref-backend-definitions ((_backend (eql sexc)) identifier)
   (sexc--xref-definitions identifier))
 
+;; --- Flymake backend -------------------------------------------------------
+
+(defvar-local sexc--flymake-proc nil
+  "Currently running SexC Flymake process for this buffer, if any.")
+
+(defconst sexc--flymake-diag-regexp
+  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): error\\[\\([^]]*\\)\\]: \\(.*\\)$"
+  "Matches a compiler diagnostic: FILE:LINE:COL: error[PHASE]: MESSAGE.")
+
+(defun sexc--flymake-parse (source report-fn)
+  "Parse compiler stderr in the current buffer into Flymake diagnostics.
+
+SOURCE is the buffer being checked.  Report via REPORT-FN.  Diagnostics
+that reference `<stdin>' are placed at their LINE:COL in SOURCE; errors in
+imported files (and locationless `error: MESSAGE' lines) become
+buffer-level diagnostics that name the originating file."
+  (let ((diags '()))
+    (goto-char (point-min))
+    (while (not (eobp))
+      (cond
+       ((looking-at sexc--flymake-diag-regexp)
+        (let* ((file (match-string 1))
+               (line (string-to-number (match-string 2)))
+               (col (string-to-number (match-string 3)))
+               (phase (match-string 4))
+               (msg (format "[%s] %s" phase (match-string 5))))
+          (if (string= file "<stdin>")
+              (pcase-let ((`(,beg . ,end)
+                           (flymake-diag-region source line col)))
+                (when beg
+                  (push (flymake-make-diagnostic source beg end :error msg)
+                        diags)))
+            ;; Error inside an imported file — can't point into SOURCE, so
+            ;; surface it as a whole-buffer diagnostic naming the location.
+            (push (flymake-make-diagnostic
+                   source (point-min) (min (point-max) (1+ (point-min))) :error
+                   (format "%s (%s:%d:%d)" msg file line col))
+                  diags))))
+       ;; Locationless bare error (e.g. missing stdlib, CLI misuse).
+       ((looking-at "^error: \\(.*\\)$")
+        (push (flymake-make-diagnostic
+               source (point-min) (min (point-max) (1+ (point-min))) :error
+               (match-string 1))
+              diags)))
+      (forward-line 1))
+    (funcall report-fn (nreverse diags))))
+
+(defun sexc-flymake (report-fn &rest _args)
+  "Flymake backend for SexC: run the compiler over the buffer.
+
+Pipes the buffer through `sexc --quiet -' and turns the resulting
+diagnostics into Flymake reports via REPORT-FN.  The compiler stops at the
+first error, so typically at most one diagnostic is produced per run."
+  (let ((bin (sexc--resolve-binary)))
+    (unless bin
+      (error "Cannot find sexc binary (see `sexc/binary')"))
+    ;; Cancel any still-running check for this buffer.
+    (when (process-live-p sexc--flymake-proc)
+      (kill-process sexc--flymake-proc))
+    (let* ((source (current-buffer))
+           ;; Run from the buffer's directory so relative `%import' targets
+           ;; resolve the same way they would for the on-disk file.
+           (default-directory (if buffer-file-name
+                                  (file-name-directory buffer-file-name)
+                                default-directory)))
+      (save-restriction
+        (widen)
+        (let ((text (buffer-string)))
+          (setq
+           sexc--flymake-proc
+           (make-process
+            :name "sexc-flymake"
+            :noquery t
+            :connection-type 'pipe
+            :buffer (generate-new-buffer " *sexc-flymake*")
+            :command (list bin "--quiet" "-")
+            :sentinel
+            (lambda (proc _event)
+              (when (memq (process-status proc) '(exit signal))
+                (unwind-protect
+                    (if (with-current-buffer source
+                          (eq proc sexc--flymake-proc))
+                        (with-current-buffer (process-buffer proc)
+                          (sexc--flymake-parse source report-fn))
+                      (flymake-log :warning
+                                   "Canceling obsolete check %s" proc))
+                  (kill-buffer (process-buffer proc)))))))
+          (process-send-string sexc--flymake-proc text)
+          (process-send-eof sexc--flymake-proc))))))
+
 ;;;###autoload
 (define-derived-mode sexc-mode lisp-mode "SexC"
   "Major mode for editing SexC files."
@@ -880,6 +981,9 @@ FILE is optional source path for project-aware lookup."
   (add-hook 'xref-backend-functions #'sexc-xref-backend nil t)
   ;; Файл сохранился → метадата на диске обновилась → дропаем кеш.
   (add-hook 'after-save-hook #'sexc--m-dump-invalidate-current nil t)
+  (when sexc/enable-flymake
+    (add-hook 'flymake-diagnostic-functions #'sexc-flymake nil t)
+    (flymake-mode 1))
   (eldoc-mode 1)
   (sexc/apply-indent-rules))
 

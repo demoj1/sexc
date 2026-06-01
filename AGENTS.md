@@ -11,6 +11,7 @@
 - Регрессионные тесты: `tests/` (bash + golden snapshots, см. ниже).
 - Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command, eldoc через `show-doc`).
   - completion-at-point через `sexc complete` (учитывает imports + std + `%module`).
+  - Flymake backend `sexc-flymake` (вкл. `sexc/enable-flymake`, default t): пайпит буфер через `sexc --quiet -`, парсит диагностики `file:line:col: error[phase]: msg`, кладёт регион через `flymake-diag-region`. Запускается из директории буфера (чтобы `%import` резолвились). Async через `make-process`.
 
 ## Карта модулей (OCaml)
 

@@ -326,7 +326,8 @@ sexc m-dump file.sexc             # dump the metadata table
 ```
 
 `sexc.el` is an Emacs major-mode: font-lock, indent rules,
-eldoc backed by `show-doc`, completion-at-point.
+eldoc backed by `show-doc`, completion-at-point, and Flymake
+diagnostics driven by the compiler (on edit and on save).
 
 ## Tests
 
@@ -654,7 +655,8 @@ sexc m-dump file.sexc             # дамп таблицы метадаты
 ```
 
 `sexc.el` — Emacs major-mode: font-lock, indent rules, eldoc
-через `show-doc`, completion-at-point.
+через `show-doc`, completion-at-point и Flymake-диагностика от
+компилятора (на лету и при сохранении).
 
 ## Тесты
 
