@@ -71,57 +71,106 @@
       (($eq? b '(long long))     "%lld")
       (($eq? b '(unsigned long)) "%lu")
       (($eq? b '(long double))   "%Lf")
-      (else ($error ($str "print: нет printf-формата для типа " b
-                          " (поддержи аннотацией/добавь в $fmt-for-type)"))))))
+      (else ($error ($str "print: no printf format for type " b
+                          " (extend $fmt-for-type)"))))))
 
-; ─── eq-as ──────────────────────────────────────────────────────────────────
+; ─── value vs pointer: тип-форма решает аксессор и имя struct ────────────────
+; (%ptr S) → arrow + поля S;  S (struct/значение) → dot + поля S.
+($defun $acc-of (ty)   ($if ($eq? ($type-kind ty) 'ptr) 'arrow 'dot))
+($defun $sname-of (ty) ($if ($eq? ($type-kind ty) 'ptr) ($|> ty $cdr $car) ty))
 
-; выражение сравнения одного поля
-($defun $eq-one (a b fty fname)
+; ─── eq-as / eq-as* ──────────────────────────────────────────────────────────
+
+; выражение сравнения одного поля; acc — аксессор (dot/arrow).
+; Вложенный struct рекурсит в eq-as (значение, dot внутри).
+($defun $eq-one (acc a b fty fname)
   ($let ((k ($type-kind fty)))
     ($cond
-      (($eq? k 'struct) ($list 'eq-as fty ($list 'dot a fname) ($list 'dot b fname)))
-      (($eq? k 'union)  ($error ($str "eq-as: union-поле " fname " пока не поддержано")))
-      (($eq? k 'array)  ($error ($str "eq-as: array-поле " fname " пока не поддержано (follow-up)")))
-      (else             ($list '= ($list 'dot a fname) ($list 'dot b fname))))))  ; scalar/enum/ptr/fn → ==
+      (($eq? k 'struct) ($list 'eq-as fty ($list acc a fname) ($list acc b fname)))
+      (($eq? k 'union)  ($error ($str "eq-as: union field " fname " not supported yet")))
+      (($eq? k 'array)  ($error ($str "eq-as: array field " fname " not supported yet (follow-up)")))
+      (else             ($list '= ($list acc a fname) ($list acc b fname))))))  ; scalar/enum/ptr/fn → ==
+
+($defun $eq-build (ty a b)
+  ($let ((sname ($sname-of ty)) (acc ($acc-of ty)))
+    ($let ((fields ($m-get sname :fields)))
+      ($if ($null? fields)
+        '1
+        ($let ((parts ($map ($eq-one acc a b ($car it) ($|> it $cdr $car)) fields)))
+          ($if ($null? ($cdr parts))
+            ($car parts)
+            ($cons '&& parts)))))))
 
 (%doc eq-as
   :sig (eq-as Type a b)
-  :doc "In-place structural equality expression: a.f == b.f && ... Recurses into nested structs; pointers/enums compared by value."
-  :example "(defn int Point/eq ((%ptr Point) a) ((%ptr Point) b) (return (eq-as Point (%deref a) (%deref b))))")
-(%defmacro eq-as (ty a b)
-  ($let ((fields ($m-get ty :fields)))
-    ($if ($null? fields)
-      '1
-      ($let ((parts ($map ($eq-one a b ($car it) ($|> it $cdr $car)) fields)))
-        ($if ($null? ($cdr parts))
-          ($car parts)
-          ($cons '&& parts))))))
+  :doc "In-place structural equality: a.f == b.f && ... Type form drives access: (%ptr S) → a->f, S → a.f. Nested structs recurse."
+  :example "(defn int Point/eq ((Point a) (Point b)) (return (eq-as Point a b)))")
+(%defmacro eq-as (ty a b) ($eq-build ty a b))
 
-; ─── print-as ────────────────────────────────────────────────────────────────
+(%doc eq-as*
+  :sig (eq-as* Type pa pb)
+  :doc "Like eq-as but pa/pb are POINTERS to Type: pa->f == pb->f ... (no manual %deref)."
+  :example "(defn int Point/eq* (((%ptr Point) a) ((%ptr Point) b)) (return (eq-as* Point a b)))")
+(%defmacro eq-as* (ty a b) ($eq-build ($list '%ptr ty) a b))
 
-; стейтмент печати одного поля
-($defun $print-one (x fty fname)
+; ─── print-as / print-as* ────────────────────────────────────────────────────
+
+; стейтмент печати одного поля; acc — аксессор (dot/arrow)
+($defun $print-one (acc x fty fname)
   ($let ((k ($type-kind fty)))
     ($cond
-      (($eq? k 'struct) ($list 'print-as fty ($list 'dot x fname)))
-      (($eq? k 'enum)   ($list 'printf ($str "  " fname " = %d\n") ($list 'dot x fname)))
+      (($eq? k 'struct) ($list 'print-as fty ($list acc x fname)))
+      (($eq? k 'enum)   ($list 'printf ($str "  " fname " = %d\n") ($list acc x fname)))
       (($eq? k 'scalar) ($list 'printf ($str "  " fname " = " ($fmt-for-type fty) "\n")
-                               ($list 'dot x fname)))
-      (($eq? k 'array)  ($error ($str "print-as: array-поле " fname " пока не поддержано (follow-up)")))
-      (($eq? k 'union)  ($error ($str "print-as: union-поле " fname " пока не поддержано")))
+                               ($list acc x fname)))
+      (($eq? k 'array)  ($error ($str "print-as: array field " fname " not supported yet (follow-up)")))
+      (($eq? k 'union)  ($error ($str "print-as: union field " fname " not supported yet")))
       (else             ($list 'printf ($str "  " fname " = %p\n")           ; ptr/fn → opaque
-                               ($list 'cast '(%ptr void) ($list 'dot x fname)))))))
+                               ($list 'cast '(%ptr void) ($list acc x fname)))))))
+
+($defun $print-build (ty x)
+  ($let ((sname ($sname-of ty)) (acc ($acc-of ty)))
+    ($let ((fields ($m-get sname :fields)))
+      ($if ($null? fields)
+        ($error ($str "print-as: no :fields metadata for " sname))
+        `(block
+           (printf ,($str sname " {\n"))
+           ,@($map ($print-one acc x ($car it) ($|> it $cdr $car)) fields)
+           (printf "}\n"))))))
 
 (%doc print-as
-  :sig (print-as Type x)
-  :doc "In-place statement printing a struct's fields via printf. Recurses into nested structs; pointers as %p, enums as %d."
-  :example "(defn void Point/print ((%ptr Point) p) (print-as Point (%deref p)))")
-(%defmacro print-as (ty x)
-  ($let ((fields ($m-get ty :fields)))
-    ($if ($null? fields)
-      ($error "print-as: no :fields metadata for this type")
-      `(block
-         (printf ,($str ty " {\n"))
-         ,@($map ($print-one x ($car it) ($|> it $cdr $car)) fields)
-         (printf "}\n")))))
+  :sig (print-as [Type] x)
+  :doc "In-place struct printf. (print-as Type x): Type drives access ((%ptr S)→x->f, S→x.f). (print-as x): infer type from x's :c-type metadata (works for decl'd vars, picks ptr/value automatically)."
+  :example "(print-as foo)  ; type inferred from (decl (Foo foo) ...)")
+(%defmacro print-as (a &rest rest)
+  ($if ($null? rest)
+    ; 1 аргумент: вывести тип из :c-type значения (для decl-переменных)
+    ($do
+      ($assert ($atom? a)
+        "print-as: single-arg form needs a variable name to infer type; otherwise (print-as Type expr)")
+      ($let ((ty ($m-get a :c-type)))
+        ($if ($null? ty)
+          ($error ($str "print-as: cannot infer type of '" a "' (no :c-type metadata); pass it explicitly: (print-as Type " a ")"))
+          ($print-build ty a))))
+    ; 2 аргумента: тип задан явно
+    ($print-build a ($car rest))))
+
+(%doc print-as*
+  :sig (print-as* Type p)
+  :doc "Like print-as but p is a POINTER to Type: p->f ... (no manual %deref)."
+  :example "(defn void Point/print* (((%ptr Point) p)) (print-as* Point p))")
+(%defmacro print-as* (ty x) ($print-build ($list '%ptr ty) x))
+
+; ─── derive/prints: генератор методов print + print* для struct ──────────────
+; Используется ВНУТРИ struct :methods; struct подставляет имя типа первым
+; аргументом. (derive/prints) → Type/print + Type/print*; (derive/prints show)
+; → Type/show + Type/show*.
+(%doc derive/prints
+  :sig (derive/prints [base])
+  :doc "Inside a struct's :methods, generate two printers: <base> (by value) and <base>* (by pointer). base defaults to 'print'. The struct name is injected automatically."
+  :example "(struct Foo :fields (int a) :methods (derive/prints))  ; => Foo/print + Foo/print*")
+(%defmacro derive/prints (type &rest rest)
+  ($let ((base ($if ($null? rest) 'print ($car rest))))
+    `(%top-level-splice
+       (defn void ,($symcat type "/" base)    ((,type self))        (print-as  ,type self))
+       (defn void ,($symcat type "/" base "*") (((%ptr ,type) self)) (print-as* ,type self)))))

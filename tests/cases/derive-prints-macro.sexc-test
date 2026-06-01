@@ -1,0 +1,76 @@
+; derive/prints внутри struct :methods → пара методов value + pointer.
+; + (print-as self) в методе: тип self выводится из сигнатуры defn.
+(include "stdio.h")
+
+(struct Foo
+  :fields (int a) (float b)
+  :methods
+  (derive/prints))                 ; → Foo/print + Foo/print*
+
+(struct Bar
+  :fields (int x) (int y)
+  :methods
+  (derive/prints show)             ; → Bar/show + Bar/show*
+  (defn void dump ((Bar self)) (print-as self)))   ; вывод типа параметра
+;==EXPECTED==
+#include "stdio.h"
+
+typedef struct Foo {
+  int a;
+  float b;
+} Foo;
+
+void Foo_u002F_print(Foo self)
+{
+  {
+    printf("Foo {\n");
+    printf("  a = %d\n", self.a);
+    printf("  b = %f\n", self.b);
+    printf("}\n");
+  }
+}
+
+void Foo_u002F_print_u002A_(Foo *self)
+{
+  {
+    printf("Foo {\n");
+    printf("  a = %d\n", self->a);
+    printf("  b = %f\n", self->b);
+    printf("}\n");
+  }
+}
+
+typedef struct Bar {
+  int x;
+  int y;
+} Bar;
+
+void Bar_u002F_show(Bar self)
+{
+  {
+    printf("Bar {\n");
+    printf("  x = %d\n", self.x);
+    printf("  y = %d\n", self.y);
+    printf("}\n");
+  }
+}
+
+void Bar_u002F_show_u002A_(Bar *self)
+{
+  {
+    printf("Bar {\n");
+    printf("  x = %d\n", self->x);
+    printf("  y = %d\n", self->y);
+    printf("}\n");
+  }
+}
+
+void Bar_u002F_dump(Bar self)
+{
+  {
+    printf("Bar {\n");
+    printf("  x = %d\n", self.x);
+    printf("  y = %d\n", self.y);
+    printf("}\n");
+  }
+}

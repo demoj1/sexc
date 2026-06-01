@@ -1,0 +1,65 @@
+; print-as*/eq-as* (указатель → arrow) и (print-as var) с выводом типа из :c-type.
+(include "stdio.h")
+(struct V :fields (int x) (int y))
+
+(defn void V/print  ((V s))                       (print-as  V s))     ; значение → s.x
+(defn void V/print* (((%ptr V) s))                (print-as* V s))     ; указатель → s->x
+(defn int  V/eq*    (((%ptr V) a) ((%ptr V) b))   (return (eq-as* V a b)))
+
+(defn int main ()
+  (decl (V v) (V# (x 1) (y 2))
+        ((%ptr V) p) (%addr v))
+  (print-as v)     ; вывод типа V → v.x
+  (print-as p)     ; вывод типа (%ptr V) → p->x
+  (return 0))
+;==EXPECTED==
+#include "stdio.h"
+
+typedef struct V {
+  int x;
+  int y;
+} V;
+
+void V_u002F_print(V s)
+{
+  {
+    printf("V {\n");
+    printf("  x = %d\n", s.x);
+    printf("  y = %d\n", s.y);
+    printf("}\n");
+  }
+}
+
+void V_u002F_print_u002A_(V *s)
+{
+  {
+    printf("V {\n");
+    printf("  x = %d\n", s->x);
+    printf("  y = %d\n", s->y);
+    printf("}\n");
+  }
+}
+
+int V_u002F_eq_u002A_(V *a, V *b)
+{
+  return a->x == b->x && a->y == b->y;
+}
+
+int main(void)
+{
+  V v = (V){ .x = 1, .y = 2 };
+  V *p = &v;
+  {
+    printf("V {\n");
+    printf("  x = %d\n", v.x);
+    printf("  y = %d\n", v.y);
+    printf("}\n");
+  }
+  {
+    printf("V {\n");
+    printf("  x = %d\n", p->x);
+    printf("  y = %d\n", p->y);
+    printf("}\n");
+  }
+  return 0;
+}

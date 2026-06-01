@@ -406,12 +406,37 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 
 Рефлексия по метадате типов, БЕЗ генерации именованных функций — их пользователь
 делает однострочной обёрткой.
-- `(eq-as Type a b)` — ВЫРАЖЕНИЕ: `a.f == b.f && ...`; вложенный struct → рекурсивно
-  `(eq-as S ...)`; scalar/enum/ptr → `==`; array/union → `$error` (follow-up).
+- `(eq-as Type a b)` — ВЫРАЖЕНИЕ: `a.f == b.f && ...`; вложенный struct → рекурсивно;
+  scalar/enum/ptr → `==`; array/union → `$error` (follow-up).
 - `(print-as Type x)` — СТЕЙТМЕНТ: `(block (printf "T {") <поля> (printf "}"))`;
   scalar → printf по `$fmt-for-type`; struct → рекурсия; enum → `%d`; ptr/fn →
   `%p`+cast; array/union → `$error`.
-- Обёртка: `(defn int Foo/eq ((%ptr Foo) a) ((%ptr Foo) b) (return (eq-as Foo (%deref a) (%deref b))))`.
+- **value vs pointer**: тип-форма решает аксессор — `Type` → `.` (значение),
+  `(%ptr Type)` → `->`. `$acc-of`/`$sname-of` диспатчат по `$type-kind`.
+  - `print-as*`/`eq-as*` (Type p) — сахар = `print-as`/`eq-as` с `(%ptr Type)` →
+    `p->f` без ручного `%deref`. (для методов, где `self` — указатель.)
+  - `(print-as x)` (1 арг) — выводит тип из `($m-get x :c-type)`: работает для
+    `decl`-переменных (включая указательные → авто `->`); НЕ для параметров
+    функций (defn не пишет тип параметров) и не для shadowing.
+- Обёртки: `(defn void Foo/print ((Foo v)) (print-as Foo v))`,
+  `(defn void Foo/print* (((%ptr Foo) p)) (print-as* Foo p))`.
+- `derive/prints` — генератор пары методов внутри `struct :methods`:
+  `(derive/prints)` → `Type/print` + `Type/print*`; `(derive/prints show)` →
+  `Type/show` + `Type/show*`. Тип подставляет `struct`.
+
+### Параметры в метадате + генераторы методов
+
+- `defn` теперь пишет тип каждого параметра: `($m-put pname :kind 'var :c-type ty)`.
+  Поэтому `(print-as self)` работает внутри тела (тип параметра выводится).
+  Глобально по имени (последний выигрывает), но раскрытие тела идёт сразу после
+  defn → в теле тип верный. Параметры функций ⇒ inference работает и в методах.
+- `struct`/`enum` методы теперь эмитятся через surface `defn` (а не голый
+  `%def-fn`): `(defn ret Type/method params body)`. defn сам пишет fn- и
+  param-метадату + неймспейс. Вывод C идентичен прежнему.
+- `:methods` пускает не только `defn`, но и **генераторы методов** — любой
+  другой список `(GEN args...)`. `struct`/`enum` подставляют имя типа первым
+  аргументом: `(GEN Type args...)`, который раскрывается в `defn`(ы). Так
+  устроен `derive/prints`.
 - `$type-kind ty` → `scalar|ptr|array|fn|struct|union|enum`: атом резолвит через
   `$m-get :kind` (typedef → рекурсия по `:underlying`), список — по голове
   (`%ptr`/`%array`/…), не-`%`-голова = многословный скаляр (`(unsigned long)`).

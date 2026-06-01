@@ -43,6 +43,14 @@
 (%defmacro defn (ret name params &rest body)
   ($do
     ($m-put name :kind 'fn :return-type ret :params params)
+    ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
+    ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
+    ; параметров — (type name...); глобально по имени (последний выигрывает, но
+    ; раскрытие тела идёт сразу после defn, поэтому в теле тип верный).
+    ($dolist (g params)
+      ($if ($atom? g) nil
+        ($dolist (n ($cdr g))
+          ($m-put n :kind 'var :c-type ($car g)))))
     ($let ((ns ($namespace-of name)))
       ($if ($null? ns) nil ($m-append ns :fns name)))
     `(%def-fn ,ret ,name ,params (%block ,@body))))
@@ -340,8 +348,9 @@
                         ($assert ($not ($eq? ($car it) 'defn)) "defn forms are only allowed in ':methods' section")
                         ($list phase ($append fvals ($list it)) mvals))
                       ($do
-                        ($assert ($not ($atom? it)) "only defn forms are allowed in ':methods' section")
-                        ($assert ($eq? ($car it) 'defn) "only defn forms are allowed in ':methods' section")
+                        ; в :methods допускаются defn ИЛИ генератор методов
+                        ; (любой другой список, напр. (derive/prints ...)).
+                        ($assert ($not ($atom? it)) "':methods' items must be lists: (defn ...) or a method-generator")
                         ($list phase fvals ($append mvals ($list it)))))))))
             ($list 'start ($list) ($list))
             items))
@@ -356,22 +365,21 @@
     `(%top-level-splice
        (%typedef (%struct ,name ,@fields) ,name)
        ,@($map
-           ($do
-             ($assert ($not ($atom? it))                      "struct method must be a list: (defn ret name params body...)")
-             ($assert ($not ($null? ($|> it $cdr)))           "struct method must include return type")
-             ($assert ($not ($null? ($|> it $cdr $cdr)))      "struct method must include method name")
-             ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "struct method must include parameter list")
-             ($let ((ret    ($|> it $cdr $car))
-                    (mname  ($|> it $cdr $cdr $car))
-                    (params ($|> it $cdr $cdr $cdr $car))
-                    (body   ($|> it $cdr $cdr $cdr $cdr)))
-               ($assert ($atom? mname) "struct method name must be an atom")
-               ($let ((fq ($symcat name "/" mname)))
-                 ($do
-                   ; Каждый метод регистрируется как функция + добавляется в (Type :fns).
-                   ($m-put fq :kind 'fn :return-type ret :params params)
-                   ($m-append name :fns fq)
-                   `(%def-fn ,ret ,fq ,params (%block ,@body))))))
+           ($if ($eq? ($car it) 'defn)
+             ; метод: (defn ret mname params body...) → (defn ret Type/mname params body...)
+             ; через surface defn (он сам пишет fn- и param-метадату и неймспейс).
+             ($do
+               ($assert ($not ($null? ($|> it $cdr)))           "struct method must include return type")
+               ($assert ($not ($null? ($|> it $cdr $cdr)))      "struct method must include method name")
+               ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "struct method must include parameter list")
+               ($let ((ret    ($|> it $cdr $car))
+                      (mname  ($|> it $cdr $cdr $car))
+                      (params ($|> it $cdr $cdr $cdr $car))
+                      (body   ($|> it $cdr $cdr $cdr $cdr)))
+                 ($assert ($atom? mname) "struct method name must be an atom")
+                 `(defn ,ret ,($symcat name "/" mname) ,params ,@body)))
+             ; иначе — генератор методов: (GEN Type . args), раскроется позже
+             ($cons ($car it) ($cons name ($cdr it))))
            methods))))
 
 ; union
@@ -416,8 +424,7 @@
                     ($if ($eq? phase 'variants)
                       ($list phase ($append vvals ($list it)) mvals)
                       ($do
-                        ($assert ($not ($atom? it)) "only defn forms are allowed in ':methods' section")
-                        ($assert ($eq? ($car it) 'defn) "only defn forms are allowed in ':methods' section")
+                        ($assert ($not ($atom? it)) "':methods' items must be lists: (defn ...) or a method-generator")
                         ($list phase vvals ($append mvals ($list it)))))))))
             ($list 'start ($list) ($list))
             items))
@@ -433,21 +440,18 @@
     `(%top-level-splice
        (%typedef (%enum ,name ,@vvals) ,name)
        ,@($map
-           ($do
-             ($assert ($not ($atom? it))                      "enum method must be a list: (defn ret name params body...)")
-             ($assert ($not ($null? ($|> it $cdr)))           "enum method must include return type")
-             ($assert ($not ($null? ($|> it $cdr $cdr)))      "enum method must include method name")
-             ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "enum method must include parameter list")
-             ($let ((ret    ($|> it $cdr $car))
-                    (mname  ($|> it $cdr $cdr $car))
-                    (params ($|> it $cdr $cdr $cdr $car))
-                    (body   ($|> it $cdr $cdr $cdr $cdr)))
-               ($assert ($atom? mname) "enum method name must be an atom")
-               ($let ((fq ($symcat name "/" mname)))
-                 ($do
-                   ($m-put fq :kind 'fn :return-type ret :params params)
-                   ($m-append name :fns fq)
-                   `(%def-fn ,ret ,fq ,params (%block ,@body))))))
+           ($if ($eq? ($car it) 'defn)
+             ($do
+               ($assert ($not ($null? ($|> it $cdr)))           "enum method must include return type")
+               ($assert ($not ($null? ($|> it $cdr $cdr)))      "enum method must include method name")
+               ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "enum method must include parameter list")
+               ($let ((ret    ($|> it $cdr $car))
+                      (mname  ($|> it $cdr $cdr $car))
+                      (params ($|> it $cdr $cdr $cdr $car))
+                      (body   ($|> it $cdr $cdr $cdr $cdr)))
+                 ($assert ($atom? mname) "enum method name must be an atom")
+                 `(defn ,ret ,($symcat name "/" mname) ,params ,@body)))
+             ($cons ($car it) ($cons name ($cdr it))))
            mvals))))
 
 ; zero-init
