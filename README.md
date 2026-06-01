@@ -97,36 +97,60 @@ Methods declared inside `struct` are namespaced as
 `Type#` form is a named-field constructor; missing fields
 are zero-initialised.
 
-### typedef, enum, and in-place reflection
+### typedef, enum, and metadata-driven derive
 
-`typedef` and `enum` mirror `struct`: they emit the C type
-and record faithful metadata (`enum` is parallel to `struct`
-with `:variants` + optional `:methods`).
+`typedef` and `enum` mirror `struct`: they emit the C type **and**
+record faithful metadata. `enum` is parallel to `struct` — sectioned
+`:variants` + optional `:methods`:
 
 ```lisp
 (typedef (%ptr char) String)
 
 (enum Dir
   :variants
-  North (East 5) South West       ; atom = auto, (name expr) = explicit
+  North (East 5) South West       ; atom = auto-number, (name expr) = explicit
   :methods
-  (defn (%ptr char) name ((Dir d)) (return "...")))
+  (defn (%ptr char) describe ((Dir d)) (return "...")))   ; → Dir/describe
 ```
 
-Because the metadata is faithful, macros can reflect over a
-type in place. `std/derive.sexc` ships `print-as` (a printf
-block) and `eq-as` (a boolean expression) that walk a type's
-`:fields` — picking printf specifiers per field type, recursing
-into nested structs, treating pointers as opaque `%p`:
+Because the metadata is faithful, macros can **reflect over a type**
+and generate code from it — no compiler magic, just stdlib. The
+flagship is `derive/prints`: drop it into a struct's `:methods` and
+get a value-printer and a pointer-printer for free.
 
 ```lisp
-(defn void Point/print ((%ptr Point) p) (print-as Point (%deref p)))
-(defn int  Point/eq ((%ptr Point) a) ((%ptr Point) b)
-  (return (eq-as Point (%deref a) (%deref b))))
+(struct Vec3
+  :fields
+  (float x) (float y) (float z)
+  :methods
+  (derive/prints))      ; ← generates Vec3/print and Vec3/print*
+```
+expands (reading `Vec3`'s recorded `:fields`) to:
+```c
+void Vec3_print(Vec3 self) {
+    printf("Vec3 {\n");
+    printf("  x = %f\n", self.x);
+    printf("  y = %f\n", self.y);
+    printf("  z = %f\n", self.z);
+    printf("}\n");
+}
+void Vec3_print_ptr(Vec3 *self) { /* same, via self->x ... */ }
+```
+Add a field to `Vec3` and both printers pick it up — no per-field
+stub, no codegen step. The building blocks are also usable directly:
+
+```lisp
+(print-as Vec3 v)     ; value:   v.x ...
+(print-as* Vec3 p)    ; pointer: p->x ...
+(print-as v)          ; infer the type from v's declaration metadata
+(eq-as Vec3 a b)      ; expression: a.x == b.x && a.y == b.y && a.z == b.z
 ```
 
-No named "derive" is generated — you wrap the in-place macro in
-a one-line function when you want one.
+`print-as` chooses printf specifiers per field type (from `man 3 printf`),
+recurses into nested structs, prints pointers as `%p`. It's ~180 lines of
+SexC in `std/derive.sexc`, reading the same `$m-get … :fields` table that
+`struct` writes — the whole "derive" mechanism lives in the language, not the
+compiler.
 
 ### Threading instead of nested calls
 
@@ -473,36 +497,59 @@ int main(void) {
 codegen — `MathOps/add`, `Vec2/add`. `Type#` — конструктор
 с именованными полями; пропущенные поля zero-init.
 
-### typedef, enum и in-place рефлексия
+### typedef, enum и derive по метадате
 
-`typedef` и `enum` симметричны `struct`: эмитят C-тип и пишут
-faithful-метадату (`enum` параллелен `struct` — секции
-`:variants` + опц. `:methods`).
+`typedef` и `enum` симметричны `struct`: эмитят C-тип **и** пишут
+faithful-метадату. `enum` параллелен `struct` — секции `:variants`
++ опц. `:methods`:
 
 ```lisp
 (typedef (%ptr char) String)
 
 (enum Dir
   :variants
-  North (East 5) South West       ; атом = авто, (имя выраж) = явно
+  North (East 5) South West       ; атом = авто-нумерация, (имя выраж) = явно
   :methods
-  (defn (%ptr char) name ((Dir d)) (return "...")))
+  (defn (%ptr char) describe ((Dir d)) (return "...")))   ; → Dir/describe
 ```
 
-Раз метадата faithful, макросы могут рефлексировать тип по
-месту. `std/derive.sexc` даёт `print-as` (блок printf) и
-`eq-as` (булево выражение): обходят `:fields`, подбирают
-printf-спецификатор по типу поля, рекурсятся во вложенные
-struct, указатели печатают как `%p`:
+Раз метадата faithful, макросы **рефлексируют тип** и генерят по нему
+код — без магии компилятора, чистый stdlib. Флагман — `derive/prints`:
+кладёшь в `:methods` структуры и получаешь принтер-по-значению и
+принтер-по-указателю бесплатно.
 
 ```lisp
-(defn void Point/print ((%ptr Point) p) (print-as Point (%deref p)))
-(defn int  Point/eq ((%ptr Point) a) ((%ptr Point) b)
-  (return (eq-as Point (%deref a) (%deref b))))
+(struct Vec3
+  :fields
+  (float x) (float y) (float z)
+  :methods
+  (derive/prints))      ; ← генерит Vec3/print и Vec3/print*
+```
+раскрывается (читая записанные `:fields` у `Vec3`) в:
+```c
+void Vec3_print(Vec3 self) {
+    printf("Vec3 {\n");
+    printf("  x = %f\n", self.x);
+    printf("  y = %f\n", self.y);
+    printf("  z = %f\n", self.z);
+    printf("}\n");
+}
+void Vec3_print_ptr(Vec3 *self) { /* то же, через self->x ... */ }
+```
+Добавил поле в `Vec3` — оба принтера подхватят его сами. Кирпичики
+доступны и напрямую:
+
+```lisp
+(print-as Vec3 v)     ; значение:  v.x ...
+(print-as* Vec3 p)    ; указатель: p->x ...
+(print-as v)          ; вывести тип из метадаты объявления v
+(eq-as Vec3 a b)      ; выражение: a.x == b.x && a.y == b.y && a.z == b.z
 ```
 
-Именованный «derive» не генерится — оборачиваешь in-place
-макрос в однострочную функцию, когда нужна именованная.
+`print-as` подбирает printf-спецификатор по типу поля (по `man 3 printf`),
+рекурсится во вложенные struct, указатели печатает как `%p`. Это ~180 строк
+SexC в `std/derive.sexc`, читающих ту же таблицу `$m-get … :fields`, что пишет
+`struct` — весь механизм «derive» живёт в языке, а не в компиляторе.
 
 ### Threading вместо вложенных вызовов
 
