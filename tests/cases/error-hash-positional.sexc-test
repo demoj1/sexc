@@ -4,6 +4,6 @@
   (decl (Point p) (Point# 1 2))
   (return 0))
 ;==EXPECTED-ERROR==
-<stdin>:3:1: error[compile]: Point# designated init expects pairs like (field value)
+<stdin>:3:1: error[compile]: Point# designated init expects pairs (field value); for {0} use (zero-init)
 (defn int main ()
 ^

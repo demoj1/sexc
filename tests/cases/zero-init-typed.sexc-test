@@ -1,0 +1,28 @@
+; (zero-init) → {0} (init position); (zero-init Type) → (Type){0} compound literal.
+(struct P :fields (int x) (int y))
+
+(defn P make () (return (zero-init P)))    ; выражение
+
+(defn int main ()
+  (decl (P a) (zero-init)                  ; голый {0}
+        (P b) (zero-init P))               ; compound literal
+  (set a (zero-init P))                    ; выражение в присваивании
+  (return 0))
+;==EXPECTED==
+typedef struct P {
+  int x;
+  int y;
+} P;
+
+P make(void)
+{
+  return (P){0};
+}
+
+int main(void)
+{
+  P a = {0};
+  P b = (P){0};
+  a = (P){0};
+  return 0;
+}

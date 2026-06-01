@@ -1,0 +1,18 @@
+; Type# с одним designated-полем теперь работает; zero-init — через (zero-init).
+(struct One :fields (int x))
+
+(defn int main ()
+  (decl (One a) (One# (x 5))
+        (One z) (zero-init))
+  (return (+ (. a x) (. z x))))
+;==EXPECTED==
+typedef struct One {
+  int x;
+} One;
+
+int main(void)
+{
+  One a = (One){ .x = 5 };
+  One z = {0};
+  return a.x + z.x;
+}

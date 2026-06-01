@@ -285,14 +285,14 @@ let rec parse_expr raw =
 
 and parse_type_hash_init ty_name args =
   let ty = TNamed ty_name in
+  (* Только designated init из пар (field value), любое число (включая одну).
+     Для zero-init используйте (zero-init) → {0}. *)
   match args with
-  | [ Raw.Atom ("0", _) ] -> ECompoundLiteral (ty, [ InitExpr (EAtom "0") ])
-  | [ _ ] -> failf "%s# supports single-argument form only as zero-init: (%s# 0)" ty_name ty_name
-  | [] -> failf "%s# requires initializers: either (%s# 0) or (%s# (field value) ...)" ty_name ty_name ty_name
+  | [] -> failf "%s# requires initializers: (%s# (field value) ...); for {0} use (zero-init)" ty_name ty_name
   | _ ->
       let parse_field_init = function
         | Raw.List ([ Raw.Atom (field, _); value ], _) -> InitField (field, parse_expr value)
-        | _ -> failf "%s# designated init expects pairs like (field value)" ty_name
+        | _ -> failf "%s# designated init expects pairs (field value); for {0} use (zero-init)" ty_name
       in
       ECompoundLiteral (ty, List.map args ~f:parse_field_init)
 

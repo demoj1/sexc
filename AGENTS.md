@@ -370,7 +370,8 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 
 ## Полезные sugar-макросы
 
-- В `std/core.sexc` добавлен `(zero-init)` -> `(%raw "{0}")`.
+- `(zero-init)` -> `{0}` (позиция инициализатора); `(zero-init Type)` ->
+  `(Type){0}` compound literal (валидно как выражение где угодно).
 - Часть простых оберток выражается через `%raw` (например `not`, `aref`, `post-inc`, `sizeof-expr`).
 
 ## Struct и инициализация
@@ -380,10 +381,12 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Секции `:fields` обязательна, `:methods` опциональна; старый mixed-формат `struct` удален.
   - Внутри `struct` можно объявлять методы через `defn`; они автогенерируются как `Name/method`.
   - `(union Name (type field) ...)` -> `typedef union ... Name;`
-- Инициализация структур через sugar `Type#`:
+- Инициализация структур через sugar `Type#` — ТОЛЬКО designated пары
+  `(field value)`, любое число (включая одно):
   - `(Roots# (x1 5) (x2 7))` -> `(Roots){ .x1 = 5, .x2 = 7 }`
-  - `(Roots# 0)` -> zero-init `(Roots){ 0 }`
-  - `(Roots# X)` при `X != 0` запрещено.
+  - `(One# (x 5))` -> `(One){ .x = 5 }` (одно поле — ок)
+  - zero-init НЕ через `Type#`: пиши `(zero-init)` → `{0}` (в позиции
+    инициализатора, напр. `(decl (Foo f) (zero-init))`). Бывший `(Type# 0)` убран.
 
 ## typedef и enum
 

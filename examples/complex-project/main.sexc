@@ -4,7 +4,7 @@
 (%import "./utils.sexc")
 
 (defn int main ()
-  (decl (lib/Counter c) (lib/Counter# 0))
+  (decl (lib/Counter c) (zero-init))
 
   (utils/print-header)
 

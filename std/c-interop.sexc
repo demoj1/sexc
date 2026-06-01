@@ -456,11 +456,16 @@
 
 ; zero-init
 ; (zero-init) => {0}
+; zero-init
+; (zero-init)      => {0}        — голый инициализатор (позиция decl-init)
+; (zero-init Type) => (Type){0}  — compound literal (валидно как выражение где угодно)
 (%doc zero-init
-  :doc "Emit zero initializer expression {0}."
-  :example "(decl (MyType v) (zero-init))")
-(%defmacro zero-init ()
-  `(%raw "{0}"))
+  :doc "Zero initializer. (zero-init) => {0} (init position). (zero-init Type) => (Type){0} compound literal, usable as an expression anywhere."
+  :example "(decl (MyType v) (zero-init))  ; or (set p (zero-init Point))")
+(%defmacro zero-init (&rest rest)
+  ($if ($null? rest)
+    `(%raw "{0}")
+    `(cast ,($car rest) (%raw "{0}"))))   ; (Type){0}
 
 ; sizeof-type
 ; (sizeof-type ty)
