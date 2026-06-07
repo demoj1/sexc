@@ -30,8 +30,19 @@ jobs:
 
       # The compiler's only external library is Core; dune is the build system.
       # No .opam file (generate_opam_files is off), so install deps explicitly.
+      # Retry to ride out transient GitHub codeload 5xx on source tarballs —
+      # opam install is idempotent, a retry just fetches what's missing.
       - name: Install dependencies
-        run: opam install --yes core dune
+        run: |
+          for attempt in 1 2 3; do
+            if opam install --yes core dune; then
+              exit 0
+            fi
+            echo "::warning::opam install failed (attempt ${attempt}/3), retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::opam install failed after 3 attempts"
+          exit 1
 
       - name: Build
         run: opam exec -- make build
