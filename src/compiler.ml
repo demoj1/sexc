@@ -58,7 +58,10 @@ let candidate_stdlib_dirs () =
     let exe = Stdlib.Sys.executable_name in
     let bin_dir = Filename.dirname exe in
     let prefix_dir = Filename.dirname bin_dir in
-    [ Filename.concat prefix_dir "include/sexc/std" ]
+    (* First look right next to the binary (a self-contained bundle: sexc + std/
+       side by side — works from any cwd), then the install layout
+       PREFIX/bin/sexc + PREFIX/include/sexc/std. *)
+    [ Filename.concat bin_dir "std"; Filename.concat prefix_dir "include/sexc/std" ]
   in
   let from_defaults = [ Filename.concat (Stdlib.Sys.getcwd ()) "std"; default_stdlib_dir ] in
   from_env @ from_exe @ from_defaults
@@ -67,8 +70,8 @@ let resolve_stdlib_dir () =
   let rec find = function
     | [] ->
         failf
-          "Could not locate SexC stdlib (missing core.sexc). Tried SEXC_STDLIB_DIR, %s, and ./std. Set %s to your stdlib directory."
-          default_stdlib_dir stdlib_env_var
+          "Could not locate SexC stdlib (missing core.sexc). Tried %s, <exe-dir>/std, <exe-dir>/../include/sexc/std, ./std, and %s. Set %s to your stdlib directory."
+          stdlib_env_var default_stdlib_dir stdlib_env_var
     | dir :: tl -> if stdlib_core_exists dir then dir else find tl
   in
   find (candidate_stdlib_dirs ())
