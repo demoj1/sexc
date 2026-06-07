@@ -52,3 +52,52 @@ jobs:
       # `gcc` is the Apple clang shim from the preinstalled Command Line Tools.
       - name: Test
         run: opam exec -- make test
+
+      # Bundle binary + stdlib + installer + bundle README (the binary needs
+      # std/*.sexc at runtime, and finds it next to itself). Named by OS + short
+      # commit hash — no versions yet, hashes only.
+      - name: Package
+        run: |
+          short="${GITHUB_SHA::7}"
+          os="$(echo "${{ runner.os }}" | tr '[:upper:]' '[:lower:]')"
+          dist="sexc-${os}-${short}"
+          mkdir -p "dist/${dist}/std"
+          cp sexc "dist/${dist}/"
+          cp std/*.sexc "dist/${dist}/std/"
+          cp scripts/install.sh "dist/${dist}/"
+          chmod +x "dist/${dist}/install.sh"
+          cp scripts/dist-README.md "dist/${dist}/README.md"
+          cp LICENSE "dist/${dist}/" 2>/dev/null || true
+          tar -czf "dist/${dist}.tar.gz" -C dist "${dist}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ runner.os }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # Publish a prerelease tagged with the commit hash, carrying both platform
+  # bundles. Runs only on master push after both matrix builds go green.
+  release:
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Create prerelease for this commit
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.sha }}
+          name: build ${{ github.sha }}
+          prerelease: true
+          files: artifacts/*.tar.gz
+          fail_on_unmatched_files: true
