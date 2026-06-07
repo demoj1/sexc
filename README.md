@@ -499,6 +499,12 @@ make test-update                 # regenerate expected blocks
 - `std/ocaml-api.sexc` — reference for OCaml-only symbols
   (`%...`, `$...`, `$defun`s).
 
+## License
+
+MIT — see [LICENSE](LICENSE). The stdlib (`std/*.sexc`) is
+covered by the same permissive terms, so code you compile with
+SexC carries no licensing obligations from the toolchain.
+
 ---
 
 <a id="russian"></a>
@@ -967,3 +973,9 @@ make test-update                 # перегенерировать expected
   целиком описан здесь.
 - `std/ocaml-api.sexc` — справочник по OCaml-only символам
   (`%...`, `$...`, `$defun`-ы).
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE). stdlib (`std/*.sexc`) под теми
+же permissive-условиями, поэтому код, скомпилированный SexC,
+не несёт никаких лицензионных обязательств от тулчейна.
