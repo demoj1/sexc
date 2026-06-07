@@ -1,5 +1,7 @@
 # SexC
 
+[![CI](https://github.com/demoj1/sexc/actions/workflows/ci.yml/badge.svg)](https://github.com/demoj1/sexc/actions/workflows/ci.yml)
+
 S-expression frontend for C with a Lisp-style macro system.
 Compiler written in OCaml.
 

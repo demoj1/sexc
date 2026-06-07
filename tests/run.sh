@@ -28,8 +28,12 @@ UPDATE="${UPDATE:-}"
 
 export ROOT SEXC UPDATE
 
-mapfile -t cases < <(find "${DIR}/cases" -type f -name '*.sexc-test' 2>/dev/null | sort)
-mapfile -t examples < <(find "${DIR}/examples" -type f -name '*.list' 2>/dev/null | sort)
+# Portable array fill (no mapfile — macOS ships bash 3.2). Filenames in this
+# repo have no spaces/newlines, so word-splitting on the sorted find output is safe.
+cases=()
+while IFS= read -r line; do cases+=("${line}"); done < <(find "${DIR}/cases" -type f -name '*.sexc-test' 2>/dev/null | sort)
+examples=()
+while IFS= read -r line; do examples+=("${line}"); done < <(find "${DIR}/examples" -type f -name '*.list' 2>/dev/null | sort)
 
 if [[ -n "${FILTER}" ]]; then
     filtered=()

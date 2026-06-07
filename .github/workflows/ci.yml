@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sets up the OCaml toolchain + opam, and caches the switch between runs.
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5"
+
+      # The compiler's only external library is Core; dune is the build system.
+      # No .opam file (generate_opam_files is off), so install deps explicitly.
+      - name: Install dependencies
+        run: opam install --yes core dune
+
+      - name: Build
+        run: opam exec -- make build
+
+      # The suite is bash + gcc only. std/*.sexc is resolved relative to the
+      # repo root (./std), so nothing needs to be installed first. On macOS
+      # `gcc` is the Apple clang shim from the preinstalled Command Line Tools.
+      - name: Test
+        run: opam exec -- make test
