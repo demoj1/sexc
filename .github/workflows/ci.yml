@@ -93,10 +93,12 @@ jobs:
           pattern: dist-*
           merge-multiple: true
 
+      # Tag is prefixed because GitHub rejects tag names that are exactly 40 or
+      # 64 hex chars (indistinguishable from a SHA-1/SHA-256 commit hash).
       - name: Create prerelease for this commit
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}
+          tag_name: build-${{ github.sha }}
           name: build ${{ github.sha }}
           prerelease: true
           files: artifacts/*.tar.gz
