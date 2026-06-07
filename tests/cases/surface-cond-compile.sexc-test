@@ -1,0 +1,60 @@
+;; when!/if!/cond! emit #if/#elif/#else/#endif via the %cpp primitive.
+(when! "defined(__linux__)"
+  (defn int only_linux () (return 1)))
+
+(if! "defined(_WIN32)"
+  (defn int p () (return 1))
+  (defn int p () (return 0)))
+
+(cond!
+  ("defined(__ANDROID__)" (defn int os () (return 3)))
+  ("defined(__linux__)"   (defn int os () (return 1)))
+  (else                   (defn int os () (return 0))))
+;==EXPECTED==
+#if defined(__linux__)
+
+int only_linux(void)
+{
+  return 1;
+}
+
+#endif
+
+#if defined(_WIN32)
+
+int p(void)
+{
+  return 1;
+}
+
+#else
+
+int p(void)
+{
+  return 0;
+}
+
+#endif
+
+#if defined(__ANDROID__)
+
+int os(void)
+{
+  return 3;
+}
+
+#elif defined(__linux__)
+
+int os(void)
+{
+  return 1;
+}
+
+#else
+
+int os(void)
+{
+  return 0;
+}
+
+#endif

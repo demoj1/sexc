@@ -7,4 +7,5 @@ examples/macros.sexc
 examples/evals.sexc
 examples/dot_arrow_alias.sexc
 examples/struct_methods.sexc
+examples/conditional.sexc
 examples/complex-project/main.sexc

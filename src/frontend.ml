@@ -132,6 +132,7 @@ type top =
   | TDeclTop of decl
   | TStmtTop of stmt
   | TComment of string
+  | TCpp of string
 
 let expect_atom = function
   | Raw.Atom (a, _) -> a
@@ -496,4 +497,6 @@ let parse_top raw =
   | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> TDeclTop (parse_decl args)
   | Raw.List ((Raw.Atom ("%comment", _) :: [ Raw.Str (s, _) ]), _) -> TComment s
   | Raw.List ((Raw.Atom ("%comment", _) :: _), _) -> fail "%comment expects exactly one string argument"
+  | Raw.List ((Raw.Atom ("%cpp", _) :: [ Raw.Str (s, _) ]), _) -> TCpp s
+  | Raw.List ((Raw.Atom ("%cpp", _) :: _), _) -> fail "%cpp expects exactly one string argument"
   | _ -> TStmtTop (parse_stmt_or_decl raw)

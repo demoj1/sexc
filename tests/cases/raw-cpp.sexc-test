@@ -1,0 +1,23 @@
+;; sexc-flags: --no-prelude
+;; %cpp emits a raw preprocessor directive: '#' + string, verbatim.
+(%cpp "if defined(_WIN32)")
+(%def-fn int plat () (%block (%return 1)))
+(%cpp "else")
+(%def-fn int plat () (%block (%return 0)))
+(%cpp "endif")
+;==EXPECTED==
+#if defined(_WIN32)
+
+int plat(void)
+{
+  return 1;
+}
+
+#else
+
+int plat(void)
+{
+  return 0;
+}
+
+#endif

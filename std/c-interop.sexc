@@ -651,3 +651,69 @@
   :example "(nop)")
 (%defmacro nop ()
   `(%nop))
+
+; ─── C preprocessor conditional compilation ─────────────────────────────────
+;
+; The `!`-family emits real #if/#elif/#else/#endif into the generated C, for
+; conditions only the C compiler can resolve (platform/compiler macros like
+; _WIN32, __linux__, __APPLE__, __GNUC__). The condition is written as a raw
+; string spliced verbatim into the directive — e.g. "defined(_WIN32)".
+;
+; Each form expands to %top-level-splice over the %cpp primitive, so it is
+; top-level only (selecting whole functions / structs / defines per platform).
+;
+; ifdef semantics is just (when! "defined(SYM)" ...).
+
+; when! — single guarded branch (implicit progn over BODY).
+(%doc when!
+  :doc "Compile BODY only when the C preprocessor condition COND (a raw string) holds. Emits #if COND ... #endif. Top-level only."
+  :example "(when! \"defined(__linux__)\" (defn int plat () (return 1)))")
+(%defmacro when! (cond &rest body)
+  `(%top-level-splice
+     (%cpp ,($str "if " cond))
+     ,@body
+     (%cpp "endif")))
+
+; if! — Lisp-style if: 2 or 3 arguments, one form per branch.
+(%doc if!
+  :doc "Preprocessor if with one form per branch: (if! COND THEN) or (if! COND THEN ELSE). COND is a raw string. Emits #if/#else/#endif. Use cond! for many branches."
+  :example "(if! \"defined(_WIN32)\" (defn int p () (return 1)) (defn int p () (return 0)))")
+(%defmacro if! (cond then &rest else-body)
+  ($do
+    ($assert ($null? ($cdr else-body))
+             "if! accepts only 2 or 3 arguments; use cond! for multi-branch logic")
+    ($if ($null? else-body)
+      `(%top-level-splice
+         (%cpp ,($str "if " cond))
+         ,then
+         (%cpp "endif"))
+      `(%top-level-splice
+         (%cpp ,($str "if " cond))
+         ,then
+         (%cpp "else")
+         ,($car else-body)
+         (%cpp "endif")))))
+
+; cond! — multi-branch: first clause → #if, rest → #elif, (else ...) → #else.
+; Each clause is (COND-STRING body...) or (else body...). Branch order matters:
+; e.g. __ANDROID__ before __linux__ (Android also defines __linux__), and
+; __clang__ before __GNUC__ (Clang also defines __GNUC__).
+($defun $cond!-clauses (clauses first?)
+  ($if ($null? clauses)
+    ($list ($list '%cpp "endif"))
+    ($let ((head ($car ($car clauses)))
+           (body ($cdr ($car clauses)))
+           (directive
+             ($if ($eq? head 'else)
+               ($list '%cpp "else")
+               ($list '%cpp ($str ($if first? "if " "elif ") head)))))
+      ($cons directive
+             ($append body ($cond!-clauses ($cdr clauses) nil))))))
+
+(%doc cond!
+  :doc "Multi-branch preprocessor conditional. Each clause is (COND-STRING body...) or (else body...); first → #if, rest → #elif. Order matters (e.g. android before linux). Top-level only."
+  :example "(cond! (\"defined(__ANDROID__)\" ...) (\"defined(__linux__)\" ...) (else ...))")
+(%defmacro cond! (&rest clauses)
+  ($if ($null? clauses)
+    ($error "cond! requires at least one clause")
+    `(%top-level-splice ,@($cond!-clauses clauses 't))))

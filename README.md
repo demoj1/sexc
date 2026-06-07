@@ -215,6 +215,45 @@ Every top-level symbol of a module is namespaced to
 `module-name/...`. `:as` adds an alias. Cycles are detected
 and reported.
 
+### Conditional compilation
+
+For conditions only the C compiler can resolve — platform and
+compiler macros like `_WIN32`, `__linux__`, `__APPLE__`,
+`__GNUC__` — there is a `!`-family that emits real
+`#if`/`#elif`/`#else`/`#endif`. The condition is a raw string
+spliced verbatim into the directive:
+
+```lisp
+(when! "defined(__GNUC__)"
+  (defn int has_gnuc () (return 1)))
+
+(cond!
+  ("defined(__ANDROID__)" (defn (%ptr char) os () (return "android")))   ; before linux!
+  ("defined(__linux__)"   (defn (%ptr char) os () (return "linux")))
+  ("defined(_WIN32)"      (defn (%ptr char) os () (return "windows")))
+  (else                   (defn (%ptr char) os () (return "unknown"))))
+```
+```c
+#if defined(__ANDROID__)
+char *os(void) { return "android"; }
+#elif defined(__linux__)
+char *os(void) { return "linux"; }
+#elif defined(_WIN32)
+char *os(void) { return "windows"; }
+#else
+char *os(void) { return "unknown"; }
+#endif
+```
+
+`when!` is a single guarded branch, `if!` is a two/three-form
+Lisp `if`, `cond!` is the multi-branch form. Branch order
+matters: Android also defines `__linux__`, Clang also defines
+`__GNUC__` — put the more specific one first. These are top-level
+only (selecting whole functions / structs / defines per platform),
+built as macros over the one `%cpp` primitive. Compile-time-known
+flags don't need this — use `%eval`/`$if` (below) and the dead
+branch never reaches the C at all.
+
 ### Compile-time evaluation: `$defun`, `%eval`, `%evals`
 
 Beyond `%defmacro`, there's a small Lisp that runs *during* expansion —
@@ -645,6 +684,45 @@ else              sign = 0;
 Все top-level символы модуля неймспейсятся в
 `module-name/...`. `:as` добавляет алиас. Циклы детектятся
 и репортятся.
+
+### Условная компиляция
+
+Для условий, которые может разрешить только C-компилятор —
+платформенные и компиляторные макросы вроде `_WIN32`,
+`__linux__`, `__APPLE__`, `__GNUC__` — есть `!`-семейство,
+эмитящее реальные `#if`/`#elif`/`#else`/`#endif`. Условие —
+сырая строка, вставляемая в директиву as-is:
+
+```lisp
+(when! "defined(__GNUC__)"
+  (defn int has_gnuc () (return 1)))
+
+(cond!
+  ("defined(__ANDROID__)" (defn (%ptr char) os () (return "android")))   ; до linux!
+  ("defined(__linux__)"   (defn (%ptr char) os () (return "linux")))
+  ("defined(_WIN32)"      (defn (%ptr char) os () (return "windows")))
+  (else                   (defn (%ptr char) os () (return "unknown"))))
+```
+```c
+#if defined(__ANDROID__)
+char *os(void) { return "android"; }
+#elif defined(__linux__)
+char *os(void) { return "linux"; }
+#elif defined(_WIN32)
+char *os(void) { return "windows"; }
+#else
+char *os(void) { return "unknown"; }
+#endif
+```
+
+`when!` — одна охраняемая ветка, `if!` — лисп-`if` на 2/3
+формы, `cond!` — мультиветка. Порядок веток важен: Android
+тоже определяет `__linux__`, Clang тоже определяет `__GNUC__`
+— более специфичную ветку ставь первой. Всё это top-level
+(выбор функций/структур/define под платформу), собрано
+макросами поверх одного примитива `%cpp`. Флаги, известные
+на этапе сборки sexc, в этом не нуждаются — для них `%eval`/
+`$if` (ниже), и мёртвая ветка вообще не попадает в C.
 
 ### Compile-time вычисления: `$defun`, `%eval`, `%evals`
 

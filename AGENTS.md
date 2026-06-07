@@ -311,6 +311,7 @@ Example: (incf-by total 4)
   - `enum name :variants ... :methods ...` → `:kind 'enum`, `:variants` (имена), `:methods`
 - `(%m-dump)` — top-level интринсик, разворачивается в `(%comment "...")` с отсортированным дампом всей метадаты на момент expand'а. Поставить в конце файла, чтобы увидеть финальное состояние.
 - `(%comment "text")` — новая top-level форма, эмитит `/*text*/` (parse в `frontend.ml`, codegen в `codegen_c.ml`).
+- `(%cpp "if defined(_WIN32)")` — top-level форма, эмитит сырую препроцессорную директиву `#` + строка, verbatim без mangling (parse в `frontend.ml`, codegen в `codegen_c.ml`). Кирпич для условной компиляции; поверх него в `std/c-interop.sexc` собраны макросы `when!`/`if!`/`cond!` (через `%top-level-splice`), эмитящие `#if`/`#elif`/`#else`/`#endif` по строковому условию. Top-level only.
 
 ### Module-level metadata (auto-populated)
 
@@ -356,7 +357,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 ## Группы ключевых слов
 
 - `IR/Intrinsic (%...)`:
-  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`, `%comment`
+  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%cpp`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`, `%comment`
   - Stmt/control: `%block`, `%if`, `%while`, `%do-while`, `%for`, `%switch`, `%case`, `%default`, `%break`, `%continue`, `%return`, `%goto`, `%label`, `%nop`
   - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`

@@ -326,3 +326,4 @@ let emit_top = function
   | TDeclTop d -> emit_decl_stmt d
   | TStmtTop s -> emit_stmt s
   | TComment s -> "/*" ^ s ^ "*/"
+  | TCpp s -> "#" ^ s

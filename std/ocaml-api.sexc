@@ -238,6 +238,11 @@
   :doc "Top-level intrinsic that emits a literal C comment /* STRING */. Newlines inside STRING are preserved."
   :example "(%comment \" generated below \")")
 
+(%doc %cpp
+  :sig (%cpp string)
+  :doc "Top-level intrinsic that emits a raw C preprocessor directive: '#' followed by STRING, verbatim (no mangling). Building block for conditional compilation; prefer the when!/if!/cond! macros over using it directly."
+  :example "(%cpp \"if defined(_WIN32)\")")
+
 (%doc $subst
   :sig ($subst sym replacement form)
   :doc "Replace all occurrences of SYM atom in FORM with REPLACEMENT. Defined as $defun in std/meta.sexc."

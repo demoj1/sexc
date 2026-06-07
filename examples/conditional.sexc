@@ -1,0 +1,28 @@
+; conditional.sexc — platform dispatch via the !-family of preprocessor
+; conditionals. when!/if!/cond! emit real #if/#elif/#else/#endif, so the
+; selection happens in the C compiler — sexc cannot know the value of
+; __linux__ / _WIN32 itself.
+;
+; The condition is a raw string spliced verbatim into the directive.
+
+(include <stdio.h>)
+
+; cond! — first clause #if, rest #elif, (else ...) #else. Branch order
+; matters: __ANDROID__ also defines __linux__, so it must come first.
+(cond!
+  ("defined(__ANDROID__)" (defn (%ptr char) os_name () (return "android")))
+  ("defined(__linux__)"   (defn (%ptr char) os_name () (return "linux")))
+  ("defined(__APPLE__)"   (defn (%ptr char) os_name () (return "apple")))
+  ("defined(_WIN32)"      (defn (%ptr char) os_name () (return "windows")))
+  (else                   (defn (%ptr char) os_name () (return "unknown"))))
+
+; when! — single guarded branch (implicit progn over the body).
+(when! "defined(__GNUC__)"
+  (defn (%ptr char) toolchain () (return "gcc-compatible")))
+
+(when! "!defined(__GNUC__)"
+  (defn (%ptr char) toolchain () (return "other")))
+
+(defn int main ()
+  (printf "os=%s toolchain=%s\n" (os_name) (toolchain))
+  (return 0))
