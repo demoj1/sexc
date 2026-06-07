@@ -243,6 +243,21 @@
   :doc "Top-level intrinsic that emits a raw C preprocessor directive: '#' followed by STRING, verbatim (no mangling). Building block for conditional compilation; prefer the when!/if!/cond! macros over using it directly."
   :example "(%cpp \"if defined(_WIN32)\")")
 
+(%doc %inline
+  :sig (%inline fn-form)
+  :doc "Top-level wrapper that prefixes a %def-fn/%decl-fn signature with `inline`. Stackable with %static/%extern, e.g. (%static (%inline ...)) → `static inline`. Prefer the defn flags (defn :inline :static ...)."
+  :example "(%inline (%def-fn int sq ((int x)) (%block (%return (%* x x)))))")
+
+(%doc %static
+  :sig (%static fn-form)
+  :doc "Top-level wrapper that prefixes a %def-fn/%decl-fn signature with `static` (file-local symbol). Stackable with %inline/%extern. Prefer the defn flags (defn :static ...)."
+  :example "(%static (%def-fn int helper () (%block (%return 1))))")
+
+(%doc %extern
+  :sig (%extern fn-form)
+  :doc "Top-level wrapper that prefixes a %def-fn/%decl-fn signature with `extern`. Stackable with %static/%inline."
+  :example "(%extern (%decl-fn int puts ((%ptr (%const char)))))")
+
 (%doc $subst
   :sig ($subst sym replacement form)
   :doc "Replace all occurrences of SYM atom in FORM with REPLACEMENT. Defined as $defun in std/meta.sexc."

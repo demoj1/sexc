@@ -307,6 +307,11 @@ let emit_fn_sig ret name params varargs =
   in
   emit_decl_of_type ret (mangle_ident name ^ "(" ^ String.concat ~sep:", " args ^ ")")
 
+(* Function specifiers (static/inline/extern) emitted before the signature,
+   space-separated, in list order (outer wrapper = left-most). *)
+let fn_specs_prefix specs =
+  if List.is_empty specs then "" else String.concat ~sep:" " specs ^ " "
+
 let emit_top = function
   | TInclude (IncludeAngle a) -> "#include " ^ a
   | TInclude (IncludeQuote s) -> "#include \"" ^ s ^ "\""
@@ -321,8 +326,10 @@ let emit_top = function
       ^ emit_expr body
   | TIfdef (sym, body) -> "#ifdef " ^ mangle_ident sym ^ "\n" ^ emit_stmt body ^ "\n#endif"
   | TTypedef (tyv, name) -> "typedef " ^ emit_decl_of_type tyv (mangle_ident name) ^ ";"
-  | TDeclFn (ret, name, params, varargs) -> emit_fn_sig ret name params varargs ^ ";"
-  | TDefFn (ret, name, params, varargs, body) -> emit_fn_sig ret name params varargs ^ "\n" ^ emit_stmt body
+  | TDeclFn (ret, name, params, varargs, specs) ->
+      fn_specs_prefix specs ^ emit_fn_sig ret name params varargs ^ ";"
+  | TDefFn (ret, name, params, varargs, body, specs) ->
+      fn_specs_prefix specs ^ emit_fn_sig ret name params varargs ^ "\n" ^ emit_stmt body
   | TDeclTop d -> emit_decl_stmt d
   | TStmtTop s -> emit_stmt s
   | TComment s -> "/*" ^ s ^ "*/"

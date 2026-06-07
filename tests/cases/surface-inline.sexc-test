@@ -1,0 +1,23 @@
+;; inline/static via defn keyword flags + raw %inline/%static wrappers
+(%inline (%decl-fn int proto ((int n))))
+(%static (%inline (%decl-fn int both ())))
+
+(defn :inline :static int sq ((int x))
+  (return (* x x)))
+
+(defn :static int helper ()
+  (return 1))
+;==EXPECTED==
+inline int proto(int n);
+
+static inline int both(void);
+
+static inline int sq(int x)
+{
+  return x * x;
+}
+
+static int helper(void)
+{
+  return 1;
+}

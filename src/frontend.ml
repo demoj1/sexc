@@ -127,8 +127,8 @@ type top =
   | TDefineMacro of string * string list * expr
   | TIfdef of string * stmt
   | TTypedef of ty * string
-  | TDeclFn of ty * string * param list * bool
-  | TDefFn of ty * string * param list * bool * stmt
+  | TDeclFn of ty * string * param list * bool * string list   (* ...varargs * fn-specifiers *)
+  | TDefFn of ty * string * param list * bool * stmt * string list   (* ...varargs * body * fn-specifiers *)
   | TDeclTop of decl
   | TStmtTop of stmt
   | TComment of string
@@ -268,6 +268,11 @@ let c_binary_op = function
   | "%*=" -> "*="
   | "%/=" -> "/="
   | "%%=" -> "%="
+  | "%&=" -> "&="
+  | "%|=" -> "|="
+  | "%^=" -> "^="
+  | "%<<=" -> "<<="
+  | "%>>=" -> ">>="
   | x -> failf "Unknown intrinsic operator: %s" x
 
 let rec parse_expr raw =
@@ -364,7 +369,8 @@ and parse_intrinsic_expr h args =
     | "%==" | "%!=" | "%<" | "%<=" | "%>" | "%>=" | "%&&" | "%||" ) as op ->
       if List.length args < 2 then failf "%s expects at least 2 arguments" op;
       ENary (c_binary_op op, List.map args ~f:parse_expr)
-  | ("%set" | "%+=" | "%-=" | "%*=" | "%/=" | "%%=") as op ->
+  | ( "%set" | "%+=" | "%-=" | "%*=" | "%/=" | "%%="
+    | "%&=" | "%|=" | "%^=" | "%<<=" | "%>>=" ) as op ->
       ensure_arity op args 2;
       EAssign (c_binary_op op, parse_expr (List.nth_exn args 0), parse_expr (List.nth_exn args 1))
   | _ -> failf "Unknown intrinsic expression: %s" h
@@ -476,7 +482,7 @@ let parse_include_arg = function
   | Raw.Atom (a, _) -> IncludeQuote a
   | _ -> fail "Invalid %include argument"
 
-let parse_top raw =
+let rec parse_top raw =
   match raw with
   | Raw.List ((Raw.Atom ("%include", _) :: args), _) ->
       if List.is_empty args then fail "%include requires at least one argument"
@@ -490,10 +496,20 @@ let parse_top raw =
   | Raw.List ((Raw.Atom ("%typedef", _) :: [ ty_s; Raw.Atom (name, _) ]), _) -> TTypedef (parse_type ty_s, name)
   | Raw.List ((Raw.Atom ("%decl-fn", _) :: ret_ty :: Raw.Atom (name, _) :: params :: []), _) ->
       let ps, varargs = parse_params params in
-      TDeclFn (parse_type ret_ty, name, ps, varargs)
+      TDeclFn (parse_type ret_ty, name, ps, varargs, [])
   | Raw.List ((Raw.Atom ("%def-fn", _) :: ret_ty :: Raw.Atom (name, _) :: params :: body :: []), _) ->
       let ps, varargs = parse_params params in
-      TDefFn (parse_type ret_ty, name, ps, varargs, parse_stmt_or_decl body)
+      TDefFn (parse_type ret_ty, name, ps, varargs, parse_stmt_or_decl body, [])
+  | Raw.List ((Raw.Atom (("%inline" | "%static" | "%extern") as spec, _) :: [ inner ]), _) ->
+      (* Stackable function specifiers: (%static (%inline (%def-fn ...))). Each
+         wrapper prepends its keyword, so outer-most ends up left-most in C. *)
+      let kw = String.chop_prefix_exn spec ~prefix:"%" in
+      (match parse_top inner with
+       | TDefFn (r, n, p, v, b, specs) -> TDefFn (r, n, p, v, b, kw :: specs)
+       | TDeclFn (r, n, p, v, specs) -> TDeclFn (r, n, p, v, kw :: specs)
+       | _ -> failf "%s expects a function definition (%%def-fn) or prototype (%%decl-fn)" spec)
+  | Raw.List ((Raw.Atom (("%inline" | "%static" | "%extern") as spec, _) :: _), _) ->
+      failf "%s expects exactly one function form" spec
   | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> TDeclTop (parse_decl args)
   | Raw.List ((Raw.Atom ("%comment", _) :: [ Raw.Str (s, _) ]), _) -> TComment s
   | Raw.List ((Raw.Atom ("%comment", _) :: _), _) -> fail "%comment expects exactly one string argument"

@@ -1,0 +1,21 @@
+; inline-bitops.sexc — exercises inline functions and bitwise compound-assign.
+;
+; (defn :inline :static ...) emits `static inline` before the C signature —
+; :static keeps the symbol file-local so it links at -O0 (a bare C99 `inline`
+; definition would need an external definition or fail to link).
+; %&=/%|=/%^=/%<<=/%>>= map to the C bitwise compound-assignment operators.
+
+(include <stdio.h>)
+
+; inline helper: set the bit at position p in mask.
+(defn :inline :static int set_bit ((int mask) (int p))
+  (return (%| mask (%<< 1 p))))
+
+(defn int main ()
+  (decl (int flags) 0)
+  (%|= flags (set_bit 0 0))   ; bit 0
+  (%|= flags (%<< 1 3))       ; bit 3
+  (%&= flags 255)             ; mask low byte
+  (%^= flags 2)               ; toggle bit 1
+  (printf "flags = %d\n" flags)
+  (return 0))

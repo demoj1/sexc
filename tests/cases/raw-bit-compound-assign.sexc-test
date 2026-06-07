@@ -1,0 +1,18 @@
+;; sexc-flags: --no-prelude
+;; bitwise compound-assignment operators
+(%def-fn void f ((int x))
+  (%block
+    (%&= x 3)
+    (%|= x 1)
+    (%^= x 2)
+    (%<<= x 1)
+    (%>>= x 2)))
+;==EXPECTED==
+void f(int x)
+{
+  x &= 3;
+  x |= 1;
+  x ^= 2;
+  x <<= 1;
+  x >>= 2;
+}

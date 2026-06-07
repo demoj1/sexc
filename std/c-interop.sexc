@@ -35,25 +35,58 @@
     `(%define ,name ,value)))
 
 ; defn
-; (defn ret name params form...)
-; => (%def-fn ret name params (%block form...))
+; (defn [:static] [:inline] ret name params form...)
+; => (%def-fn ret name params (%block form...)), optionally wrapped in
+;    %static / %inline specifier intrinsics.
+; Leading keyword flags are optional and order-independent; :static gives a
+; file-local symbol (the right choice for an inline function in one .c unit —
+; bare C99 inline needs an external definition or it fails to link at -O0).
+
+; collect leading :static/:inline flags → returns (flags-list . rest-args).
+($defun $defn-flag? (a)
+  ($if ($eq? a ':static) t ($if ($eq? a ':inline) t nil)))
+
+($defun $defn-split (args acc)
+  ($if ($null? args)
+    ($cons ($reverse acc) args)
+    ($if ($defn-flag? ($car args))
+      ($defn-split ($cdr args) ($cons ($car args) acc))
+      ($cons ($reverse acc) args))))
+
+($defun $defn-has? (flags kw)
+  ($if ($null? flags) nil
+    ($if ($eq? ($car flags) kw) t ($defn-has? ($cdr flags) kw))))
+
+; wrap %def-fn form per collected flags. :inline innermost, :static outermost
+; → emits `static inline ...` (canonical order).
+($defun $defn-wrap (flags form)
+  ($let ((f1 ($if ($defn-has? flags ':inline) ($list '%inline form) form)))
+    ($if ($defn-has? flags ':static) ($list '%static f1) f1)))
+
 (%doc defn
-  :doc "Define a C function."
-  :example "(defn int main () (return 0))")
-(%defmacro defn (ret name params &rest body)
-  ($do
-    ($m-put name :kind 'fn :return-type ret :params params)
-    ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
-    ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
-    ; параметров — (type name...); глобально по имени (последний выигрывает, но
-    ; раскрытие тела идёт сразу после defn, поэтому в теле тип верный).
-    ($dolist (g params)
-      ($if ($atom? g) nil
-        ($dolist (n ($cdr g))
-          ($m-put n :kind 'var :c-type ($car g)))))
-    ($let ((ns ($namespace-of name)))
-      ($if ($null? ns) nil ($m-append ns :fns name)))
-    `(%def-fn ,ret ,name ,params (%block ,@body))))
+  :doc "Define a C function. Optional leading flags :static and/or :inline emit the corresponding C specifiers (e.g. `static inline`). For an inline function in a single translation unit prefer :inline :static so it links at -O0."
+  :example "(defn :inline :static int sq ((int x)) (return (* x x)))")
+(%defmacro defn (&rest args)
+  ($let ((split  ($defn-split args ($list)))
+         (flags  ($car split))
+         (rest   ($cdr split))
+         (ret    ($car rest))
+         (name   ($car ($cdr rest)))
+         (params ($car ($cdr ($cdr rest))))
+         (body   ($cdr ($cdr ($cdr rest)))))
+    ($do
+      ($m-put name :kind 'fn :return-type ret :params params)
+      ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
+      ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
+      ; параметров — (type name...); глобально по имени (последний выигрывает, но
+      ; раскрытие тела идёт сразу после defn, поэтому в теле тип верный).
+      ($dolist (g params)
+        ($if ($atom? g) nil
+          ($dolist (n ($cdr g))
+            ($m-put n :kind 'var :c-type ($car g)))))
+      ($let ((ns ($namespace-of name)))
+        ($if ($null? ns) nil ($m-append ns :fns name)))
+      ($defn-wrap flags `(%def-fn ,ret ,name ,params (%block ,@body))))))
 
 ; decl
 ; (decl (type name) init ...)
