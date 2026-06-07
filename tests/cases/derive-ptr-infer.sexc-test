@@ -7,7 +7,7 @@
 (defn int  V/eq*    (((%ptr V) a) ((%ptr V) b))   (return (eq-as* V a b)))
 
 (defn int main ()
-  (decl (V v) (V# (x 1) (y 2))
+  (decl (V v) (V# :x 1 :y 2)
         ((%ptr V) p) (%addr v))
   (print-as v)     ; вывод типа V → v.x
   (print-as p)     ; вывод типа (%ptr V) → p->x
@@ -47,7 +47,7 @@ int V_u002F_eq_u002A_(V *a, V *b)
 
 int main(void)
 {
-  V v = (V){ .x = 1, .y = 2 };
+  V v = (V){.x = 1, .y = 2};
   V *p = &v;
   {
     printf("V {\n");

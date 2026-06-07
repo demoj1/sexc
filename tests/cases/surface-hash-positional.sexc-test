@@ -1,0 +1,18 @@
+; Type# positional init: (Point# 1 2) => (Point){1, 2}. (Was an error before
+; init unified aggregate construction.)
+(struct Point :fields (int x) (int y))
+
+(defn int main ()
+  (decl (Point p) (Point# 1 2))
+  (return (. p x)))
+;==EXPECTED==
+typedef struct Point {
+  int x;
+  int y;
+} Point;
+
+int main(void)
+{
+  Point p = (Point){1, 2};
+  return p.x;
+}

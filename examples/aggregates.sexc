@@ -1,0 +1,22 @@
+; aggregates.sexc — the unified `init` literal and Type# constructor.
+;
+; init builds a bare {...}: (init) => {0}, (init 1 2 3) positional,
+; (init :x 1 :y 2) designated. Type# wraps it with a type:
+; (Pt# :x 1 :y 2) => (Pt){.x = 1, .y = 2}.
+
+(include <stdio.h>)
+
+(struct Pt :fields (int x) (int y))
+
+(defn int main ()
+  (decl ((%array int 4) a)            (init 10 20 30 40)   ; positional array
+        ((%array (%array int 2) 2) m) (init (init 1 2) (init 3 4))  ; nested 2D
+        (Pt p)                        (Pt# :x 3 :y 4)      ; designated struct
+        (Pt q)                        (Pt# 5 6)            ; positional struct
+        (Pt z)                        (Pt#)                ; zero struct
+        (int sum)                     0)
+  (dotimes i 4 (incf-by sum (aref a i)))
+  (printf "sum=%d m[1][1]=%d p=(%d,%d) q=(%d,%d) z=(%d,%d)\n"
+          sum (aref (aref m 1) 1)
+          (. p x) (. p y) (. q x) (. q y) (. z x) (. z y))
+  (return 0))

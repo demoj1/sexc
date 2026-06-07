@@ -29,11 +29,11 @@
                   `(%decl float ,name
                           (/ (,op (- (. self b)) d) denom)))))
 
-    (return (Roots# (x1 x1) (x2 x2)))))
+    (return (Roots# :x1 x1 :x2 x2))))
 
 (defn int main ()
   (decl
-    (QuadrEq problem) (QuadrEq# (a 5) (b 3) (c -26))
+    (QuadrEq problem) (QuadrEq# :a 5 :b 3 :c -26)
     (Roots root) (QuadrEq/solve problem))
 
   (%evals

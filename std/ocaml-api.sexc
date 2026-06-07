@@ -153,6 +153,16 @@
   :doc "Return the namespace of a qualified atom — everything before the last '/'. Returns nil if there's no '/'. Used by declarative macros (defn, struct, union, define) to register themselves under their parent namespace's :fns / :types / :defines lists."
   :example "($namespace-of 'ring/Buffer/init) ; → ring/Buffer")
 
+(%doc $keyword?
+  :sig ($keyword? x)
+  :doc "True iff X is an atom starting with ':' (a keyword like :x). Used by the init macro to choose designated vs positional mode."
+  :example "($keyword? ':x) ; → t")
+
+(%doc $keyword-name
+  :sig ($keyword-name kw)
+  :doc "Strip the leading ':' from a keyword atom: :x → x. Errors if KW is not a keyword."
+  :example "($keyword-name ':x) ; → x")
+
 (%doc $m-append
   :sig ($m-append sym key item)
   :doc "Append ITEM to the list stored at SYM/KEY in compile-time metadata. Handles the case where the key doesn't exist yet (starts a new list). Defined as $defun in std/meta.sexc."

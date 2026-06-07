@@ -1,0 +1,25 @@
+; init — bare aggregate literal: zero / positional / designated / nested.
+(struct Pt :fields (int x) (int y))
+
+(defn int main ()
+  (decl ((%array int 4) a)              (init 1 2 3 4)
+        ((%array (%array int 2) 2) m)   (init (init 1 2) (init 3 4))
+        ((%array int 3) e)              (init (+ 1 1) 0 9)
+        (Pt p)                          (init :x 7 :y 8)
+        ((%array int 2) z)              (init))
+  (return (. p x)))
+;==EXPECTED==
+typedef struct Pt {
+  int x;
+  int y;
+} Pt;
+
+int main(void)
+{
+  int a[4] = {1, 2, 3, 4};
+  int m[2][2] = {{1, 2}, {3, 4}};
+  int e[3] = {1 + 1, 0, 9};
+  Pt p = {.x = 7, .y = 8};
+  int z[2] = {0};
+  return p.x;
+}

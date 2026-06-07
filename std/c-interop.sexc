@@ -500,6 +500,43 @@
     `(%raw "{0}")
     `(cast ,($car rest) (%raw "{0}"))))   ; (Type){0}
 
+; init — universal aggregate initializer literal (emits a bare {...}).
+;   (init)            => {0}              (zero)
+;   (init 1 2 3)      => {1, 2, 3}        (positional)
+;   (init :x 1 :y 2)  => {.x = 1, .y = 2} (designated; mode chosen by 1st arg)
+; Nests for multidimensional / array-of-struct. Type# wraps this with a type:
+; (Point# :x 1 :y 2) => (cast Point (init :x 1 :y 2)) => (Point){.x = 1, .y = 2}.
+
+; positional: e1 ", " e2 ", " e3
+($defun $init-positional (elems)
+  ($if ($null? ($cdr elems))
+    ($list ($car elems))
+    ($cons ($car elems) ($cons ", " ($init-positional ($cdr elems))))))
+
+; designated: :f v ... → ".f = " v ", " ".g = " w ...
+($defun $init-fields (pairs)
+  ($if ($null? pairs)
+    ($list)
+    ($do
+      ($assert ($keyword? ($car pairs)) "init: designated field must be a :keyword")
+      ($assert ($not ($null? ($cdr pairs))) "init: :keyword field needs a value")
+      ($let ((piece ($str "." ($keyword-name ($car pairs)) " = "))
+             (val   ($car ($cdr pairs)))
+             (rest  ($cdr ($cdr pairs))))
+        ($if ($null? rest)
+          ($list piece val)
+          ($cons piece ($cons val ($cons ", " ($init-fields rest)))))))))
+
+(%doc init
+  :doc "Aggregate initializer literal. (init) => {0}; (init 1 2 3) => {1, 2, 3} (positional); (init :x 1 :y 2) => {.x = 1, .y = 2} (designated). Mode is chosen by the first argument (a :keyword means designated). Nests for multidimensional arrays / arrays of structs. Emits a bare {...} for a decl initializer; for a typed compound literal use Type#."
+  :example "(decl ((%array int 4) a) (init 1 2 3 4))")
+(%defmacro init (&rest args)
+  ($if ($null? args)
+    `(%raw "{0}")
+    ($if ($keyword? ($car args))
+      `(%raw "{" ,@($init-fields args) "}")
+      `(%raw "{" ,@($init-positional args) "}"))))
+
 ; sizeof-type
 ; (sizeof-type ty)
 ; => (%sizeof-type ty)

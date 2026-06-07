@@ -119,7 +119,7 @@ let precedence_of_expr = function
   | ENary (("*" | "/" | "%"), _) -> 13
   | ENary _ -> 12
   | EUnary _ | ECast _ | ESizeofType _ | ESizeofExpr _ -> 14
-  | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ | ECompoundLiteral _ -> 15
+  | EPostfix _ | ECall _ | EIndex _ | EMember _ | EPtrMember _ -> 15
   | EAtom _ | EString _ | ERaw _ -> 16
 
 (* emit_type_base..emit_expr — одна рекурсивная группа: типы и выражения
@@ -215,14 +215,6 @@ and emit_expr ?(ctx = 0) e =
     | EIndex (a, i) -> emit_expr ~ctx:p a ^ "[" ^ emit_expr i ^ "]"
     | EMember (x, f) -> emit_expr ~ctx:p x ^ "." ^ mangle_ident f
     | EPtrMember (x, f) -> emit_expr ~ctx:p x ^ "->" ^ mangle_ident f
-    | ECompoundLiteral (tyv, inits) ->
-        let emit_init = function
-          | InitExpr x -> emit_expr x
-          | InitField (field, value) -> "." ^ mangle_ident field ^ " = " ^ emit_expr value
-        in
-        "(" ^ emit_decl_of_type tyv "" ^ "){ "
-        ^ (List.map inits ~f:emit_init |> String.concat ~sep:", ")
-        ^ " }"
     | ECall (callee, args) ->
         emit_expr ~ctx:p callee ^ "(" ^ (List.map args ~f:emit_expr |> String.concat ~sep:", ") ^ ")"
   in

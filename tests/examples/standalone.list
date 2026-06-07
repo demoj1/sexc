@@ -9,4 +9,5 @@ examples/dot_arrow_alias.sexc
 examples/struct_methods.sexc
 examples/conditional.sexc
 examples/inline-bitops.sexc
+examples/aggregates.sexc
 examples/complex-project/main.sexc

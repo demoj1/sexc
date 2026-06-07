@@ -1,9 +1,0 @@
-(struct Point :fields (int x) (int y))
-
-(defn int main ()
-  (decl (Point p) (Point# 1 2))
-  (return 0))
-;==EXPECTED-ERROR==
-<stdin>:3:1: error[compile]: Point# designated init expects pairs (field value); for {0} use (zero-init)
-(defn int main ()
-^

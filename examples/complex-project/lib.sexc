@@ -9,8 +9,8 @@
   (defn Counter add ((Counter self) (int value))
     (return
       (Counter#
-        (total (+ (. self total) value))
-        (count (+ (. self count) 1)))))
+        :total (+ (. self total) value)
+        :count (+ (. self count) 1))))
 
   (defn float average ((Counter self))
     (if (= (. self count) 0)

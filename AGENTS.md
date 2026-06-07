@@ -362,10 +362,10 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`, `%&=`, `%|=`, `%^=`, `%<<=`, `%>>=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
-  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `when!`, `if!`, `cond!`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `when!`, `if!`, `cond!`
   - `std/derive.sexc` (in-place рефлексия по метадате): `eq-as`, `print-as` (+ compile-time `$type-kind`/`$pointer?`/`$rem-mods`/`$fmt-for-type`)
   - `std/meta.sexc` (не привязано к C): `|>`, `||>`, `|as>` (threading)
 
@@ -382,12 +382,21 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Секции `:fields` обязательна, `:methods` опциональна; старый mixed-формат `struct` удален.
   - Внутри `struct` можно объявлять методы через `defn`; они автогенерируются как `Name/method`.
   - `(union Name (type field) ...)` -> `typedef union ... Name;`
-- Инициализация структур через sugar `Type#` — ТОЛЬКО designated пары
-  `(field value)`, любое число (включая одно):
-  - `(Roots# (x1 5) (x2 7))` -> `(Roots){ .x1 = 5, .x2 = 7 }`
-  - `(One# (x 5))` -> `(One){ .x = 5 }` (одно поле — ок)
-  - zero-init НЕ через `Type#`: пиши `(zero-init)` → `{0}` (в позиции
-    инициализатора, напр. `(decl (Foo f) (zero-init))`). Бывший `(Type# 0)` убран.
+- `Type#` — типизированный compound-literal-конструктор. В макрофазе
+  (`macro.ml` `expand_one`, суффикс `#`) разворачивается в
+  `(cast Type (init args…))`; всю работу по построению `{…}` делает `init`.
+  Namespace-rewrite уже квалифицирует `Buffer#` → `ring/Buffer#` ДО раскрытия
+  (`compiler.ml:146`). Раньше Type# был frontend-формой (`parse_type_hash_init`
+  + `ECompoundLiteral`) — удалено.
+  - `(Roots# :x1 5 :x2 7)` -> `(Roots){.x1 = 5, .x2 = 7}` (designated, keyword)
+  - `(Pt# 5 6)` -> `(Pt){5, 6}` (positional)
+  - `(Pt#)` -> `(Pt){0}` (zero)
+- `init` — голый агрегат-инициализатор без типа (`std/c-interop.sexc`):
+  `(init)` → `{0}`, `(init 1 2 3)` → `{1, 2, 3}`, `(init :x 1 :y 2)` →
+  `{.x = 1, .y = 2}`. Режим по первому аргументу (`:keyword` ⇒ designated),
+  через `$keyword?`. Вложенность для 2D/массивов структур. Для decl-init
+  массивов: `(decl ((%array int 4) a) (init 1 2 3 4))`. `zero-init` —
+  тонкий частный случай (оставлен, не ломаем).
 
 ## typedef и enum
 

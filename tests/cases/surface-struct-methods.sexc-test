@@ -6,8 +6,8 @@
   :methods
   (defn Counter add ((Counter self) (int delta))
     (return (Counter#
-              (total (+ (dot self total) delta))
-              (n (+ (dot self n) 1))))))
+              :total (+ (dot self total) delta)
+              :n (+ (dot self n) 1)))))
 ;==EXPECTED==
 typedef struct Counter {
   int total;
@@ -16,5 +16,5 @@ typedef struct Counter {
 
 Counter Counter_u002F_add(Counter self, int delta)
 {
-  return (Counter){ .total = self.total + delta, .n = self.n + 1 };
+  return (Counter){.total = self.total + delta, .n = self.n + 1};
 }

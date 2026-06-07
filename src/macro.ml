@@ -166,6 +166,21 @@ and eval_expr_inner ctx env expr =
        | None -> Raw.Atom ("nil", None))
   | Raw.List ((Raw.Atom ("$namespace-of", _) :: _), _) ->
       fail "$namespace-of expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$keyword?", _) :: [ x ]), _) ->
+      (* true iff the value is an atom starting with ':' (a keyword like :x). *)
+      (match eval_expr ctx env x with
+       | Raw.Atom (a, _) -> bool_raw (String.is_prefix a ~prefix:":")
+       | _ -> bool_raw false)
+  | Raw.List ((Raw.Atom ("$keyword?", _) :: _), _) ->
+      fail "$keyword? expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$keyword-name", _) :: [ x ]), _) ->
+      (* ':x' → 'x'; drops a single leading ':'. Errors if not a keyword atom. *)
+      let s = expect_atom_or_string (eval_expr ctx env x) in
+      (match String.chop_prefix s ~prefix:":" with
+       | Some name -> Raw.Atom (name, None)
+       | None -> failf "$keyword-name expects a :keyword atom, got %s" s)
+  | Raw.List ((Raw.Atom ("$keyword-name", _) :: _), _) ->
+      fail "$keyword-name expects exactly one argument"
   | Raw.List ((Raw.Atom ("$let", _) :: Raw.List (binds, _) :: body), _) ->
       let rec bind env = function
         | [] -> env
@@ -630,6 +645,19 @@ and expand_one ctx ~depth raw =
         ([ Raw.Atom ("%comment", None); Raw.Str ((format_meta_dump ctx.sym_meta), None) ], None)
   | Raw.List ((Raw.Atom ("%m-dump", _) :: _), _) ->
       fail "%m-dump takes no arguments"
+  | Raw.List ((Raw.Atom (head, _) :: args), list_sp)
+    when String.length head > 1 && String.is_suffix head ~suffix:"#" ->
+      (* Type# constructor sugar: (Foo# args...) → (cast Foo (init args...)).
+         Namespace-rewrite has already qualified the head (ring/Buffer#), so the
+         dropped-# base carries the right name. cast+init are surface macros. *)
+      let ty = String.drop_suffix head 1 in
+      let out =
+        Raw.List
+          ([ Raw.Atom ("cast", None);
+             Raw.Atom (ty, None);
+             Raw.List (Raw.Atom ("init", None) :: args, None) ], list_sp)
+      in
+      expand_one ctx ~depth:(depth + 1) out
   | Raw.List ((Raw.Atom (head, head_sp) :: args), list_sp) -> (
       match Map.find ctx.defs head with
       | Some m ->

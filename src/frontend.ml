@@ -74,11 +74,6 @@ and expr =
   | EIndex of expr * expr
   | EMember of expr * string
   | EPtrMember of expr * string
-  | ECompoundLiteral of ty * compound_init list
-
-and compound_init =
-  | InitExpr of expr
-  | InitField of string * expr
 
 and raw_part =
   | RawText of string
@@ -236,13 +231,6 @@ let ensure_arity_between name args low high =
 
 let is_intrinsic name = String.is_prefix name ~prefix:"%"
 
-let parse_type_hash_name s =
-  if String.is_suffix s ~suffix:"#" then
-    let n = String.length s in
-    if n = 1 then fail "Type# initializer requires a type name before '#'"
-    else Some (String.sub s ~pos:0 ~len:(n - 1))
-  else None
-
 let c_binary_op = function
   | "%+" -> "+"
   | "%-" -> "-"
@@ -283,24 +271,8 @@ let rec parse_expr raw =
   | Raw.List ((head :: rest), _) -> (
       match head with
       | Raw.Atom (h, _) when is_intrinsic h -> parse_intrinsic_expr h rest
-      | Raw.Atom (h, _) -> (
-          match parse_type_hash_name h with
-          | Some ty_name -> parse_type_hash_init ty_name rest
-          | None -> ECall (parse_expr head, List.map rest ~f:parse_expr))
+      | Raw.Atom (_, _) -> ECall (parse_expr head, List.map rest ~f:parse_expr)
       | _ -> ECall (parse_expr head, List.map rest ~f:parse_expr))
-
-and parse_type_hash_init ty_name args =
-  let ty = TNamed ty_name in
-  (* Только designated init из пар (field value), любое число (включая одну).
-     Для zero-init используйте (zero-init) → {0}. *)
-  match args with
-  | [] -> failf "%s# requires initializers: (%s# (field value) ...); for {0} use (zero-init)" ty_name ty_name
-  | _ ->
-      let parse_field_init = function
-        | Raw.List ([ Raw.Atom (field, _); value ], _) -> InitField (field, parse_expr value)
-        | _ -> failf "%s# designated init expects pairs (field value); for {0} use (zero-init)" ty_name
-      in
-      ECompoundLiteral (ty, List.map args ~f:parse_field_init)
 
 and parse_intrinsic_expr h args =
   match h with
