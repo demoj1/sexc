@@ -1,0 +1,18 @@
+; `sizeof` picks the right intrinsic: compound type forms -> sizeof(type),
+; atoms/expressions -> sizeof(expr) (which C resolves either way).
+(defn int main ()
+  (decl (int x) 0)
+  (decl ((%array int 4) arr) (init 1 2 3 4))
+  (return (+ (sizeof int)
+             (sizeof (%ptr char))
+             (sizeof (unsigned long))
+             (sizeof x)
+             (sizeof (aref arr 0))
+             (sizeof arr))))
+;==EXPECTED==
+int main(void)
+{
+  int x = 0;
+  int arr[4] = {1, 2, 3, 4};
+  return sizeof(int) + sizeof(char *) + sizeof(unsigned long) + sizeof(x) + sizeof((arr)[0]) + sizeof(arr);
+}

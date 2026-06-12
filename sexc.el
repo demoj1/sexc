@@ -71,7 +71,7 @@ The command must accept source on stdin and print generated C to stdout."
   '("include" "define" "defn" "decl" "block" "if" "cond"
     "while" "for" "return" "set" "cast" "struct" "union"
     "adecl" "free*" "typedef" "enum" "init"
-    "zero-init" "sizeof-type" "sizeof-expr" "aref" "dot" "arrow"
+    "zero-init" "sizeof" "sizeof-type" "sizeof-expr" "aref" "dot" "arrow"
     "." "->" "not" "+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">"
     ">=" "&&" "and" "||" "or" "post-inc" "nop"
     "when" "unless" "incf" "decf" "incf-by" "decf-by"
@@ -130,6 +130,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("with" . "(with VAR VALUE BODY...) -> dynamic binding; restores VAR on any block exit")
     ("defer1" . "(defer1 FN ARG) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
     ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")
+    ("sizeof" . "(sizeof X) -> sizeof(X); auto-picks type vs expr (use sizeof-type/sizeof-expr to force)")
     ("set" . "(set LHS VALUE [LHS2 VALUE2 ...])")
     ("struct" . "(struct Name :fields ... [:methods (defn ...)...])")
     ("union" . "(union Name (TYPE FIELD) ...)")

@@ -34,7 +34,7 @@
   (decl
     ((%ptr int) xs)
     (cast (%ptr int)
-          (arena-alloc *arena* (* 4 (sizeof-type int)))))
+          (arena-alloc *arena* (* 4 (sizeof int)))))
 
   (dotimes i 4
     (set (aref xs i) (* i i)))

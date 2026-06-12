@@ -557,6 +557,30 @@
 (%defmacro sizeof-expr (expr)
   `(%raw "sizeof(" ,expr ")"))
 
+; sizeof — one form for any valid sizeof context; picks the intrinsic itself.
+; A compound TYPE form (%ptr/%array/%const/.../multi-word builtin) can't be parsed
+; as an expression, so it must go through sizeof-type. Everything else — an atom
+; or an expression — goes through sizeof-expr; for a bare atom the C compiler
+; resolves sizeof(NAME) the same whether NAME is a type or a value, so you never
+; have to choose. Use sizeof-type/sizeof-expr only to force a specific reading.
+($defun $sizeof-type-head? (h)
+  ($case h
+    ('%ptr 't) ('%array 't) ('%const 't) ('%volatile 't) ('%restrict 't)
+    ('%fn 't) ('%struct 't) ('%union 't) ('%enum 't)
+    ('void 't) ('char 't) ('short 't) ('int 't) ('long 't)
+    ('float 't) ('double 't) ('signed 't) ('unsigned 't)
+    (else nil)))
+
+(%doc sizeof
+  :doc "sizeof(X), choosing the intrinsic automatically. A compound type form ((%ptr int), (unsigned long), ...) → sizeof(<type>); an atom or expression → sizeof(<expr>), which C resolves identically for a type name or a value. Use sizeof-type/sizeof-expr to force a reading."
+  :example "(sizeof int)  (sizeof (%ptr char))  (sizeof x)  (sizeof (aref a 0))")
+(%defmacro sizeof (x)
+  ($if ($atom? x)
+    `(sizeof-expr ,x)
+    ($if ($sizeof-type-head? ($car x))
+      `(sizeof-type ,x)
+      `(sizeof-expr ,x))))
+
 ; aref / dot / arrow helpers
 (%doc aref
   :doc "Array indexing helper: ARR[IDX]."
