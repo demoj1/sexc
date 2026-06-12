@@ -1,0 +1,29 @@
+; defslot with a default: the slot's thread_local is declared once, a startup
+; constructor sets it, and it is OPTIONAL — reading it without `with` is fine
+; (always bound), so the analysis does not flag the bare call.
+(include <stdio.h>)
+(defslot (:* FILE) *out* stdout)
+(defn void emit ((:* :const char m)) (fprintf *out* "%s\n" m))
+(defn int main ()
+  (emit "no with needed")
+  (return 0))
+;==EXPECTED==
+#include <stdio.h>
+
+_Thread_local FILE *_u002A_out_u002A_;
+
+__attribute__((constructor)) static void sx_defslot_0(void)
+{
+  _u002A_out_u002A_ = stdout;
+}
+
+void emit(const char *m)
+{
+  fprintf(_u002A_out_u002A_, "%s\n", m);
+}
+
+int main(void)
+{
+  emit("no with needed");
+  return 0;
+}

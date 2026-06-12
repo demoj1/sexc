@@ -54,23 +54,30 @@ let rec is_scalar_type = function
    [*foo*] that no [with] ever binds is not here, and scalar slots are excluded
    (their unbound default 0 is a value, not a crash). *)
 let tracked_slots forms =
-  let acc = ref String.Set.empty in
-  let add v = acc := Set.add !acc v in
+  let tracked = ref String.Set.empty in
+  let defaulted = ref String.Set.empty in
+  let add r v = r := Set.add !r v in
   let rec go raw =
     match raw with
     (* `with` binding: tracked only if non-scalar (scalar default 0 ≠ crash) *)
     | Raw.List ((Raw.Atom ("%dyn-scope", _) :: Raw.Atom (v, _) :: ty :: rest), _) ->
-        if not (is_scalar_type ty) then add v;
+        if not (is_scalar_type ty) then add tracked v;
         List.iter rest ~f:go
     (* explicit `slot*` requirement: tracked unconditionally — the developer
        said "I require it", so we check it regardless of type *)
     | Raw.List ((Raw.Atom ("%dyn-require", _) :: slots), _) ->
-        List.iter slots ~f:(function Raw.Atom (v, _) -> add v | _ -> ())
+        List.iter slots ~f:(function Raw.Atom (v, _) -> add tracked v | _ -> ())
+    (* top-level `defslot`: a default makes the slot always-bound → exempt
+       (even if also `with`-bound); a non-scalar slot with no default is required *)
+    | Raw.List ((Raw.Atom ("%dyn-slot", _) :: Raw.Atom (v, _) :: ty :: rest), _) ->
+        let has_default = match rest with Raw.Atom ("t", _) :: _ -> true | _ -> false in
+        if has_default then add defaulted v
+        else if not (is_scalar_type ty) then add tracked v
     | Raw.List (xs, _) -> List.iter xs ~f:go
     | _ -> ()
   in
   List.iter forms ~f:go;
-  !acc
+  Set.diff !tracked !defaulted
 
 (* A top-level function definition, unwrapping %static/%inline/%extern. *)
 let rec fn_def = function

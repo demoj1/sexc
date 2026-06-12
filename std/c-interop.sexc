@@ -1035,17 +1035,21 @@
          (saved ($gensym "sx_with_saved_"))
          (guard ($gensym "sx_with_guard_")))
     ($assert ($atom? var) "with: variable name must be an atom")
+    ; Объявление слота в голову файла шлём, ТОЛЬКО если слот не объявлен defslot
+    ; (иначе defslot — единственная точка правды, иначе было бы двойное объявление).
+    ($let ((head-decl ($if ($m-get var :slot) ($list)
+                        ($list `(%file-head-splice (%decl (:thread_local ,ty) ,var))))))
     ; %dyn-scope — маркер для whole-program анализа (src/analysis.ml): внутри
     ; него ,var связан; ,ty нужен, чтобы скалярные слоты (дефолт 0, не краш)
     ; исключать из must-bind проверки. Для codegen прозрачен (стрип в compiler.ml).
     `(%dyn-scope ,var ,ty
        (%block
-         (%file-head-splice (%decl (:thread_local ,ty) ,var))
+         ,@head-decl
          ,@($sx-with-runtime)
          (%decl __auto_type ,saved ,var)
          (%raw "__sx_with_guard " ,guard " __attribute__((cleanup(__sx_with_restore))) = { &(" ,var "), &" ,saved ", sizeof(" ,var ") }")
          (set ,var ,value)
-         ,@body))))
+         ,@body)))))
 
 ; slot* — declare the dynamic slots a function REQUIRES from its caller. Put it
 ; at the top of the body: (slot* *out* *arena*). It binds nothing and costs
@@ -1058,6 +1062,36 @@
   :example "(defn void log-line ((:* :const char m)) (slot* *out*) (fprintf *out* \"%s\\n\" m))")
 (%defmacro slot* (&rest slots)
   `(%dyn-require ,@slots))
+
+; defslot — declare a dynamic slot at top level: its type (explicit) and an
+; OPTIONAL default. The slot's thread_local is declared once at the file head;
+; with a default, a __attribute__((constructor)) sets it before main (so the slot
+; is always bound — main thread; other threads see it unset, see README/AGENTS).
+;   (defslot (:* FILE) *out* stdout)   ; pointer slot with a default → OPTIONAL
+;   (defslot (:* Arena) *arena*)       ; pointer slot, no default    → REQUIRED
+; The (%dyn-slot ...) marker tells the analysis the slot's type and whether it has
+; a default: a defaulted (or scalar) slot is exempt from the must-bind check; a
+; non-scalar slot without a default must be bound on every path that reads it.
+(%doc defslot
+  :sig (defslot TYPE *slot* [default])
+  :doc "Declare a dynamic slot at top level with an explicit TYPE and an optional DEFAULT. A defaulted slot is initialized by a startup constructor and is optional; a pointer slot with no default must be bound (via `with`) before any read. Bind with `with`, declare a function's needs with `slot*`."
+  :example "(defslot (:* FILE) *out* stdout)")
+(%defmacro defslot (ty slot &rest rest)
+  ($let ((has-default ($not ($null? rest)))
+         (uty         ($unpack-type ty))
+         (ctor        ($gensym "sx_defslot_")))
+    ($do
+      ; defslot — единственная точка объявления слота; `with` это видит и СВОЁ
+      ; объявление не шлёт (см. with). Декларацию эмичу обычным top-`%decl` ПЕРВОЙ
+      ; в сплайсе — чтобы она была до конструктора (тот читает слот).
+      ($m-put slot :slot t)
+      `(%top-level-splice
+         (%decl (:thread_local ,uty) ,slot)
+         (%dyn-slot ,slot ,uty ,($if has-default 't 'nil))
+         ,@($if has-default
+              ($list `(%constructor (%static
+                        (%def-fn void ,ctor () (%block (set ,slot ,($car rest)))))))
+              ($list))))))
 
 ; Build one guard declaration form (a %raw statement) for FN(ARG) at scope exit.
 ; Shared by defer1 and defer*; each call gensyms its own guard variable.

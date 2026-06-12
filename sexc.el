@@ -79,7 +79,7 @@ The command must accept source on stdin and print generated C to stdout."
     "if-nil" "when-nil" "unless-nil"
     "when" "unless" "incf" "decf" "incf-by" "decf-by"
     "dotimes" "for-range" "repeat"
-    "when!" "if!" "cond!" "with" "slot*" "defer1" "defer*"
+    "when!" "if!" "cond!" "with" "slot*" "defslot" "defer1" "defer*"
     "|>" "||>" "|as>")
   "Surface DSL keywords/macros (no %/$ prefix)."
   :type '(repeat string)
@@ -135,6 +135,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("free*" . "(free* PTR...) -> emit block of free calls")
     ("with" . "(with VAR VALUE BODY...) -> dynamic binding; restores VAR on any block exit")
     ("slot*" . "(slot* *a* *b* ...) -> declare the dynamic slots this fn requires; a caller that doesn't `with`-bind one is a compile-time error at the call")
+    ("defslot" . "(defslot TYPE *slot* [default]) -> top-level dynamic slot: explicit TYPE, optional DEFAULT (startup constructor). Defaulted/scalar = optional; pointer w/o default must be bound (`with`) before any read")
     ("defer1" . "(defer1 FN ARG) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
     ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")
     ("sizeof" . "(sizeof X) -> sizeof(X); auto-picks type vs expr (use sizeof-type/sizeof-expr to force)")

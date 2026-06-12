@@ -1,0 +1,12 @@
+; defslot with NO default: a pointer slot that must be bound before any read —
+; a bare call that reaches it unbound is a compile-time error (even without slot*).
+(include <stdio.h>)
+(defslot (:* FILE) *out*)
+(defn void emit ((:* :const char m)) (fprintf *out* "%s\n" m))
+(defn int main ()
+  (emit "oops")
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:7:4: error[analysis]: emit requires the dynamic slot *out*, which is unbound here — provide it before the call with (with *out* <value> ...)
+  (emit "oops")
+   ^

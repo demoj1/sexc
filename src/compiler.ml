@@ -568,7 +568,7 @@ let rec hoist_splices ~file_head raw : Raw.t list * Raw.t option =
    collected file-head declarations are injected right before the first one. *)
 let rec is_fn_def_form = function
   | Raw.List ((Raw.Atom (("defn" | "%def-fn"), _) :: _), _) -> true
-  | Raw.List ((Raw.Atom (("%static" | "%inline" | "%extern"), _) :: [ inner ]), _) ->
+  | Raw.List ((Raw.Atom (("%static" | "%inline" | "%extern" | "%constructor"), _) :: [ inner ]), _) ->
       is_fn_def_form inner
   | _ -> false
 
@@ -661,10 +661,16 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
           let hoisted, cleaned = hoist_splices ~file_head raw in
           hoisted @ Option.to_list cleaned)
       in
-      (* Тап для whole-program анализа (формы с маркерами %dyn-scope). *)
+      (* Тап для whole-program анализа (формы с маркерами %dyn-scope/%dyn-slot). *)
       program_forms := List.rev_append flattened_raws !program_forms;
-      (* Маркеры %dyn-scope — только для анализа; для codegen прозрачны. *)
-      let parsed = List.map flattened_raws ~f:(fun r -> Frontend.parse_top (strip_dyn_scope r)) in
+      (* %dyn-slot — top-level analysis-only маркер (от defslot), для codegen не
+         форма → выкидываем; %dyn-scope/%dyn-require внутри форм стрипаются. *)
+      let codegen_raws =
+        List.filter flattened_raws ~f:(function
+          | Raw.List ((Raw.Atom ("%dyn-slot", _) :: _), _) -> false
+          | _ -> true)
+      in
+      let parsed = List.map codegen_raws ~f:(fun r -> Frontend.parse_top (strip_dyn_scope r)) in
       let body = List.map parsed ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n" in
       (* Top-level #line — покрывает строку сигнатуры функции / определения
          struct (сами стейтменты тела получают свои #line через SAt). *)

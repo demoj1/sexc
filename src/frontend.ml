@@ -525,15 +525,21 @@ let rec parse_top raw =
   | Raw.List ((Raw.Atom ("%def-fn", _) :: ret_ty :: Raw.Atom (name, _) :: params :: body :: []), _) ->
       let ps, varargs = parse_params params in
       TDefFn (parse_type ret_ty, name, ps, varargs, parse_stmt_or_decl body, [])
-  | Raw.List ((Raw.Atom (("%inline" | "%static" | "%extern") as spec, _) :: [ inner ]), _) ->
+  | Raw.List ((Raw.Atom (("%inline" | "%static" | "%extern" | "%constructor") as spec, _) :: [ inner ]), _) ->
       (* Stackable function specifiers: (%static (%inline (%def-fn ...))). Each
-         wrapper prepends its keyword, so outer-most ends up left-most in C. *)
-      let kw = String.chop_prefix_exn spec ~prefix:"%" in
+         wrapper prepends its keyword, so outer-most ends up left-most in C.
+         %constructor → __attribute__((constructor)) (GCC/Clang: run before main;
+         used by defslot to set a slot's default at startup). *)
+      let kw =
+        match spec with
+        | "%constructor" -> "__attribute__((constructor))"
+        | _ -> String.chop_prefix_exn spec ~prefix:"%"
+      in
       (match parse_top inner with
        | TDefFn (r, n, p, v, b, specs) -> TDefFn (r, n, p, v, b, kw :: specs)
        | TDeclFn (r, n, p, v, specs) -> TDeclFn (r, n, p, v, kw :: specs)
        | _ -> failf "%s expects a function definition (%%def-fn) or prototype (%%decl-fn)" spec)
-  | Raw.List ((Raw.Atom (("%inline" | "%static" | "%extern") as spec, _) :: _), _) ->
+  | Raw.List ((Raw.Atom (("%inline" | "%static" | "%extern" | "%constructor") as spec, _) :: _), _) ->
       failf "%s expects exactly one function form" spec
   | Raw.List ((Raw.Atom ("%decl", _) :: args), _) -> TDeclTop (parse_decl args)
   | Raw.List ((Raw.Atom ("%comment", _) :: [ Raw.Str (s, _) ]), _) -> TComment s

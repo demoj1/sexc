@@ -349,6 +349,17 @@ a function needing a slot without binding it is an error, pointing at the call
 explicitly; scalar slots (e.g. an `int` depth that safely defaults to `0`) are
 exempt — only pointer slots that could NULL-deref are checked.
 
+`defslot` declares a slot at the top level — an explicit type and an optional
+default set by a startup constructor:
+
+```lisp
+(defslot (:* FILE)  *out* stdout)   ; defaulted → optional, no `with` required
+(defslot (:* Arena) *arena*)        ; no default → must be bound before any read
+```
+
+A defaulted slot is always bound (so `*out*` falls back to `stdout`); a pointer
+slot with no default is required, enforced by the same check.
+
 `defer1` / `defer*` run a one-argument cleanup at block exit, in LIFO
 order, on any exit path — both compile to `__attribute__((cleanup))`
 (GCC/Clang):
@@ -879,6 +890,17 @@ _Thread_local __typeof__(stdout) *out*;   /* поднято в начало фа
 dynamic slot *out* …`). `slot*` объявляет зависимость явно; скалярные слоты
 (напр. `int`-глубина с безопасным дефолтом `0`) исключены — проверяются только
 указательные, где возможен NULL-дереф.
+
+`defslot` объявляет слот на top-level — явный тип и опциональный дефолт,
+выставляемый стартап-конструктором:
+
+```lisp
+(defslot (:* FILE)  *out* stdout)   ; с дефолтом → опциональный, `with` не нужен
+(defslot (:* Arena) *arena*)        ; без дефолта → обязан быть связан до чтения
+```
+
+Слот с дефолтом всегда связан (`*out*` падает обратно на `stdout`); указательный
+слот без дефолта обязателен — это ловит та же проверка.
 
 `defer1` / `defer*` выполняют cleanup одного аргумента на выходе из
 блока, в порядке LIFO, на любом пути выхода — оба компилятся в

@@ -273,6 +273,8 @@ Example: (incf-by total 4)
   `compiler.ml`) — по нему whole-program проход знает, где слот связан (см.
   «Whole-program анализ»). `(slot* *a* *b*)` в начале функции объявляет, какие
   слоты она ТРЕБУЕТ от вызывающего (маркер `%dyn-require`, рантайм-ноль).
+  `(defslot ty *v* [default])` — top-level декларация слота (явный тип + опц.
+  дефолт через стартап-конструктор), единственная точка объявления.
   `(defer1 fn arg)`
   зовёт `fn(arg)` на выходе (LIFO), `fn` — одного указательного аргумента;
   `(defer* (fn arg)...)` — пачка `defer1` (общий `$sx-defer-decl` строит guard на
@@ -424,6 +426,10 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 объявленная `slot*` (`%dyn-require`). Правила:
 - `with *v* val …` → `%dyn-scope v ty …`: внутри региона `v` связан (биндинг).
 - `(slot* *a* *b*)` → `%dyn-require *a* *b*`: функция ТРЕБУЕТ эти слоты (явно).
+- `(defslot ty *v* [default])` → top-level `%dyn-slot v ty t/nil`: объявляет слот
+  глобально (единственная точка — `with` тогда не дублирует объявление). С дефолтом
+  → слот всегда связан (стартап-конструктор) → **исключён** (даже если где-то ещё
+  `with`-связан); без дефолта и нескалярный → обязателен.
 - голое чтение слота, связанного `with` где-то, — неявное требование; **скаляры
   исключены** (тип из `%dyn-scope`: дефолт 0 ≠ NULL-краш), `slot*` — без исключения.
 - `(%set *v* …)` в блоке — связывание `v` до конца блока (заполнить слот руками ок).
@@ -431,8 +437,11 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   на строке вызова с именем функции («X requires the dynamic slot *v* …»). Нет
   `main` (библиотека) → требования — забота внешнего вызывающего, не репортим.
 
-Оба маркера прозрачны для codegen — `strip_dyn_scope` в `compiler.ml` снимает
-`%dyn-scope` (→ тело) и `%dyn-require` (→ `%nop`) перед парсингом. Zero C-change.
+Маркеры прозрачны для codegen — `strip_dyn_scope` в `compiler.ml` снимает
+`%dyn-scope` (→ тело) и `%dyn-require` (→ `%nop`) перед парсингом, а top-level
+`%dyn-slot` отфильтровывается. Zero C-change. `defslot` с дефолтом эмитит стартап-
+функцию `(%constructor (%static (%def-fn …)))` — спецификатор `%constructor`
+(frontend) → `__attribute__((constructor))`; объявление слота идёт ПЕРЕД ней.
 
 ## Именование уровней (строго)
 
@@ -452,7 +461,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defer1`, `defer*`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defslot`, `defer1`, `defer*`
   - **Конвенция**: имя любого surface-предиката заканчивается на `?`
     (`nil?`/`not-nil?`/`zero?`/`ltz?`/`letz?`/`gtz?`/`getz?`). `do` — плоская
     последовательность стейтментов без скоупа (через `%evals`-сплайс), в отличие
