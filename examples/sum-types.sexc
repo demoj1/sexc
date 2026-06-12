@@ -33,11 +33,10 @@
         (Shape r) (Shape/Rect# 3.0f 4.0f)
         (Shape u) (Shape/Unit#))
 
-  (printf "areas: %.2f %.2f %.2f\n"
-    (cast double (area c)) (cast double (area r)) (cast double (area u)))
+  ; printf — вариадик: float-аргументы сами промоутятся в double под %.2f.
+  (printf "areas: %.2f %.2f %.2f\n" (area c) (area r) (area u))
 
-  (printf "rect-perimeter: %.2f %.2f\n"
-    (cast double (rect-perimeter c)) (cast double (rect-perimeter r)))
+  (printf "rect-perimeter: %.2f %.2f\n" (rect-perimeter c) (rect-perimeter r))
 
   (printf "predicates: c.Circle?=%d r.Rect?=%d u.Unit?=%d\n"
     (Shape/Circle? c) (Shape/Rect? r) (Shape/Unit? u))
