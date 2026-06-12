@@ -25,7 +25,7 @@
     (set (-> b cap)   c
          (-> b head)  0
          (-> b count) 0
-         (-> b data)  (cast (%ptr float) (calloc c (sizeof-type float)))))
+         (-> b data)  (cast (%ptr float) (calloc c (sizeof float)))))
 
   (defn void push (((%ptr Buffer) b) (float v))
     (decl (int slot) (-> b head))
@@ -49,7 +49,7 @@
 
   (defn void release (((%ptr Buffer) b))
     (free (-> b data))
-    (set (-> b data)  (cast (%ptr float) 0)
+    (set (-> b data)  nil
          (-> b cap)   0
          (-> b head)  0
          (-> b count) 0)))

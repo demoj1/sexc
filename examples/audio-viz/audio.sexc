@@ -33,7 +33,7 @@
   (cast void dev)
   (cast void output)
 
-  (when (and (not= input NULL) (> frames 0))
+  (when (and (not-nil? input) (pos? frames))
     (decl ((%ptr (%const float)) samples) (cast (%ptr (%const float)) input)
           (float                 sum)     0.0f)
     (dotimes i frames
@@ -52,7 +52,7 @@
        (. cfg sampleRate)        48000
        (. cfg dataCallback)      on_capture)
 
-  (when (not= (ma_device_init  NULL (%addr cfg) (%addr g_device)) MA_SUCCESS)
+  (when (not= (ma_device_init nil (%addr cfg) (%addr g_device)) MA_SUCCESS)
     (return 0))
   (when (not= (ma_device_start (%addr g_device)) MA_SUCCESS)
     (ma_device_uninit (%addr g_device))
