@@ -1,0 +1,14 @@
+; A requirement propagates up through intermediate callers to main; the error
+; lands on the call and names the (immediate) function that requires the slot.
+(include <stdio.h>)
+(defn void emit ((:* :const char m))
+  (slot* *out*)
+  (fprintf *out* "%s\n" m))
+(defn void greet () (emit "hi"))
+(defn int main ()
+  (greet)
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:9:4: error[analysis]: greet requires the dynamic slot *out*, which is unbound here — provide it before the call with (with *out* <value> ...)
+  (greet)
+   ^

@@ -1,0 +1,54 @@
+; A function that binds the slot for its own callees requires nothing from ITS
+; caller, so a bare call to it is fine (the requirement is discharged inside it).
+(include <stdio.h>)
+(defn void emit ((:* :const char m))
+  (slot* *out*)
+  (fprintf *out* "%s\n" m))
+(defn void show ()
+  (with *out* stdout (emit "self-provided")))
+(defn int main ()
+  (show)
+  (return 0))
+;==EXPECTED==
+#include <stdio.h>
+
+_Thread_local __typeof__(stdout) _u002A_out_u002A_;
+
+void emit(const char *m)
+{
+  ;
+  fprintf(_u002A_out_u002A_, "%s\n", m);
+}
+
+#ifndef SX_WITH_GUARD_
+
+#define SX_WITH_GUARD_
+
+typedef struct __sx_with_guard {
+  void *slot;
+  const void *saved;
+  unsigned long size;
+} __sx_with_guard;
+
+static inline void __sx_with_restore(const __sx_with_guard *g)
+{
+  unsigned char *__d=(unsigned char*)g->slot;const unsigned char *__s=(const unsigned char*)g->saved;for(unsigned long __i=0;__i<g->size;__i++)__d[__i]=__s[__i];;
+}
+
+#endif
+
+void show(void)
+{
+  {
+    __auto_type sx_with_saved_0 = _u002A_out_u002A_;
+    __sx_with_guard sx_with_guard_1 __attribute__((cleanup(__sx_with_restore))) = { &(_u002A_out_u002A_), &sx_with_saved_0, sizeof(_u002A_out_u002A_) };
+    _u002A_out_u002A_ = stdout;
+    emit("self-provided");
+  }
+}
+
+int main(void)
+{
+  show();
+  return 0;
+}

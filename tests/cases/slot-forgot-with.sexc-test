@@ -1,0 +1,12 @@
+; A pointer slot bound by `with` somewhere is a known slot; a bare call on a path
+; that does not bind it is a compile-time error (it would be NULL at runtime).
+(include <stdio.h>)
+(defn void emit ((:* :const char m)) (fprintf *out* "%s\n" m))
+(defn int main ()
+  (with *out* stdout (emit "ok"))
+  (emit "forgot the with")
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:7:4: error[analysis]: emit requires the dynamic slot *out*, which is unbound here — provide it before the call with (with *out* <value> ...)
+  (emit "forgot the with")
+   ^

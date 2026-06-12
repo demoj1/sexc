@@ -327,12 +327,13 @@ binding states it explicitly (needed for self-referential or
 local-typed values):
 
 ```lisp
-(defn void say (((%ptr (%const char)) m))   ; reads *out* — never passed in
+(defn void say ((:* :const char m))   ; reads *out* — never passed in
+  (slot* *out*)                       ; declares: this function needs the *out* slot
   (fprintf *out* "%s\n" m))
 
 (defn int main ()
-  (with *out* stdout                ; type inferred via __typeof__: FILE*
-    (say "hello"))                  ; *out* reverts after the block
+  (with *out* stdout                  ; type inferred via __typeof__: FILE*
+    (say "hello"))                    ; *out* reverts after the block
   (return 0))
 ```
 ```c
@@ -340,12 +341,20 @@ _Thread_local __typeof__(stdout) *out*;   /* hoisted to the file head */
 /* ... with body saves/sets/restores *out* around (say ...) ... */
 ```
 
+This is dependency injection in plain C — `say` asks for an `*out*` sink, the
+caller supplies one. Forget the `with` and `*out*` would be `NULL` at runtime;
+instead a **whole-program pass catches it at compile time**: a call that reaches
+a function needing a slot without binding it is an error, pointing at the call
+(`say requires the dynamic slot *out* …`). `slot*` declares the dependency
+explicitly; scalar slots (e.g. an `int` depth that safely defaults to `0`) are
+exempt — only pointer slots that could NULL-deref are checked.
+
 `defer1` / `defer*` run a one-argument cleanup at block exit, in LIFO
 order, on any exit path — both compile to `__attribute__((cleanup))`
 (GCC/Clang):
 
 ```lisp
-(decl ((%ptr char) buf) (cast (%ptr char) (malloc 64)))
+(decl ((:* char) buf) (malloc 64))
 (defer1 free buf)                   ; free(buf) when the block exits
 (defer* (free a) (fclose f))        ; or a batch, run b…a in reverse
 ```
@@ -849,12 +858,13 @@ char *os(void) { return "unknown"; }
 self-referential или локально-типизированных значений):
 
 ```lisp
-(defn void say (((%ptr (%const char)) m))   ; читает *out* — не передаётся параметром
+(defn void say ((:* :const char m))   ; читает *out* — не передаётся параметром
+  (slot* *out*)                       ; объявляет: функции нужен слот *out*
   (fprintf *out* "%s\n" m))
 
 (defn int main ()
-  (with *out* stdout                ; тип выведен через __typeof__: FILE*
-    (say "hello"))                  ; *out* откатывается после блока
+  (with *out* stdout                  ; тип выведен через __typeof__: FILE*
+    (say "hello"))                    ; *out* откатывается после блока
   (return 0))
 ```
 ```c
@@ -862,12 +872,20 @@ _Thread_local __typeof__(stdout) *out*;   /* поднято в начало фа
 /* ... тело with сохраняет/ставит/восстанавливает *out* вокруг (say ...) ... */
 ```
 
+Это dependency injection на голом C — `say` просит слот `*out*`, вызывающий его
+даёт. Забудешь `with` — `*out*` был бы `NULL` в рантайме; вместо этого
+**whole-program проход ловит это в compile-time**: вызов, доходящий до функции,
+которой нужен слот, без связывания — ошибка на строке вызова (`say requires the
+dynamic slot *out* …`). `slot*` объявляет зависимость явно; скалярные слоты
+(напр. `int`-глубина с безопасным дефолтом `0`) исключены — проверяются только
+указательные, где возможен NULL-дереф.
+
 `defer1` / `defer*` выполняют cleanup одного аргумента на выходе из
 блока, в порядке LIFO, на любом пути выхода — оба компилятся в
 `__attribute__((cleanup))` (GCC/Clang):
 
 ```lisp
-(decl ((%ptr char) buf) (cast (%ptr char) (malloc 64)))
+(decl ((:* char) buf) (malloc 64))
 (defer1 free buf)                   ; free(buf) при выходе из блока
 (defer* (free a) (fclose f))        ; или пачкой, b…a в обратном порядке
 ```

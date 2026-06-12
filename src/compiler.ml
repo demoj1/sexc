@@ -585,6 +585,19 @@ let dedup_file_head forms =
       | Some n -> if Hash_set.mem seen n then false else (Hash_set.add seen n; true)
       | None -> true)
 
+(* [(%dyn-scope *v* INNER)] is an analysis-only marker emitted by [with] to mark
+   the region where a dynamic variable is bound (see [Analysis]). It is fully
+   transparent to codegen — strip it (keeping INNER) right before parsing, after
+   the whole-program analysis has read it. *)
+let rec strip_dyn_scope raw =
+  match raw with
+  (* (%dyn-scope VAR TY INNER) → INNER *)
+  | Raw.List ((Raw.Atom ("%dyn-scope", _) :: _ :: _ :: [ inner ]), _) -> strip_dyn_scope inner
+  (* (%dyn-require …) — analysis-only requirement declaration → nothing emitted *)
+  | Raw.List ((Raw.Atom ("%dyn-require", _) :: _), _) -> Raw.List ([ Raw.Atom ("%nop", None) ], None)
+  | Raw.List (xs, sp) -> Raw.List (List.map xs ~f:strip_dyn_scope, sp)
+  | other -> other
+
 let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   (* Core compile pipeline (in order):
      1) normalize %module names
@@ -624,6 +637,10 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   (* Declarations destined for the file head (dynamic variables from `with`),
      accumulated across all forms and injected before the first function. *)
   let file_head = ref [] in
+  (* Вся раскрытая программа в одном месте (после expand+qualify+hoist, ДО
+     codegen) — фундамент для whole-program анализов ([Analysis]). Копим тут
+     flattened-формы каждой top-формы (с маркерами %dyn-scope, до их стрипа). *)
+  let program_forms = ref [] in
   let emit_one (top : top_form) : string =
     let run () =
       (* Модуль текущей формы → макросы квалифицируют свою метадату через
@@ -644,7 +661,10 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
           let hoisted, cleaned = hoist_splices ~file_head raw in
           hoisted @ Option.to_list cleaned)
       in
-      let parsed = List.map flattened_raws ~f:Frontend.parse_top in
+      (* Тап для whole-program анализа (формы с маркерами %dyn-scope). *)
+      program_forms := List.rev_append flattened_raws !program_forms;
+      (* Маркеры %dyn-scope — только для анализа; для codegen прозрачны. *)
+      let parsed = List.map flattened_raws ~f:(fun r -> Frontend.parse_top (strip_dyn_scope r)) in
       let body = List.map parsed ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n" in
       (* Top-level #line — покрывает строку сигнатуры функции / определения
          struct (сами стейтменты тела получают свои #line через SAt). *)
@@ -678,6 +698,9 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   in
   let t = now_ns () in
   let chunks = List.map non_macro_tops ~f:emit_safe in
+  (* Whole-program анализ по всей раскрытой программе; диагностики копим в общий
+     errors (вместе с per-form ошибками — пользователь видит всё за прогон). *)
+  errors := List.rev_append (Analysis.check_program (List.rev !program_forms)) !errors;
   (match List.rev !errors with
    | [] -> ()
    | items -> raise (Common.Sexc_errors items));

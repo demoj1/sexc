@@ -1,0 +1,11 @@
+; A known slot read directly (not via a call) on an unbound path is caught too,
+; with the plain "is unbound here" wording.
+(include <stdio.h>)
+(defn int main ()
+  (with *out* stdout (fprintf *out* "ok\n"))
+  (fprintf *out* "oops, no with around this one\n")
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:6:12: error[analysis]: dynamic slot *out* is unbound here (NULL at runtime) — bind it with (with *out* <value> ...) or assign it first
+  (fprintf *out* "oops, no with around this one\n")
+           ^

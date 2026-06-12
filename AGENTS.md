@@ -21,6 +21,7 @@
 - `src/macro.ml` — `%defmacro`, `%eval/%evals`, compile-time `$...` builtins.
 - `src/frontend.ml` — парсинг expanded Raw в AST (типы/stmt/expr/top-level).
 - `src/codegen_c.ml` — генерация C из AST + mangling идентификаторов.
+- `src/analysis.ml` — whole-program анализ по раскрытому `%`-IR (generic fixpoint по графу вызовов; первый клиент — unbound dynamic slots). Запускается из `compile_forms` до codegen.
 - `src/cache/cache.ml` — пассивный disk-cache индекса символов (md5 по файлам + сериализация).
 - `src/cache/index.ml` — индекс символов/документации/локаций из парсера (для `show-doc`, `complete`, `xref`).
 - `src/docs.ml` — `%doc` metadata, `show-doc`, `dump-docs`, `dump-stdlib-docs`, markdown генерация.
@@ -267,7 +268,12 @@ Example: (incf-by total 4)
   через `%file-head-splice` (видна всем читателям, в т.ч. callee выше по файлу; дедуп
   по имени). `binding` задаёт тип: атом `var` → инференс через `(%typeof value)`;
   список `(Type var)` → явный тип (нужен для self-ref/локальных значений, напр.
-  `(with (int *depth*) (+ *depth* 1) ...)`). `(defer1 fn arg)`
+  `(with (int *depth*) (+ *depth* 1) ...)`). `with` также оборачивает тело в
+  analysis-маркер `(%dyn-scope var ty …)` (прозрачен для codegen, стрип в
+  `compiler.ml`) — по нему whole-program проход знает, где слот связан (см.
+  «Whole-program анализ»). `(slot* *a* *b*)` в начале функции объявляет, какие
+  слоты она ТРЕБУЕТ от вызывающего (маркер `%dyn-require`, рантайм-ноль).
+  `(defer1 fn arg)`
   зовёт `fn(arg)` на выходе (LIFO), `fn` — одного указательного аргумента;
   `(defer* (fn arg)...)` — пачка `defer1` (общий `$sx-defer-decl` строит guard на
   каждый клауз). Общий top-level хелпер (guard-struct + restore/run fn) всплывает
@@ -402,6 +408,32 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   `int`/чужие типы не трогать). Оба читают `ctx.current_module`/
   `ctx.current_name_map`, выставляемые per-form в `compile_forms`.
 
+## Whole-program анализ (`src/analysis.ml`)
+
+Фаза анализа по ВСЕЙ раскрытой программе (после expand+qualify+hoist, ДО codegen).
+`compile_forms` копит flattened-формы всех top-форм в `program_forms`, прогоняет
+`Analysis.check_program` и подмешивает диагностики в общий multi-error.
+
+**Generic-движок** (переиспользуемый): `propagate_over_calls` — fixpoint по графу
+вызовов; каждая функция несёт set-факт, факты текут по рёбрам-вызовам, гасятся где
+вызывающий «покрывает». Под любой «факт, текущий по вызовам» (purity, may-longjmp…)
+— меняется только per-function step.
+
+**Первый клиент — unbound dynamic slots.** Динамический слот — НЕ по имени (имена
+любые), а по факту связывания: переменная в маркере `with` (`%dyn-scope`) или
+объявленная `slot*` (`%dyn-require`). Правила:
+- `with *v* val …` → `%dyn-scope v ty …`: внутри региона `v` связан (биндинг).
+- `(slot* *a* *b*)` → `%dyn-require *a* *b*`: функция ТРЕБУЕТ эти слоты (явно).
+- голое чтение слота, связанного `with` где-то, — неявное требование; **скаляры
+  исключены** (тип из `%dyn-scope`: дефолт 0 ≠ NULL-краш), `slot*` — без исключения.
+- `(%set *v* …)` в блоке — связывание `v` до конца блока (заполнить слот руками ок).
+- требования текут вверх по вызовам; если доходят до `main` непогашенными → ошибка
+  на строке вызова с именем функции («X requires the dynamic slot *v* …»). Нет
+  `main` (библиотека) → требования — забота внешнего вызывающего, не репортим.
+
+Оба маркера прозрачны для codegen — `strip_dyn_scope` в `compiler.ml` снимает
+`%dyn-scope` (→ тело) и `%dyn-require` (→ `%nop`) перед парсингом. Zero C-change.
+
 ## Именование уровней (строго)
 
 - `%...` — системные/IR формы компилятора.
@@ -420,7 +452,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `defer1`, `defer*`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defer1`, `defer*`
   - **Конвенция**: имя любого surface-предиката заканчивается на `?`
     (`nil?`/`not-nil?`/`zero?`/`ltz?`/`letz?`/`gtz?`/`getz?`). `do` — плоская
     последовательность стейтментов без скоупа (через `%evals`-сплайс), в отличие

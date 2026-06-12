@@ -1,0 +1,13 @@
+; `slot*` declares a required slot explicitly; with no provider anywhere the call
+; is flagged (this case otherwise only fails later, at the C compiler).
+(include <stdio.h>)
+(defn void emit ((:* :const char m))
+  (slot* *out*)
+  (fprintf *out* "%s\n" m))
+(defn int main ()
+  (emit "hi")
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:8:4: error[analysis]: emit requires the dynamic slot *out*, which is unbound here — provide it before the call with (with *out* <value> ...)
+  (emit "hi")
+   ^

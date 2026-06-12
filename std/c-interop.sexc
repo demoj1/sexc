@@ -1035,13 +1035,29 @@
          (saved ($gensym "sx_with_saved_"))
          (guard ($gensym "sx_with_guard_")))
     ($assert ($atom? var) "with: variable name must be an atom")
-    `(%block
-       (%file-head-splice (%decl (:thread_local ,ty) ,var))
-       ,@($sx-with-runtime)
-       (%decl __auto_type ,saved ,var)
-       (%raw "__sx_with_guard " ,guard " __attribute__((cleanup(__sx_with_restore))) = { &(" ,var "), &" ,saved ", sizeof(" ,var ") }")
-       (set ,var ,value)
-       ,@body)))
+    ; %dyn-scope — маркер для whole-program анализа (src/analysis.ml): внутри
+    ; него ,var связан; ,ty нужен, чтобы скалярные слоты (дефолт 0, не краш)
+    ; исключать из must-bind проверки. Для codegen прозрачен (стрип в compiler.ml).
+    `(%dyn-scope ,var ,ty
+       (%block
+         (%file-head-splice (%decl (:thread_local ,ty) ,var))
+         ,@($sx-with-runtime)
+         (%decl __auto_type ,saved ,var)
+         (%raw "__sx_with_guard " ,guard " __attribute__((cleanup(__sx_with_restore))) = { &(" ,var "), &" ,saved ", sizeof(" ,var ") }")
+         (set ,var ,value)
+         ,@body))))
+
+; slot* — declare the dynamic slots a function REQUIRES from its caller. Put it
+; at the top of the body: (slot* *out* *arena*). It binds nothing and costs
+; nothing at runtime — it is an analysis marker (%dyn-require, see src/analysis.ml
+; / stripped in compiler.ml): if a caller reaches this function without binding a
+; declared slot (via `with`), the compiler reports it at the call site.
+(%doc slot*
+  :sig (slot* *a* *b* ...)
+  :doc "Declare the dynamic slots this function requires from its caller (place at the top of the body). Analysis-only, zero runtime cost: a call that does not bind a required slot via `with` is a compile-time error at the call site."
+  :example "(defn void log-line ((:* :const char m)) (slot* *out*) (fprintf *out* \"%s\\n\" m))")
+(%defmacro slot* (&rest slots)
+  `(%dyn-require ,@slots))
 
 ; Build one guard declaration form (a %raw statement) for FN(ARG) at scope exit.
 ; Shared by defer1 and defer*; each call gensyms its own guard variable.
