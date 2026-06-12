@@ -151,6 +151,15 @@
 (%defmacro block (&rest body)
   `(%block ,@body))
 
+; do — splice forms into the current statement list, WITHOUT a `{}` scope
+; (unlike `block`). Use to group statements without introducing a parasitic
+; block. Implemented as an %evals splice into the surrounding context.
+(%doc do
+  :doc "Sequence statements inline, with NO new scope (no braces) — splices BODY into the enclosing block. Use `block` when you do want a `{}` scope."
+  :example "(do (set x 1) (foo x))")
+(%defmacro do (&rest body)
+  `(%evals (quote ,body)))
+
 ; if
 ; (if cond then) or (if cond then else)
 ; => (%if cond (%block then))
@@ -166,12 +175,96 @@
       `(%if ,cond (%block ,then))
       `(%if ,cond (%block ,then) (%block ,($car else-body))))))
 
-; if-nil — `if` whose test is "VALUE is the null pointer (nil)".
+; ─── Predicates (convention: every predicate name ends with `?`) ─────────────
+; Thin wrappers over the surface comparison operators; `nil` is ((void*)0).
+(%doc nil?
+  :doc "True when X is the null pointer: (nil? x) => (= x nil) => x == ((void*)0)."
+  :example "(when (nil? p) (return -1))")
+(%defmacro nil? (x) `(= ,x nil))
+
+(%doc not-nil?
+  :doc "True when X is not the null pointer: (not-nil? x) => (not= x nil)."
+  :example "(when (not-nil? p) (use p))")
+(%defmacro not-nil? (x) `(not= ,x nil))
+
+(%doc zero?
+  :doc "True when X equals 0: (zero? x) => (= x 0)."
+  :example "(if (zero? n) (return 1) (rec n))")
+(%defmacro zero? (x) `(= ,x 0))
+
+(%doc ltz?
+  :doc "True when X < 0 (less than zero)."
+  :example "(when (ltz? n) (error))")
+(%defmacro ltz? (x) `(< ,x 0))
+
+(%doc letz?
+  :doc "True when X <= 0 (less than or equal to zero)."
+  :example "(when (letz? n) (return 0))")
+(%defmacro letz? (x) `(<= ,x 0))
+
+(%doc gtz?
+  :doc "True when X > 0 (greater than zero)."
+  :example "(when (gtz? n) (work))")
+(%defmacro gtz? (x) `(> ,x 0))
+
+(%doc getz?
+  :doc "True when X >= 0 (greater than or equal to zero)."
+  :example "(when (getz? n) (ok))")
+(%defmacro getz? (x) `(>= ,x 0))
+
+(%doc pos?
+  :doc "True when X > 0 (positive). Readable alias of gtz?."
+  :example "(when (pos? n) (work))")
+(%defmacro pos? (x) `(gtz? ,x))
+
+(%doc neg?
+  :doc "True when X < 0 (negative). Readable alias of ltz?."
+  :example "(when (neg? n) (error))")
+(%defmacro neg? (x) `(ltz? ,x))
+
+(%doc nonzero?
+  :doc "True when X != 0 (truthy). Opposite of zero?."
+  :example "(when (nonzero? n) (use n))")
+(%defmacro nonzero? (x) `(not= ,x 0))
+
+(%doc even?
+  :doc "True when X is even: (even? x) => (= (% x 2) 0)."
+  :example "(if (even? n) (a) (b))")
+(%defmacro even? (x) `(= (% ,x 2) 0))
+
+(%doc odd?
+  :doc "True when X is odd: (odd? x) => (not= (% x 2) 0)."
+  :example "(when (odd? n) (a))")
+(%defmacro odd? (x) `(not= (% ,x 2) 0))
+
+(%doc bit-set?
+  :doc "True when any bit of MASK is set in X: (bit-set? x mask) => ((x & mask) != 0)."
+  :example "(when (bit-set? flags FLAG_A) (a))")
+(%defmacro bit-set? (x mask) `(not= (%& ,x ,mask) 0))
+
+(%doc between?
+  :doc "True when LO <= X <= HI (inclusive): (between? x lo hi) => (and (<= lo x) (<= x hi))."
+  :example "(when (between? c 'a' 'z') (lower))")
+(%defmacro between? (x lo hi) `(and (<= ,lo ,x) (<= ,x ,hi)))
+
+; if-nil / when-nil / unless-nil — conditionals keyed on a null pointer.
 (%doc if-nil
-  :doc "Like `if`, but tests whether VALUE is the null pointer: (if-nil x then [else]) => (if (= x nil) then else). 2 or 3 forms."
+  :doc "Like `if`, but tests whether VALUE is the null pointer: (if-nil x then [else]) => (if (nil? x) then else). 2 or 3 forms."
   :example "(if-nil p (return -1) (use p))")
 (%defmacro if-nil (value then &rest else-body)
-  `(if (= ,value nil) ,then ,@else-body))
+  `(if (nil? ,value) ,then ,@else-body))
+
+(%doc when-nil
+  :doc "Run BODY when VALUE is the null pointer: (when-nil x body...) => (when (nil? x) body...)."
+  :example "(when-nil p (return -1))")
+(%defmacro when-nil (value &rest body)
+  `(when (nil? ,value) ,@body))
+
+(%doc unless-nil
+  :doc "Run BODY when VALUE is NOT the null pointer: (unless-nil x body...) => (unless (nil? x) body...)."
+  :example "(unless-nil p (use p))")
+(%defmacro unless-nil (value &rest body)
+  `(unless (nil? ,value) ,@body))
 
 ; cond
 ; (cond

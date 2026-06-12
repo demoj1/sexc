@@ -1,0 +1,18 @@
+; `do` splices statements with NO scope; `block` wraps them in `{}`.
+(defn void demo ((int x))
+  (do
+    (set x 1)
+    (set x (%+ x 1)))
+  (block
+    (set x 3)
+    (set x (%+ x 1))))
+;==EXPECTED==
+void demo(int x)
+{
+  x = 1;
+  x = x + 1;
+  {
+    x = 3;
+    x = x + 1;
+  }
+}

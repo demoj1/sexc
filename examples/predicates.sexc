@@ -1,0 +1,33 @@
+; predicates.sexc — every predicate (name ends with `?`), exercised with both a
+; true and a false input so the runtime values are verified end-to-end.
+
+(include <stdio.h>)
+
+(defn int main ()
+  (decl (int x) 42)
+  (decl ((%ptr int) p) (%addr x)
+        ((%ptr int) np) nil)
+
+  ; pointer / zero / sign
+  (printf "nil?      %d %d\n"    (nil? np)     (nil? p))                 ; 1 0
+  (printf "not-nil?  %d %d\n"    (not-nil? np) (not-nil? p))            ; 0 1
+  (printf "zero?     %d %d\n"    (zero? 0)     (zero? 5))               ; 1 0
+  (printf "nonzero?  %d %d\n"    (nonzero? 5)  (nonzero? 0))            ; 1 0
+  (printf "ltz?      %d %d %d\n" (ltz? -1)  (ltz? 0)  (ltz? 1))          ; 1 0 0
+  (printf "letz?     %d %d %d\n" (letz? -1) (letz? 0) (letz? 1))         ; 1 1 0
+  (printf "gtz?      %d %d %d\n" (gtz? -1)  (gtz? 0)  (gtz? 1))          ; 0 0 1
+  (printf "getz?     %d %d %d\n" (getz? -1) (getz? 0) (getz? 1))         ; 0 1 1
+  (printf "pos?      %d %d %d\n" (pos? -1)  (pos? 0)  (pos? 1))          ; 0 0 1
+  (printf "neg?      %d %d %d\n" (neg? -1)  (neg? 0)  (neg? 1))          ; 1 0 0
+
+  ; parity / bits / range
+  (printf "even?     %d %d\n"    (even? 4)     (even? 5))               ; 1 0
+  (printf "odd?      %d %d\n"    (odd? 4)      (odd? 5))                ; 0 1
+  (printf "bit-set?  %d %d %d\n" (bit-set? 5 1) (bit-set? 5 2) (bit-set? 5 4)) ; 1 0 1
+  (printf "between?  %d %d %d\n" (between? 5 0 10) (between? 0 0 10) (between? 15 0 10)) ; 1 1 0
+
+  ; nil-keyed conditionals
+  (when-nil np (printf "when-nil fired\n"))
+  (unless-nil p (printf "unless-nil fired\n"))
+  (if-nil np (printf "if-nil: null\n") (printf "if-nil: not null\n"))
+  (return 0))

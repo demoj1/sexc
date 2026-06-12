@@ -1,0 +1,29 @@
+; Predicate helpers (all end with `?`) + nil-keyed conditionals.
+(defn int demo ((int n) ((%ptr int) p))
+  (when-nil p (return 1))
+  (unless-nil p (set (%deref p) n))
+  (if-nil p (return 2) (nop))
+  (return (%+ (nil? p) (not-nil? p) (zero? n) (nonzero? n)
+              (ltz? n) (letz? n) (gtz? n) (getz? n) (pos? n) (neg? n)
+              (even? n) (odd? n) (bit-set? n 4) (between? n 0 9))))
+;==EXPECTED==
+int demo(int n, int *p)
+{
+  if (p == ((void*)0))
+    {
+      return 1;
+    }
+  if (!(p == ((void*)0)))
+    {
+      *p = n;
+    }
+  if (p == ((void*)0))
+    {
+      return 2;
+    }
+  else
+    {
+      ;
+    }
+  return (p == ((void*)0)) + (p != ((void*)0)) + (n == 0) + (n != 0) + (n < 0) + (n <= 0) + (n > 0) + (n >= 0) + (n > 0) + (n < 0) + (n % 2 == 0) + (n % 2 != 0) + ((n & 4) != 0) + (0 <= n && n <= 9);
+}

@@ -1,0 +1,17 @@
+nil?      1 0
+not-nil?  0 1
+zero?     1 0
+nonzero?  1 0
+ltz?      1 0 0
+letz?     1 1 0
+gtz?      0 0 1
+getz?     0 1 1
+pos?      0 0 1
+neg?      1 0 0
+even?     1 0
+odd?      0 1
+bit-set?  1 0 1
+between?  1 1 0
+when-nil fired
+unless-nil fired
+if-nil: null

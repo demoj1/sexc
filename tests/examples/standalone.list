@@ -15,3 +15,4 @@ examples/with-scope.sexc
 examples/with-infer.sexc
 examples/with-alloca.sexc
 examples/complex-project/main.sexc
+examples/predicates.sexc
