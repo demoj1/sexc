@@ -25,7 +25,7 @@
     (set (-> b cap)   c
          (-> b head)  0
          (-> b count) 0
-         (-> b data)  (cast (:* float) (calloc c (sizeof float)))))
+         (-> b data)  (calloc c (sizeof float))))
 
   (defn void push ((:* Buffer b) (float v))
     (decl (int slot) (-> b head))

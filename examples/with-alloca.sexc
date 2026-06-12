@@ -16,7 +16,7 @@
   (int used))
 
 (defn Arena arena-make ((int cap))
-  (decl (Arena a) (Arena# :base (cast (:* char) (malloc cap)) :cap cap :used 0))
+  (decl (Arena a) (Arena# :base (malloc cap) :cap cap :used 0))
   (return a))
 
 ; bump-allocate N bytes from the arena, returning a raw pointer
@@ -24,7 +24,7 @@
   (decl (:* char p) (+ (-> a base) (-> a used)))
   (set (-> a used) (+ (-> a used) n))
 
-  (return (cast (:* void) p)))
+  (return p))
 
 (defn void arena-free ((:* Arena a))
   (free (-> a base)))
@@ -33,8 +33,7 @@
 (defn void work ()
   (decl
     (:* int xs)
-    (cast (:* int)
-          (arena-alloc *arena* (* 4 (sizeof int)))))
+    (arena-alloc *arena* (* 4 (sizeof int))))
 
   (dotimes i 4
     (set (aref xs i) (* i i)))

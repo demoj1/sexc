@@ -34,7 +34,7 @@
   (cast void output)
 
   (when (and (not-nil? input) (pos? frames))
-    (decl (:* :const float samples) (cast (:* :const float) input)
+    (decl (:* :const float samples) input
           (float            sum)     0.0f)
     (dotimes i frames
       (decl (float s) (aref samples i))
