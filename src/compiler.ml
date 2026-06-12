@@ -273,6 +273,7 @@ let collect_module_defined_names forms =
       | Raw.List ((Raw.Atom ("struct", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
       | Raw.List ((Raw.Atom ("union", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
       | Raw.List ((Raw.Atom ("enum", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("defsum", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
       | Raw.List ((Raw.Atom ("%typedef", _) :: ty :: Raw.Atom (name, _) :: []), _) ->
           let acc = add_name acc name in
           Option.value_map (from_typedef_type ty) ~default:acc ~f:(fun n -> add_name acc n)

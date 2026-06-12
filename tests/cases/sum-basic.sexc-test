@@ -1,0 +1,61 @@
+; defsum: tagged union → tag enum + per-variant payload struct + struct{tag;union}
+; + predicates VName? ; match → switch with positional field binding and a
+; diverging default (exhaustive, so __builtin_unreachable silences -Wreturn-type).
+(defsum Shape
+  (Circle (float r))
+  (Rect   (float w) (float h)))
+
+(defn float area ((Shape s))
+  (match s
+    (Circle (r)   (return (* 3.14159f r r)))
+    (Rect   (w h) (return (* w h)))))
+;==EXPECTED==
+typedef enum Shape_u002F_tag { Shape_u002F_Circle, Shape_u002F_Rect } Shape_u002F_tag;
+
+typedef struct Shape_u002F_Circle_u002F_p {
+  float r;
+} Shape_u002F_Circle_u002F_p;
+
+typedef struct Shape_u002F_Rect_u002F_p {
+  float w;
+  float h;
+} Shape_u002F_Rect_u002F_p;
+
+typedef struct Shape {
+  Shape_u002F_tag tag;
+  union Shape_u002F_u {
+  Shape_u002F_Circle_u002F_p Circle;
+  Shape_u002F_Rect_u002F_p Rect;
+} u;
+} Shape;
+
+int Shape_u002F_Circle_u003F_(Shape s)
+{
+  return s.tag == Shape_u002F_Circle;
+}
+
+int Shape_u002F_Rect_u003F_(Shape s)
+{
+  return s.tag == Shape_u002F_Rect;
+}
+
+float area(Shape s)
+{
+  switch (s.tag) {
+    case Shape_u002F_Circle:
+      {
+        float r = s.u.Circle.r;
+        return 3.14159f * r * r;
+        break;
+      }
+    case Shape_u002F_Rect:
+      {
+        float w = s.u.Rect.w;
+        float h = s.u.Rect.h;
+        return w * h;
+        break;
+      }
+    default:
+      __builtin_unreachable();
+  }
+}

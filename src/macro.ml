@@ -103,6 +103,15 @@ let is_self_evaluating_atom a =
   || Option.is_some (Int.of_string_opt a)
   || Option.is_some (Float.of_string_opt a)
 
+(* Квалификация имени текущим модулем: "Buffer" → "ring/Buffer". Идемпотентна
+   (уже-"ring/…" не трогает), пропускает %/$-имена, вне модуля — no-op. Общая
+   для builtin [$qualify] и для sum-конструкторного диспатча в [expand_one]. *)
+let qualify_in_module module_opt s =
+  match module_opt with
+  | None -> s
+  | Some _ when String.is_prefix s ~prefix:"%" || String.is_prefix s ~prefix:"$" -> s
+  | Some m -> if String.is_prefix s ~prefix:(m ^ "/") then s else m ^ "/" ^ s
+
 (* Обёртка: запоминает span текущей вычисляемой формы в Common.current_eval_span,
    чтобы bare Sexc_error из любого места eval_expr_inner promote'ился до точной
    локации подформы (а не до top-level формы). На исключении ref остаётся
@@ -192,13 +201,7 @@ and eval_expr_inner ctx env expr =
          Вне модуля — no-op. Используется макросами для ключей метадаты;
          IR квалифицирует отдельный проход в compiler.ml. *)
       let s = expect_atom_or_string (eval_expr ctx env x) in
-      (match ctx.current_module with
-       | None -> Raw.Atom (s, None)
-       | Some _ when String.is_prefix s ~prefix:"%" || String.is_prefix s ~prefix:"$" ->
-           Raw.Atom (s, None)
-       | Some m ->
-           if String.is_prefix s ~prefix:(m ^ "/") then Raw.Atom (s, None)
-           else Raw.Atom (m ^ "/" ^ s, None))
+      Raw.Atom (qualify_in_module ctx.current_module s, None)
   | Raw.List ((Raw.Atom ("$qualify", _) :: _), _) ->
       fail "$qualify expects exactly one argument"
   | Raw.List ((Raw.Atom ("$qualify-type", _) :: [ x ]), _) ->
@@ -705,15 +708,30 @@ and expand_one ctx ~depth raw =
       fail "%m-dump takes no arguments"
   | Raw.List ((Raw.Atom (head, _) :: args), list_sp)
     when String.length head > 1 && String.is_suffix head ~suffix:"#" ->
-      (* Type# constructor sugar: (Foo# args...) → (cast Foo (init args...)).
-         Namespace-rewrite has already qualified the head (ring/Buffer#), so the
-         dropped-# base carries the right name. cast+init are surface macros. *)
-      let ty = String.drop_suffix head 1 in
+      (* `#` — конвенция конструктора. Два режима, разводятся по compile-time
+         метадате базы (имени без #):
+         - sum-вариант (есть :sum-of) → делегируем sexc-макросу `sum-construct`,
+           который читает :sum-of/:member и собирает тегированный литерал;
+         - иначе generic Type#: (Foo# args...) → (cast Foo (init args...)).
+         База квалифицируется текущим модулем (как defsum писал ключи метадаты);
+         %-IR проход доквалифицирует bare-имена в выхлопе. *)
+      let base = String.drop_suffix head 1 in
+      let qbase = qualify_in_module ctx.current_module base in
+      let is_sum key =
+        match Map.find ctx.sym_meta key with
+        | Some m -> Map.mem m ":sum-of"
+        | None -> false
+      in
       let out =
-        Raw.List
-          ([ Raw.Atom ("cast", None);
-             Raw.Atom (ty, None);
-             Raw.List (Raw.Atom ("init", None) :: args, None) ], list_sp)
+        if is_sum qbase then
+          Raw.List (Raw.Atom ("sum-construct", None) :: Raw.Atom (qbase, None) :: args, list_sp)
+        else if is_sum base then
+          Raw.List (Raw.Atom ("sum-construct", None) :: Raw.Atom (base, None) :: args, list_sp)
+        else
+          Raw.List
+            ([ Raw.Atom ("cast", None);
+               Raw.Atom (base, None);
+               Raw.List (Raw.Atom ("init", None) :: args, None) ], list_sp)
       in
       expand_one ctx ~depth:(depth + 1) out
   | Raw.List ((Raw.Atom (head, head_sp) :: args), list_sp) -> (

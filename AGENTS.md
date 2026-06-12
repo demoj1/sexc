@@ -441,12 +441,13 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Секции `:fields` обязательна, `:methods` опциональна; старый mixed-формат `struct` удален.
   - Внутри `struct` можно объявлять методы через `defn`; они автогенерируются как `Name/method`.
   - `(union Name (type field) ...)` -> `typedef union ... Name;`
-- `Type#` — типизированный compound-literal-конструктор. В макрофазе
-  (`macro.ml` `expand_one`, суффикс `#`) разворачивается в
-  `(cast Type (init args…))`; всю работу по построению `{…}` делает `init`.
-  Namespace-rewrite уже квалифицирует `Buffer#` → `ring/Buffer#` ДО раскрытия
-  (`compiler.ml:146`). Раньше Type# был frontend-формой (`parse_type_hash_init`
-  + `ECompoundLiteral`) — удалено.
+- `Type#` — типизированный compound-literal-конструктор (конвенция: `#` = «это
+  конструктор», как `new`). В макрофазе (`macro.ml` `expand_one`, суффикс `#`)
+  разворачивается в `(cast Type (init args…))`; всю работу по построению `{…}`
+  делает `init`. База квалифицируется текущим модулем; bare-имена в выхлопе
+  доквалифицирует `%`-IR проход. ИСКЛЮЧЕНИЕ: если база — sum-вариант (есть мета
+  `:sum-of`), `#` делегирует `sum-construct` (см. defsum ниже). Раньше Type# был
+  frontend-формой (`parse_type_hash_init` + `ECompoundLiteral`) — удалено.
   - `(Roots# :x1 5 :x2 7)` -> `(Roots){.x1 = 5, .x2 = 7}` (designated, keyword)
   - `(Pt# 5 6)` -> `(Pt){5, 6}` (positional)
   - `(Pt#)` -> `(Pt){0}` (zero)
@@ -473,6 +474,46 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   через `emit_expr (parse_expr raw)`. Для этого `emit_type_base`↔`emit_expr` в
   codegen объединены в одну рекурсивную группу (типы↔выражения взаимно-рекурсивны:
   cast/sizeof/enum-значение).
+
+## defsum / match: tagged unions (`std/sum.sexc`)
+
+Алгебраические типы (Rust/OCaml-вариант) — **чистый макрос**, ядро не трогали
+(кроме `#`-диспатча и `defsum` в `collect_module_defined_names`).
+
+```
+(defsum Shape
+  (Circle (float r))
+  (Rect   (float w) (float h))
+  (Unit))                          ; вариант без полей
+```
+Раскрывается в (всё имена квалифицируются модулем, печём `base = ($qualify Name)`):
+- enum-тег `Name/tag` { `Name/Circle`, … } — значения тегов;
+- payload-struct на вариант с полями: `Name/Circle/p = struct {...}`;
+- сам тип `Name = struct { Name/tag tag; union { Name/Circle/p Circle; … } u; }`
+  (union опускается, если НИ у одного варианта нет полей);
+- предикаты-функции `Name/Circle?` → `s.tag == Name/Circle`;
+- метадата: на типе `:kind 'sum :variants :tag-type`; на каждом варианте
+  `Name/Variant` → `:sum-of :member :fields`.
+
+**Конструктор** — `Name/Circle# v1 v2…` (конвенция `#`). Правило `#` в `macro.ml`
+видит `:sum-of` в мете и делегирует sexc-макросу `sum-construct`, который читает
+мету и строит тегированный compound literal `(cast Name (init :tag … :u (init :Circle (init v1 v2))))`.
+
+**match** (`(match s (Variant (binders…) body…) … [...])`):
+- тип скрутини берётся из `($m-get s :c-type)` → `:variants` (s — переменная);
+- → `%switch (. s tag)` + на каждый arm `%case Name/Variant` с позиционным
+  биндингом полей через `(decl (ty bn) (. (. (. s u) member) field))` + `%break`;
+- **exhaustiveness**: непокрытые варианты → `$error` (compile-time). Хвостовой
+  `...` отключает проверку (частичный match);
+- `default`: exhaustive → `__builtin_unreachable()` (глушит `-Wreturn-type` когда
+  все ветки `return`); партиал → пустой `break` (глушит `-Wswitch`).
+
+**Namespace**: `defsum` печёт полностью-квалифицированные имена сам (enum-варианты
+`%`-IR проход НЕ квалифицирует — protection), и зарегистрирован в
+`collect_module_defined_names`, так что пользовательские ссылки на тип `Name`
+квалифицируются. **v1-ограничение**: имена генераторов (`Name/Variant#`/`?`) —
+глобальные; два модуля с одинаковым `defsum Name` дадут коллизию (документировано,
+редкий кейс). Пример — `examples/sum-types.sexc`.
 
 ## derive: in-place `print-as` / `eq-as` (`std/derive.sexc`)
 

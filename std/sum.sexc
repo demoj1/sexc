@@ -1,0 +1,157 @@
+; std/sum.sexc — tagged unions / sum types (как в Rust/OCaml) поверх Си.
+;
+;   (defsum Shape
+;     (Circle (float r))
+;     (Rect   (float w) (float h)))
+;
+; Раскрывается в:
+;   - enum-тег  Shape/tag { Shape/Circle, Shape/Rect }
+;   - payload-struct на вариант с полями: Shape/Circle/p = struct { float r; }
+;   - сам тип   Shape = struct { Shape/tag tag; union { ... } u; }
+;   - метадату  (:kind sum :variants ...) на Shape; (:sum-of/:member/:fields) на варианты
+;   - предикаты Shape/Circle?  →  s.tag == Shape/Circle
+;
+; Конструктор — Shape/Circle# 3.0 (конвенция `#`; правило в macro.ml видит
+; :sum-of в метадате и делегирует sum-construct). match — switch по тегу с
+; позиционным биндингом полей.
+;
+; Все генерируемые имена квалифицируются модулем (печём base = ($qualify Name)
+; и наследуем), т.к. %-IR namespace-проход НЕ трогает имена enum-вариантов —
+; печём их уже квалифицированными, чтобы определения и ссылки совпали.
+
+; ─── helpers ────────────────────────────────────────────────────────────────
+
+; найти fieldspec'ы варианта по простому имени в списке :variants
+($defun $sum-find (vname variants)
+  ($if ($null? variants) nil
+    ($if ($eq? ($car ($car variants)) vname)
+      ($cdr ($car variants))
+      ($sum-find vname ($cdr variants)))))
+
+; x ∈ lst ?
+($defun $sum-has? (x lst)
+  ($if ($null? lst) nil
+    ($if ($eq? ($car lst) x) t ($sum-has? x ($cdr lst)))))
+
+; список атомов → строка "A B C " (для сообщений об ошибке; $str не ест список)
+($defun $sum-names-str (lst)
+  ($if ($null? lst) ""
+    ($str ($car lst) " " ($sum-names-str ($cdr lst)))))
+
+; варианты типа, не покрытые арм-именами (для exhaustiveness)
+($defun $sum-missing (allnames covered)
+  ($if ($null? allnames) ($list)
+    ($if ($sum-has? ($car allnames) covered)
+      ($sum-missing ($cdr allnames) covered)
+      ($cons ($car allnames) ($sum-missing ($cdr allnames) covered)))))
+
+; зип (binder × (ty field)) → список (decl (ty binder) scrut.u.member.field)
+($defun $sum-binds (scrut member binders fields)
+  ($if ($null? binders) ($list)
+    ($do
+      ($assert ($not ($null? fields)) "match: more binders than fields in variant")
+      ($cons
+        `(decl (,($car ($car fields)) ,($car binders))
+               (. (. (. ,scrut u) ,member) ,($car ($cdr ($car fields)))))
+        ($sum-binds scrut member ($cdr binders) ($cdr fields))))))
+
+; ─── defsum ─────────────────────────────────────────────────────────────────
+
+(%doc defsum
+  :doc "Define a tagged union (sum type): (defsum Name (Variant (type field)...) ...). Construct with Name/Variant#, branch with match."
+  :example "(defsum Shape (Circle (float r)) (Rect (float w) (float h)))")
+(%defmacro defsum (name &rest variants)
+  ($let ((base   ($qualify name))
+         (tagty  ($symcat base "/tag"))
+         (unionty ($symcat base "/u"))
+         ; ключи тегов (enum-константы) и payload-имена
+         (vkeys  ($map ($symcat base "/" ($car it)) variants))
+         ; варианты, у которых есть поля (для union/payload-структур)
+         (withfields ($filter ($not ($null? ($cdr it))) variants))
+         (payloads ($map `(%typedef
+                            (%struct ,($symcat base "/" ($car it) "/p") ,@($cdr it))
+                            ,($symcat base "/" ($car it) "/p"))
+                         withfields))
+         (members ($map `(,($symcat base "/" ($car it) "/p") ,($car it)) withfields))
+         ; тело sum-структуры: tag + (опционально) union u
+         (sumfields ($if ($null? withfields)
+                      `((,tagty tag))
+                      `((,tagty tag) ((%union ,unionty ,@members) u))))
+         ; предикаты VName?
+         (preds ($map `(defn int ,($symcat base "/" ($car it) "?") ((,base s))
+                         (return (= (. s tag) ,($symcat base "/" ($car it)))))
+                      variants)))
+    ($do
+      ; метадата типа + вариантов
+      ($m-put base :kind 'sum :variants variants :tag-type tagty)
+      ($dolist (v variants)
+        ($m-put ($symcat base "/" ($car v))
+                :sum-of base :member ($car v) :fields ($cdr v)))
+      `(%top-level-splice
+         (%typedef (%enum ,tagty ,@vkeys) ,tagty)
+         ,@payloads
+         (%typedef (%struct ,base ,@sumfields) ,base)
+         ,@preds))))
+
+; ─── конструктор (вызывается правилом `#` из macro.ml) ───────────────────────
+
+; (sum-construct geo/Shape/Circle v1 v2 ...) → тегированный compound literal.
+; vals — позиционные, ложатся в поля payload-структуры по порядку.
+(%defmacro sum-construct (vkey &rest vals)
+  ($let ((parent ($m-get vkey :sum-of))
+         (member ($m-get vkey :member))
+         (fields ($m-get vkey :fields)))
+    ($if ($null? fields)
+      `(cast ,parent (init :tag ,vkey))
+      `(cast ,parent (init :tag ,vkey
+                           :u (init ,($symcat ":" member) (init ,@vals)))))))
+
+; ─── match ──────────────────────────────────────────────────────────────────
+
+; (match s
+;   (Circle (r)   body...)
+;   (Rect   (w h) body...)
+;   ...)              ; хвостовой ... = частичный match (без exhaustiveness)
+(%doc match
+  :doc "Pattern-match on a sum value: (match s (Variant (binders...) body...) ...). Positional binders. A trailing ... allows a non-exhaustive match; otherwise all variants must be covered."
+  :example "(match s (Circle (r) (return (* 3.14 r r))) (Rect (w h) (return (* w h))))")
+(%defmacro match (scrut &rest clauses)
+  ($do
+    ($assert ($atom? scrut) "match: scrutinee must be a variable")
+    ($let ((sty ($m-get scrut :c-type)))
+      ($assert ($not ($null? sty)) "match: scrutinee has no known type (declare it first)")
+      ($let ((variants ($m-get sty :variants))
+             (partial  ($if ($null? clauses) nil ($eq? ($car ($reverse clauses)) '...)))
+             (arms     ($if partial ($reverse ($cdr ($reverse clauses))) clauses))
+             (covered  ($map ($car it) arms))
+             (allnames ($map ($car it) variants)))
+        ($assert ($not ($null? variants)) "match: type is not a defsum")
+        ; exhaustiveness (если нет хвостового ...)
+        ($if partial nil
+          ($let ((missing ($sum-missing allnames covered)))
+            ($if ($null? missing) nil
+              ($error ($str "match: non-exhaustive, missing variants: "
+                            ($sum-names-str missing)
+                            "(add a trailing ... to allow)")))))
+        ; собираем %case на каждый arm
+        ($let ((cases
+                ($map
+                  ($let ((vname ($car it))
+                         (binders ($car ($cdr it)))
+                         (body ($cdr ($cdr it)))
+                         (fields ($sum-find vname variants))
+                         (vkey ($symcat sty "/" vname)))
+                    `(%case ,vkey
+                       (%block
+                         ,@($sum-binds scrut vname binders fields)
+                         ,@body
+                         (%break))))
+                  arms))
+               ; default в обоих случаях, чтобы не ловить -Wswitch:
+               ; - exhaustive → недостижим (__builtin_unreachable; глушит и
+               ;   -Wreturn-type, когда все ветки возвращают);
+               ; - партиал (...) → пустой break: непокрытое намеренно игнорим.
+               (dflt ($if partial
+                       ($list `(%default (%break)))
+                       ($list `(%default (%raw "__builtin_unreachable()"))))))
+          `(%switch (. ,scrut tag) ,@cases ,@dflt))))))

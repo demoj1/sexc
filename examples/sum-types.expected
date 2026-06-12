@@ -1,0 +1,3 @@
+areas: 12.57 12.00 1.00
+rect-perimeter: 0.00 14.00
+predicates: c.Circle?=1 r.Rect?=1 u.Unit?=1

@@ -70,7 +70,7 @@ The command must accept source on stdin and print generated C to stdout."
 (defcustom sexc/surface-keywords
   '("include" "define" "defn" "decl" "block" "if" "cond"
     "while" "for" "return" "set" "cast" "struct" "union"
-    "adecl" "free*" "typedef" "enum" "init"
+    "adecl" "free*" "typedef" "enum" "init" "defsum" "match"
     "zero-init" "sizeof" "sizeof-type" "sizeof-expr" "aref" "dot" "arrow"
     "." "->" "not" "+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">"
     ">=" "&&" "and" "||" "or" "post-inc" "nop"
@@ -104,6 +104,8 @@ The command must accept source on stdin and print generated C to stdout."
     ("defn" . (4 4 4 &body))
     ("struct" . (2 &body))
     ("union" . (2 &body))
+    ("defsum" . (4 &body))
+    ("match" . (4 &body))
     ("if" . (4 &body))
     ("if-nil" . (4 &body))
     ("when" . (4 &body))
@@ -140,6 +142,8 @@ The command must accept source on stdin and print generated C to stdout."
     ("set" . "(set LHS VALUE [LHS2 VALUE2 ...])")
     ("struct" . "(struct Name :fields ... [:methods (defn ...)...])")
     ("union" . "(union Name (TYPE FIELD) ...)")
+    ("defsum" . "(defsum Name (Variant (TYPE FIELD)...) ...) -> tagged union; construct Name/Variant#, branch with match")
+    ("match" . "(match SCRUT (Variant (BINDERS...) BODY...) ... [...]) -> switch on a sum; trailing ... allows non-exhaustive")
     ("%eval" . "(%eval EXPR) -> evaluate compile-time expression to one form")
     ("%evals" . "(%evals EXPR) -> evaluate compile-time expression to list splice")
     ("%raw" . "(%raw PART...) -> inline C fragment in expression context")
