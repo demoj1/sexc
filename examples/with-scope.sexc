@@ -19,11 +19,11 @@
 
 (include <stdio.h>)
 
-(defn void line (((%ptr (%const char)) text))
+(defn void line ((:* :const char text))
   (dotimes i *indent* (printf "  "))
   (printf "%s\n" text))
 
-(defn void node (((%ptr (%const char)) name) (int depth))
+(defn void node ((:* :const char name) (int depth))
   (line name)
   (when (pos? depth)
     (with (int *indent*) (+ *indent* 1)      ; explicit type (value is self-referential)

@@ -5,8 +5,8 @@
 
 (defn int main ()
   (decl (int x) 42)
-  (decl ((%ptr int) p) (%addr x)
-        ((%ptr int) np) nil)
+  (decl (:* int p) (%addr x)
+        (:* int np) nil)
 
   ; pointer / zero / sign
   (printf "nil?      %d %d\n"    (nil? np)     (nil? p))                 ; 1 0

@@ -10,7 +10,7 @@
 ; *indent* is never declared by hand — `with` declares it (thread_local) at the
 ; file head. Its value is self-referential, so we state the type: (int *indent*).
 
-(defn void say (((%ptr (%const char)) msg))
+(defn void say ((:* :const char msg))
   (dotimes i *indent* (printf "  "))
   (printf "%s\n" msg))
 

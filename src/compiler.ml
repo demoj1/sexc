@@ -161,6 +161,11 @@ let rewrite_params name_map = function
   | Raw.List (groups, _) ->
       let rewrite_group = function
         | Raw.List ([], _) -> Raw.List ([], None)
+        (* bundled flat form (:mods base name...): the type spans several leading
+           elements, so rewrite the whole group — modifiers and names aren't
+           module-defined types, only the base gets qualified. *)
+        | Raw.List ((Raw.Atom (h, _) :: _), _) as g when String.is_prefix h ~prefix:":" ->
+            rewrite_type_like name_map g
         | Raw.List ((ty :: names), _) -> Raw.List ((rewrite_type_like name_map ty :: names), None)
         | other -> other
       in

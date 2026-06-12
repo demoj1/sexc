@@ -11,29 +11,29 @@
 
 (struct Arena
   :fields
-  ((%ptr char) base)
+  (:* char base)
   (int cap)
   (int used))
 
 (defn Arena arena-make ((int cap))
-  (decl (Arena a) (Arena# :base (cast (%ptr char) (malloc cap)) :cap cap :used 0))
+  (decl (Arena a) (Arena# :base (cast (:* char) (malloc cap)) :cap cap :used 0))
   (return a))
 
 ; bump-allocate N bytes from the arena, returning a raw pointer
-(defn (%ptr void) arena-alloc (((%ptr Arena) a) (int n))
-  (decl ((%ptr char) p) (+ (-> a base) (-> a used)))
+(defn (:* void) arena-alloc ((:* Arena a) (int n))
+  (decl (:* char p) (+ (-> a base) (-> a used)))
   (set (-> a used) (+ (-> a used) n))
 
-  (return (cast (%ptr void) p)))
+  (return (cast (:* void) p)))
 
-(defn void arena-free (((%ptr Arena) a))
+(defn void arena-free ((:* Arena a))
   (free (-> a base)))
 
 ; work() allocates from the AMBIENT *arena* — no allocator argument anywhere.
 (defn void work ()
   (decl
-    ((%ptr int) xs)
-    (cast (%ptr int)
+    (:* int xs)
+    (cast (:* int)
           (arena-alloc *arena* (* 4 (sizeof int)))))
 
   (dotimes i 4
@@ -49,7 +49,7 @@
 (defn int main ()
   (decl (Arena a) (arena-make 1024))
 
-  (with ((%ptr Arena) *arena*) (%addr a)   ; explicit type: the value is a local
+  (with (:* Arena *arena*) (%addr a)       ; explicit type: the value is a local
     (work)                                 ; allocates inside *arena*
     (arena-free *arena*))                  ; tear it down after the call, still in scope
 

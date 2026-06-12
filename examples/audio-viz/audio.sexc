@@ -25,17 +25,17 @@
 ; miniaudio дёргает on_capture с куском audio frames. Считаем RMS уровень
 ; и сохраняем в g_level. Никаких блокировок — main-тред читает то что есть.
 
-(defn void on_capture (((%ptr ma_device)         dev)
-                       ((%ptr void)              output)
-                       ((%ptr (%const void))     input)
-                       (ma_uint32                frames))
+(defn void on_capture ((:* ma_device     dev)
+                       (:* void           output)
+                       (:* :const void    input)
+                       (ma_uint32         frames))
   ; гасим unused-warning'и: callback signature шире чем нам нужно
   (cast void dev)
   (cast void output)
 
   (when (and (not-nil? input) (pos? frames))
-    (decl ((%ptr (%const float)) samples) (cast (%ptr (%const float)) input)
-          (float                 sum)     0.0f)
+    (decl (:* :const float samples) (cast (:* :const float) input)
+          (float            sum)     0.0f)
     (dotimes i frames
       (decl (float s) (aref samples i))
       (incf-by sum (* s s)))

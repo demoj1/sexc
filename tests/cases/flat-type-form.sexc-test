@@ -1,0 +1,33 @@
+; Flat keyword type form (:* / :const / ...) via $unpack-type, in every type
+; position. Reading is left=outermost: (:* :const char) => const char *.
+; In binding positions (params, fields, decl) the bundled form (:mods base name)
+; folds type+name into one group; type-only positions stay (:mods base).
+(struct S
+  :fields
+  (:* :const char name)            ; bundled  → const char *name
+  ((:const int) id))               ; classic  → const int id
+
+(defn (:* :const char) pick ((:* :const char a) ((:* int) b))   ; bundled + classic params
+  (return a))
+
+(defn int demo ()
+  (decl (:const int k) 0)          ; bundled
+  (decl ((:* int) p) nil)          ; classic
+  (return (cast int (sizeof (:* (:const char))))))   ; type-only positions
+;==EXPECTED==
+typedef struct S {
+  const char *name;
+  const int id;
+} S;
+
+const char *pick(const char *a, int *b)
+{
+  return a;
+}
+
+int demo(void)
+{
+  const int k = 0;
+  int *p = ((void*)0);
+  return (int)sizeof(const char *);
+}

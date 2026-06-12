@@ -245,6 +245,21 @@ Example: (incf-by total 4)
     (`(:static :thread_local int)`); неизвестный `:kw` — ошибка. Эмитятся
     префиксом перед типом (`decl.d_specs`), сосуществуют со старыми
     `%storage`-атомами (`%static` и т.п.).
+- **Flat keyword type form** (sexc, `$unpack-type` в `std/c-interop.sexc`, без
+  правки OCaml-парсера типов): `:*`/`:ptr`, `:const`, `:volatile`, `:restrict` —
+  плоская запись типа вместо матрёшки `%ptr`/`%const`. Схема «слева = снаружи»
+  (каждый токен оборачивает остальное): `(:* :const char)` → `const char *`,
+  `(:const :* char)` → `char * const`, `(:* :* int)` → `int **`. Атомы/`%`-формы/
+  `(unsigned long)` проходят насквозь. Раскрывается во всех тип-позициях:
+  `decl`/`adecl`/`defn`(ret+params)/`struct`/`union`/`cast`/`sizeof`/`with`.
+- **Bundled binding form** (`$binding-split`): в binding-позициях (параметры,
+  поля, `decl`/`adecl`/`with`) можно слить тип+имя: `(:* :const char msg)` ≡
+  `((:* :const char) msg)` → `const char *msg`. Дискриминатор — первый элемент
+  группы начинается с `:` → bundled, иначе классика `(тип имя…)` (не ломается).
+  База — ровно один элемент после модификаторов (многословную группируй:
+  `(:const (unsigned long) x)`). Namespace: `rewrite_params` (compiler.ml) видит
+  `:keyword`-группу как единый тип, поэтому модульный базовый тип в bundled
+  всё равно квалифицируется (`(:* Buf b)` в `%module ring` → `ring/Buf *b`).
 - `with`/`defer1`/`defer*` — динамический биндинг и scoped-cleanup через
   `__attribute__((cleanup))` (GCC/Clang). `(with binding value body...)` сохраняет/
   восстанавливает переменную на любом выходе из блока (вкл. `return`). **Переменная

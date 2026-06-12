@@ -10,18 +10,18 @@
 ; cond! — first clause #if, rest #elif, (else ...) #else. Branch order
 ; matters: __ANDROID__ also defines __linux__, so it must come first.
 (cond!
-  ("defined(__ANDROID__)" (defn (%ptr char) os_name () (return "android")))
-  ("defined(__linux__)"   (defn (%ptr char) os_name () (return "linux")))
-  ("defined(__APPLE__)"   (defn (%ptr char) os_name () (return "apple")))
-  ("defined(_WIN32)"      (defn (%ptr char) os_name () (return "windows")))
-  (else                   (defn (%ptr char) os_name () (return "unknown"))))
+  ("defined(__ANDROID__)" (defn (:* char) os_name () (return "android")))
+  ("defined(__linux__)"   (defn (:* char) os_name () (return "linux")))
+  ("defined(__APPLE__)"   (defn (:* char) os_name () (return "apple")))
+  ("defined(_WIN32)"      (defn (:* char) os_name () (return "windows")))
+  (else                   (defn (:* char) os_name () (return "unknown"))))
 
 ; when! — single guarded branch (implicit progn over the body).
 (when! "defined(__GNUC__)"
-  (defn (%ptr char) toolchain () (return "gcc-compatible")))
+  (defn (:* char) toolchain () (return "gcc-compatible")))
 
 (when! "!defined(__GNUC__)"
-  (defn (%ptr char) toolchain () (return "other")))
+  (defn (:* char) toolchain () (return "other")))
 
 (defn int main ()
   (printf "os=%s toolchain=%s\n" (os_name) (toolchain))

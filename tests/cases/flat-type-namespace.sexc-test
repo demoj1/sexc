@@ -1,0 +1,19 @@
+; Bundled flat type in a %module: the base type (Buf) must still be namespace-
+; qualified (ring/Buf) even though it sits inside the flat group — covered by
+; rewrite_params treating a :keyword-led group as a whole type.
+(%module ring)
+
+(struct Buf :fields (:* float data) (int n))
+
+(defn float first ((:* Buf b))
+  (return (aref (-> b data) 0)))
+;==EXPECTED==
+typedef struct ring_u002F_Buf {
+  float *data;
+  int n;
+} ring_u002F_Buf;
+
+float ring_u002F_first(ring_u002F_Buf *b)
+{
+  return (b->data)[0];
+}

@@ -10,7 +10,7 @@
 
 (include <stdio.h>)
 
-(defn void note (((%ptr (%const char)) msg) (int lvl))
+(defn void note ((:* :const char msg) (int lvl))
   (when (<= lvl *level*)
     (fprintf *out* "[%d] %s\n" lvl msg)))
 

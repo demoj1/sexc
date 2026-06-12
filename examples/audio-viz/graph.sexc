@@ -23,7 +23,7 @@
 
 ;; --- Public API: graph/draw -------------------------------------------------
 
-(defn void draw (((%ptr ring/Buffer) buf) (int width) (int height))
+(defn void draw ((:* ring/Buffer buf) (int width) (int height))
   ;; рамка
   (DrawRectangleLines GRAPH_PAD GRAPH_PAD
                       (- width  (* GRAPH_PAD 2))
