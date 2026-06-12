@@ -31,8 +31,8 @@
   (say "back to top")      ; *indent* fully restored
 
   ; defer*: a batch of defer1; both frees run LIFO on return (b then a).
-  (adecl (int a) (sizeof-type int)
-         (int b) (sizeof-type int))
+  (adecl (int a) (sizeof int)
+         (int b) (sizeof int))
 
   (defer* (free a)
           (free b))

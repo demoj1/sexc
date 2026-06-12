@@ -1,7 +1,7 @@
 (include "stdio.h")
 
 (defn int gcd ((int a b))
-  (while (not= b 0)
+  (while (nonzero? b)
     (decl (int t) b)
     (set b (% a b))
     (set a t))

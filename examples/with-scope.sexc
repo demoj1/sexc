@@ -25,7 +25,7 @@
 
 (defn void node (((%ptr (%const char)) name) (int depth))
   (line name)
-  (when (> depth 0)
+  (when (pos? depth)
     (with (int *indent*) (+ *indent* 1)      ; explicit type (value is self-referential)
       (node "child-a" (- depth 1))
       (node "child-b" (- depth 1)))))         ; depth reverts when this block exits
