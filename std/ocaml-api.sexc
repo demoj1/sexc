@@ -43,6 +43,16 @@
   :doc "Force FORM to be parsed as an expression (identity). Mainly useful inside %raw, where a bare string is raw C text: (%expr \"x\") emits the string literal \"x\" (quoted + escaped) instead of x. Used by `init` to carry string field values."
   :example "(%raw \"{\" (%expr \"hi\") \"}\")  ; => {\"hi\"}")
 
+(%doc %null
+  :sig (%null)
+  :doc "Null pointer constant, emitted as ((void*)0) (header-free). The surface atom `nil` is an alias. Use in any pointer context: (set p (%null)), (return (%null))."
+  :example "(set p (%null))")
+
+(%doc nil
+  :sig nil
+  :doc "Surface null pointer — a bare atom that expands to ((void*)0) (alias of %null). `nil` is reserved at expression level. Use anywhere a null pointer goes: (set p nil), (return nil), (= p nil); see if-nil."
+  :example "(set p nil)")
+
 (%doc $quote
   :sig ($quote form)
   :doc "Return FORM without evaluating it."

@@ -166,6 +166,13 @@
       `(%if ,cond (%block ,then))
       `(%if ,cond (%block ,then) (%block ,($car else-body))))))
 
+; if-nil — `if` whose test is "VALUE is the null pointer (nil)".
+(%doc if-nil
+  :doc "Like `if`, but tests whether VALUE is the null pointer: (if-nil x then [else]) => (if (= x nil) then else). 2 or 3 forms."
+  :example "(if-nil p (return -1) (use p))")
+(%defmacro if-nil (value then &rest else-body)
+  `(if (= ,value nil) ,then ,@else-body))
+
 ; cond
 ; (cond
 ;   (test form...)

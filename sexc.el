@@ -74,6 +74,7 @@ The command must accept source on stdin and print generated C to stdout."
     "zero-init" "sizeof" "sizeof-type" "sizeof-expr" "aref" "dot" "arrow"
     "." "->" "not" "+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">"
     ">=" "&&" "and" "||" "or" "post-inc" "nop"
+    "nil" "if-nil"
     "when" "unless" "incf" "decf" "incf-by" "decf-by"
     "dotimes" "for-range" "repeat"
     "when!" "if!" "cond!" "with" "defer1" "defer*"
@@ -102,6 +103,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("struct" . (2 &body))
     ("union" . (2 &body))
     ("if" . (4 &body))
+    ("if-nil" . (4 &body))
     ("when" . (4 &body))
     ("unless" . (4 &body))
     ("while" . (4 &body))
@@ -131,6 +133,8 @@ The command must accept source on stdin and print generated C to stdout."
     ("defer1" . "(defer1 FN ARG) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
     ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")
     ("sizeof" . "(sizeof X) -> sizeof(X); auto-picks type vs expr (use sizeof-type/sizeof-expr to force)")
+    ("nil" . "nil -> ((void*)0), the null pointer (alias of %null)")
+    ("if-nil" . "(if-nil VALUE THEN [ELSE]) -> like `if`, tests whether VALUE is nil")
     ("set" . "(set LHS VALUE [LHS2 VALUE2 ...])")
     ("struct" . "(struct Name :fields ... [:methods (defn ...)...])")
     ("union" . "(union Name (TYPE FIELD) ...)")

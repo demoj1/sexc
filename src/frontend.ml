@@ -303,6 +303,7 @@ let c_binary_op = function
 
 let rec parse_expr raw =
   match raw with
+  | Raw.Atom ("nil", _) -> parse_intrinsic_expr "%null" []  (* surface null pointer *)
   | Raw.Atom (a, _) -> EAtom a
   | Raw.Str (s, _) -> EString s
   | Raw.List ([], _) -> fail "Expression cannot be empty list"
@@ -314,6 +315,10 @@ let rec parse_expr raw =
 
 and parse_intrinsic_expr h args =
   match h with
+  | "%null" ->
+      (* null pointer constant; header-free. `nil` is the surface alias. *)
+      if not (List.is_empty args) then fail "%null takes no arguments";
+      ERaw [ RawText "((void*)0)" ]
   | "%top-level-splice" -> fail "%top-level-splice is allowed only at top-level"
   | "%eval" -> fail "%eval should be expanded during macro phase"
   | "%evals" -> fail "%evals should be expanded during macro phase"
