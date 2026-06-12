@@ -1,0 +1,56 @@
+; with-alloca.sexc — a temporary bump allocator passed implicitly via `with`.
+;
+; main spins up a fresh arena, binds it as the ambient *arena*, then calls work()
+; — which allocates from it WITHOUT taking the allocator as a parameter — and
+; tears the arena down afterwards, all inside the `with`. Outside the block
+; *arena* reverts to its previous value, so the temporary allocator is scoped to
+; exactly this region.
+
+(include <stdio.h>)
+(include <stdlib.h>)
+
+(struct Arena
+  :fields
+  ((%ptr char) base)
+  (int cap)
+  (int used))
+
+(defn Arena arena-make ((int cap))
+  (decl (Arena a) (Arena# :base (cast (%ptr char) (malloc cap)) :cap cap :used 0))
+  (return a))
+
+; bump-allocate N bytes from the arena, returning a raw pointer
+(defn (%ptr void) arena-alloc (((%ptr Arena) a) (int n))
+  (decl ((%ptr char) p) (+ (-> a base) (-> a used)))
+  (set (-> a used) (+ (-> a used) n))
+
+  (return (cast (%ptr void) p)))
+
+(defn void arena-free (((%ptr Arena) a))
+  (free (-> a base)))
+
+; work() allocates from the AMBIENT *arena* — no allocator argument anywhere.
+(defn void work ()
+  (decl
+    ((%ptr int) xs)
+    (cast (%ptr int)
+          (arena-alloc *arena* (* 4 (sizeof-type int)))))
+
+  (dotimes i 4
+    (set (aref xs i) (* i i)))
+
+  (printf "work: %d %d %d %d  (arena used = %d bytes)\n"
+          (aref xs 0)
+          (aref xs 1)
+          (aref xs 2)
+          (aref xs 3)
+          (-> *arena* used)))
+
+(defn int main ()
+  (decl (Arena a) (arena-make 1024))
+
+  (with ((%ptr Arena) *arena*) (%addr a)   ; explicit type: the value is a local
+    (work)                                 ; allocates inside *arena*
+    (arena-free *arena*))                  ; tear it down after the call, still in scope
+
+  (return 0))

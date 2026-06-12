@@ -1,0 +1,8 @@
+root
+  child-a
+    child-a
+    child-b
+  child-b
+    child-a
+    child-b
+done

@@ -256,6 +256,46 @@ built as macros over the one `%cpp` primitive. Compile-time-known
 flags don't need this — use `%eval`/`$if` (below) and the dead
 branch never reaches the C at all.
 
+### Dynamic binding and scoped cleanup
+
+`with` rebinds a variable for the dynamic extent of its body and
+restores it on **any** exit, `return` included — Clojure-`binding` /
+Odin-`context` style dynamic scope. The variable is declared once,
+`_Thread_local`, at the file head (so callees down the stack see it),
+so you never write a top-level declaration. A bare-atom binding
+infers the type from the value via `__typeof__`; a `(Type var)`
+binding states it explicitly (needed for self-referential or
+local-typed values):
+
+```lisp
+(defn void say (((%ptr (%const char)) m))   ; reads *out* — never passed in
+  (fprintf *out* "%s\n" m))
+
+(defn int main ()
+  (with *out* stdout                ; type inferred via __typeof__: FILE*
+    (say "hello"))                  ; *out* reverts after the block
+  (return 0))
+```
+```c
+_Thread_local __typeof__(stdout) *out*;   /* hoisted to the file head */
+/* ... with body saves/sets/restores *out* around (say ...) ... */
+```
+
+`defer1` / `defer*` run a one-argument cleanup at block exit, in LIFO
+order, on any exit path — both compile to `__attribute__((cleanup))`
+(GCC/Clang):
+
+```lisp
+(decl ((%ptr char) buf) (cast (%ptr char) (malloc 64)))
+(defer1 free buf)                   ; free(buf) when the block exits
+(defer* (free a) (fclose f))        ; or a batch, run b…a in reverse
+```
+
+Together they give a temporary allocator scoped to a region: bind a
+fresh arena as the ambient `*arena*`, `defer*` its teardown, and let
+callees allocate from it without taking it as a parameter (see
+`examples/with-alloca.sexc`).
+
 ### Compile-time evaluation: `$defun`, `%eval`, `%evals`
 
 Beyond `%defmacro`, there's a small Lisp that runs *during* expansion —
@@ -485,8 +525,10 @@ make test-update                 # regenerate expected blocks
 
 - `tests/cases/*.sexc-test` — golden snapshots. Source and
   expected in one file, split by `;==EXPECTED==`.
-- `tests/examples/standalone.list` — examples that build
-  end-to-end via gcc.
+- `tests/examples/standalone.list` — examples built end-to-end
+  via **gcc and clang** (clang when installed). If an example has
+  an `examples/X.expected` sidecar, it is also run and its stdout
+  diffed (`UPDATE=1` regenerates the sidecar).
 
 ## Further reading
 
@@ -732,6 +774,46 @@ char *os(void) { return "unknown"; }
 на этапе сборки sexc, в этом не нуждаются — для них `%eval`/
 `$if` (ниже), и мёртвая ветка вообще не попадает в C.
 
+### Динамический биндинг и scoped-cleanup
+
+`with` переопределяет переменную на время своего тела и
+восстанавливает её на **любом** выходе, включая `return` —
+динамический скоуп в стиле Clojure-`binding` / Odin-`context`.
+Переменная объявляется один раз, `_Thread_local`, в начале файла
+(чтобы её видели callee вниз по стеку) — top-level-декларацию руками
+писать не нужно. Атом-биндинг выводит тип из значения через
+`__typeof__`; биндинг `(Type var)` задаёт тип явно (нужно для
+self-referential или локально-типизированных значений):
+
+```lisp
+(defn void say (((%ptr (%const char)) m))   ; читает *out* — не передаётся параметром
+  (fprintf *out* "%s\n" m))
+
+(defn int main ()
+  (with *out* stdout                ; тип выведен через __typeof__: FILE*
+    (say "hello"))                  ; *out* откатывается после блока
+  (return 0))
+```
+```c
+_Thread_local __typeof__(stdout) *out*;   /* поднято в начало файла */
+/* ... тело with сохраняет/ставит/восстанавливает *out* вокруг (say ...) ... */
+```
+
+`defer1` / `defer*` выполняют cleanup одного аргумента на выходе из
+блока, в порядке LIFO, на любом пути выхода — оба компилятся в
+`__attribute__((cleanup))` (GCC/Clang):
+
+```lisp
+(decl ((%ptr char) buf) (cast (%ptr char) (malloc 64)))
+(defer1 free buf)                   ; free(buf) при выходе из блока
+(defer* (free a) (fclose f))        ; или пачкой, b…a в обратном порядке
+```
+
+Вместе это даёт временный аллокатор, ограниченный регионом: ставишь
+свежую арену как ambient `*arena*`, `defer*` её разрушение, а callee
+аллоцируют из неё, не принимая её параметром (см.
+`examples/with-alloca.sexc`).
+
 ### Compile-time вычисления: `$defun`, `%eval`, `%evals`
 
 Кроме `%defmacro`, есть маленький Lisp, исполняемый *во время* раскрытия —
@@ -960,8 +1042,10 @@ make test-update                 # перегенерировать expected
 
 - `tests/cases/*.sexc-test` — golden snapshot. Source и
   expected в одном файле, разделённые `;==EXPECTED==`.
-- `tests/examples/standalone.list` — examples,
-  компилирующиеся end-to-end через gcc.
+- `tests/examples/standalone.list` — examples, собираемые
+  end-to-end через **gcc и clang** (clang — если установлен).
+  Если рядом лежит сайдкар `examples/X.expected`, пример ещё и
+  запускается, а его stdout сверяется (`UPDATE=1` перегенерит).
 
 ## Куда смотреть дальше
 

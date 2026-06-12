@@ -144,6 +144,7 @@ let rec emit_type_base = function
             | Some raw -> base ^ " = " ^ emit_expr (parse_expr raw))
       in
       "enum " ^ mangle_ident name ^ " { " ^ String.concat ~sep:", " vs ^ " }"
+  | TTypeof e -> "__typeof__(" ^ emit_expr e ^ ")"
   | _ -> fail "emit_type_base received non-base type"
 
 and emit_decl_of_type tyv name =
@@ -221,11 +222,15 @@ and emit_expr ?(ctx = 0) e =
   if p < ctx then "(" ^ body ^ ")" else body
 
 let emit_decl_signature d =
+  let specs =
+    if List.is_empty d.d_specs then ""
+    else String.concat ~sep:" " d.d_specs ^ " "
+  in
   let stor =
     if List.is_empty d.d_storage then ""
     else (List.map d.d_storage ~f:storage_to_c |> String.concat ~sep:" ") ^ " "
   in
-  stor ^ emit_decl_of_type d.d_ty (mangle_ident d.d_name)
+  specs ^ stor ^ emit_decl_of_type d.d_ty (mangle_ident d.d_name)
 
 let indent n = String.make n ' '
 

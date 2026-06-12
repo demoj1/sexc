@@ -1,0 +1,18 @@
+; String values in init / Type# must emit as C string literals (quoted +
+; escaped), not as raw %raw text. Regression: (init "x") used to yield {x}.
+(struct Msg :fields ((%ptr (%const char)) tag) (int n))
+
+(defn void demo ()
+  (decl (Msg m) (Msg# :tag "hi\n" :n 3))
+  (decl ((%array (%ptr (%const char)) 2) words) (init "foo" "bar")))
+;==EXPECTED==
+typedef struct Msg {
+  const char *tag;
+  int n;
+} Msg;
+
+void demo(void)
+{
+  Msg m = (Msg){.tag = "hi\n", .n = 3};
+  const char *words[2] = {"foo", "bar"};
+}

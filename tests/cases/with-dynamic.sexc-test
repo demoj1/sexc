@@ -1,0 +1,50 @@
+; `with` dynamic binding: the variable is auto-declared (thread_local) at the
+; file head — before `show`, which reads it — and the cleanup-runtime helper is
+; hoisted on first use. `*level*` is the bare atom form, so its type is inferred
+; via __typeof__(10).
+(include <stdio.h>)
+
+(defn void show ()
+  (printf "%d\n" *level*))
+
+(defn int main ()
+  (with *level* 10
+    (show))
+  (return 0))
+;==EXPECTED==
+#include <stdio.h>
+
+_Thread_local __typeof__(10) _u002A_level_u002A_;
+
+void show(void)
+{
+  printf("%d\n", _u002A_level_u002A_);
+}
+
+#ifndef SX_WITH_GUARD_
+
+#define SX_WITH_GUARD_
+
+typedef struct __sx_with_guard {
+  void *slot;
+  const void *saved;
+  unsigned long size;
+} __sx_with_guard;
+
+static inline void __sx_with_restore(const __sx_with_guard *g)
+{
+  unsigned char *__d=(unsigned char*)g->slot;const unsigned char *__s=(const unsigned char*)g->saved;for(unsigned long __i=0;__i<g->size;__i++)__d[__i]=__s[__i];;
+}
+
+#endif
+
+int main(void)
+{
+  {
+    __auto_type sx_with_saved_0 = _u002A_level_u002A_;
+    __sx_with_guard sx_with_guard_1 __attribute__((cleanup(__sx_with_restore))) = { &(_u002A_level_u002A_), &sx_with_saved_0, sizeof(_u002A_level_u002A_) };
+    _u002A_level_u002A_ = 10;
+    show();
+  }
+  return 0;
+}

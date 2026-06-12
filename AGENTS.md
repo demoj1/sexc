@@ -92,7 +92,8 @@
 - Новый **error-кейс** — source + `;==EXPECTED-ERROR==` + ожидаемый stderr (file:line:col + caret + опц. hint-блок с docs). Sexc должен exit'нуть non-zero; stdout игнорируется. Абсолютные пути внутри ROOT нормализуются в `<root>` (через `pwd -P`-нормализацию плюс `sed` в `run_one.sh`), чтобы snapshot был портативным. Multi-error кейс просто кладёт несколько ошибочных top-форм.
 - Новый **#line-кейс** — заголовок `;; sexc-keep-line` (отменяет дефолтный `--no-line` раннера), source + `;==EXPECTED==` + C-вывод **с** `#line`-директивами. Так тестируется сам source-mapping (см. `line-struct-fields`, `line-after-macro-def`, `line-after-empty-evals` — последние два проверяют, что не-эмитящие формы не сдвигают нумерацию).
 - Заголовок первой строки управляет флагами раннера: `sexc-keep-line` (оставить `#line`), `--no-prelude` (без прелюдии). По умолчанию: `--quiet --no-line`.
-- Новый standalone-пример без внешних зависимостей — добавить путь в `tests/examples/standalone.list`.
+- Новый standalone-пример без внешних зависимостей — добавить путь в `tests/examples/standalone.list`. `run_example.sh` собирает его **и gcc, и clang** (clang — если установлен; ловит непортабельность в GNU-расширениях типа `__typeof__`/`cleanup`).
+- **Проверка вывода примера**: положи рядом сайдкар `examples/X.expected` — тогда раннер ещё и **запустит** gcc-бинарь и сдиффит stdout. Нет сайдкара → только компиляция. Сгенерировать/обновить: `UPDATE=1 tests/run_example.sh examples/X.sexc` (или `UPDATE=1 ./tests/run.sh`), потом отревьюить. Только для детерминированного вывода.
 - Examples с экзотическими link-флагами могут указывать их в первой строке: `;; sexc-test-flags: -lm -lpthread`.
 - `sexc check` exit-коды покрыты smoke-секцией в `run.sh` (не отдельные файлы).
 
@@ -237,6 +238,27 @@ Example: (incf-by total 4)
     - `(decl (int x) 5)`
     - `(decl (int x) 5 (int y) (+ x 9))`.
   - Старый формат `(decl name type ...)` — **удален** (breaking change).
+  - **Спецификаторы у типа** через ведущие `:keyword` в тип-позиции
+    (`parse_decl_type`, `frontend.ml`): `(decl ((:thread_local int) x) 0)` →
+    `_Thread_local int x = 0;`. Допустимы `:thread_local`/`:static`/`:extern`/
+    `:register`/`:auto`/`:inline`/`:const`/`:volatile`/`:atomic`; стакаются
+    (`(:static :thread_local int)`); неизвестный `:kw` — ошибка. Эмитятся
+    префиксом перед типом (`decl.d_specs`), сосуществуют со старыми
+    `%storage`-атомами (`%static` и т.п.).
+- `with`/`defer1`/`defer*` — динамический биндинг и scoped-cleanup через
+  `__attribute__((cleanup))` (GCC/Clang). `(with binding value body...)` сохраняет/
+  восстанавливает переменную на любом выходе из блока (вкл. `return`). **Переменная
+  объявляется автоматически** (`_Thread_local`) — `with` шлёт `%decl` в голову файла
+  через `%file-head-splice` (видна всем читателям, в т.ч. callee выше по файлу; дедуп
+  по имени). `binding` задаёт тип: атом `var` → инференс через `(%typeof value)`;
+  список `(Type var)` → явный тип (нужен для self-ref/локальных значений, напр.
+  `(with (int *depth*) (+ *depth* 1) ...)`). `(defer1 fn arg)`
+  зовёт `fn(arg)` на выходе (LIFO), `fn` — одного указательного аргумента;
+  `(defer* (fn arg)...)` — пачка `defer1` (общий `$sx-defer-decl` строит guard на
+  каждый клауз). Общий top-level хелпер (guard-struct + restore/run fn) всплывает
+  один раз через `%top-level-splice` (`$sx-with-runtime`/`$sx-defer-runtime`, флаг
+  в метадате + `#ifndef`-гард). `defer1`/`defer*` НЕ создают scope (сплайс через
+  `%evals` в текущий блок), иначе cleanup сработал бы сразу.
 - `adecl` в стиле `let*` для malloc-аллоцируемых указателей:
   - Формат: `(adecl (type name) size (type2 name2) size2 ...)`.
   - Пример: `(adecl (char name) 25 (int foo) 15)`.
@@ -254,9 +276,14 @@ Example: (incf-by total 4)
 
 ## Top-level splicing
 
-- Поддержан `%top-level-splice` на уровне программы.
-- Используется для макросов, которые должны эмитить несколько top-level форм.
-- Внутри выражений/stmt `%top-level-splice` не допускается.
+- `%top-level-splice` всплывает на файловый уровень из **любой** вложенности
+  (`hoist_splices` в `compiler.ml`): splice, сгенерированный макросом внутри тела
+  функции, вытаскивается на top-level (и удаляется из исходной позиции). Это даёт
+  statement-макросу (`with`/`defer1`) эмитить общий top-level хелпер (typedef /
+  `static inline` fn). `quote`/`quasiquote`-поддеревья не трогаются. Дедуп — забота
+  макроса (напр. `#ifndef`-гард). Написанный буквально в выражении/stmt
+  `%top-level-splice` всё ещё ошибка (`frontend.ml`) — он рассчитан на генерацию
+  макросом, а не на ручное использование во вложенной позиции.
 
 ## Raw escape hatch
 
@@ -357,15 +384,15 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 ## Группы ключевых слов
 
 - `IR/Intrinsic (%...)`:
-  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%cpp`, `%inline`, `%static`, `%extern`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`, `%comment`
+  - Top-level/decl/fn: `%include`, `%define`, `%define-macro`, `%ifdef`, `%cpp`, `%inline`, `%static`, `%extern`, `%typedef`, `%decl-fn`, `%def-fn`, `%decl`, `%decl-many`, `%top-level-splice`, `%file-head-splice`, `%comment`
   - Stmt/control: `%block`, `%if`, `%while`, `%do-while`, `%for`, `%switch`, `%case`, `%default`, `%break`, `%continue`, `%return`, `%goto`, `%label`, `%nop`
-  - Expr/operators: `%raw`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`, `%&=`, `%|=`, `%^=`, `%<<=`, `%>>=`
+  - Expr/operators: `%raw`, `%expr`, `%typeof`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`, `%&=`, `%|=`, `%^=`, `%<<=`, `%>>=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
   - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `when!`, `if!`, `cond!`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `when!`, `if!`, `cond!`, `with`, `defer1`, `defer*`
   - `std/derive.sexc` (in-place рефлексия по метадате): `eq-as`, `print-as` (+ compile-time `$type-kind`/`$pointer?`/`$rem-mods`/`$fmt-for-type`)
   - `std/meta.sexc` (не привязано к C): `|>`, `||>`, `|as>` (threading)
 

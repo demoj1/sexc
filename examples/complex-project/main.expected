@@ -1,0 +1,10 @@
+
+=== Complex Project Demo ===
+step=1 total=8 count=1 avg=8.00
+step=2 total=19 count=2 avg=9.50
+step=3 total=35 count=3 avg=11.67
+step=4 total=58 count=4 avg=14.50
+step=5 total=90 count=5 avg=18.00
+step=6 total=130 count=6 avg=21.67
+step=7 total=170 count=7 avg=24.29
+summary: total=170 count=7 avg=24.29

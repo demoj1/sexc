@@ -1,0 +1,7 @@
+top
+  one level in
+    two levels in
+  deep
+guarded() = 42
+back to top
+a=1 b=2 (freed b then a on return)

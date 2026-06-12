@@ -1,0 +1,43 @@
+; dynamic-context.sexc — dynamic binding (`with`) and scoped cleanup (`defer1`).
+;
+; `with` swaps a variable for the dynamic extent of its body and restores it on
+; ANY exit (return included). `defer1` runs a one-argument function at block exit
+; in LIFO order. Both compile to __attribute__((cleanup)) (GCC/Clang).
+
+(include <stdio.h>)
+(include <stdlib.h>)
+
+; *indent* is never declared by hand — `with` declares it (thread_local) at the
+; file head. Its value is self-referential, so we state the type: (int *indent*).
+
+(defn void say (((%ptr (%const char)) msg))
+  (dotimes i *indent* (printf "  "))
+  (printf "%s\n" msg))
+
+; Early-return out of a `with` body still restores *indent*.
+(defn int guarded ()
+  (with (int *indent*) (+ *indent* 1)
+    (say "deep")
+    (return 42))           ; cleanup restores *indent* despite the return
+  (return 0))
+
+(defn int main ()
+  (say "top")
+  (with (int *indent*) 1
+    (say "one level in")
+    (with (int *indent*) 2
+      (say "two levels in")))
+  (printf "guarded() = %d\n" (guarded))
+  (say "back to top")      ; *indent* fully restored
+
+  ; defer*: a batch of defer1; both frees run LIFO on return (b then a).
+  (adecl (int a) (sizeof-type int)
+         (int b) (sizeof-type int))
+
+  (defer* (free a)
+          (free b))
+
+  (set (aref a 0) 1)
+  (set (aref b 0) 2)
+  (printf "a=%d b=%d (freed b then a on return)\n" (aref a 0) (aref b 0))
+  (return 0))

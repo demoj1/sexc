@@ -1,0 +1,6 @@
+;; sexc-flags: --no-prelude
+(%decl (:bogus int) x 0)
+;==EXPECTED-ERROR==
+<stdin>:2:1: error[compile]: Unknown decl specifier :bogus (allowed: :thread_local :static :extern :register :auto :inline :const :volatile :atomic)
+(%decl (:bogus int) x 0)
+^

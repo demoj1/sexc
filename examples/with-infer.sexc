@@ -1,0 +1,23 @@
+; with-infer.sexc — `with` inferring each variable's type via __typeof__ from the
+; bound value (the bare-atom binding form). No types written by hand, no decls:
+; `with` declares each at the file head with the inferred type.
+;
+;   (with *out* stdout ...)   →  _Thread_local __typeof__(stdout) *out*;   (FILE*)
+;   (with *level* 2 ...)      →  _Thread_local __typeof__(2) *level*;      (int)
+;
+; `note` reads both *out* and *level* as ambient context, never taking them as
+; arguments — and it's defined ABOVE the function that binds them.
+
+(include <stdio.h>)
+
+(defn void note (((%ptr (%const char)) msg) (int lvl))
+  (when (<= lvl *level*)
+    (fprintf *out* "[%d] %s\n" lvl msg)))
+
+(defn int main ()
+  (with *out* stdout            ; type inferred: FILE*
+    (with *level* 2             ; type inferred: int
+      (note "always"  1)
+      (note "verbose" 2)
+      (note "trace"   3)))       ; suppressed: 3 > current *level* (2)
+  (return 0))

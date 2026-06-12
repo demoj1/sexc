@@ -1,0 +1,36 @@
+; with-scope.sexc — the essence of `with`: dynamic binding with automatic,
+; scope-bounded restore, and NO manual declaration.
+;
+; `*indent*` is an ambient "current depth". `line` reads it WITHOUT it ever
+; being passed as an argument — that is the point of dynamic scope. `node`
+; recurses; around the recursion into its children it bumps `*indent*` with
+; `with`, and on return from that block the old depth comes back on its own.
+;
+; The variable is never declared by hand: the `with` declares `_Thread_local int
+; *indent*;` at the file head (before every reader). Here the value references
+; *indent* itself, so its type can't be inferred — we state it with the
+; `(int *indent*)` binding form. For a self-contained value like `(with i 5 ...)`
+; the bare atom form infers `int` via __typeof__.
+;
+; Why `with` and not just a global you assign? After the whole "child-a" subtree
+; prints, "child-b" lines up at the SAME depth as its sibling, and "done"
+; returns to column 0 — the depth reverts on its own. With a plain global you'd
+; decrement it by hand on every exit path of every recursive call.
+
+(include <stdio.h>)
+
+(defn void line (((%ptr (%const char)) text))
+  (dotimes i *indent* (printf "  "))
+  (printf "%s\n" text))
+
+(defn void node (((%ptr (%const char)) name) (int depth))
+  (line name)
+  (when (> depth 0)
+    (with (int *indent*) (+ *indent* 1)      ; explicit type (value is self-referential)
+      (node "child-a" (- depth 1))
+      (node "child-b" (- depth 1)))))         ; depth reverts when this block exits
+
+(defn int main ()
+  (node "root" 2)
+  (line "done")                               ; back at column 0 — fully restored
+  (return 0))

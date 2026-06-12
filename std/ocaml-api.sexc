@@ -15,8 +15,18 @@
 
 (%doc %top-level-splice
   :sig (%top-level-splice form...)
-  :doc "Splice multiple top-level forms into program output."
+  :doc "Splice FORMs into program output at file scope. Hoists up from ANY nesting depth: a %top-level-splice produced by a macro used inside a function body is pulled out to the top level (and removed from its original position), so a statement-level macro can emit a shared top-level helper (typedef / static fn). quote/quasiquote subtrees are left untouched. Dedup is the macro's job (e.g. an #ifndef guard)."
   :example "(%top-level-splice (%define A 1) (%define B 2))")
+
+(%doc %file-head-splice
+  :sig (%file-head-splice form...)
+  :doc "Like %top-level-splice, but its FORMs are moved to the FILE HEAD — right before the first function definition (after includes and type definitions) — instead of next to the containing form. Used by `with` to emit a dynamic variable's declaration where every reader, including callees defined earlier, can see it. Declarations are deduped by variable name. Macro-generated only."
+  :example "(%file-head-splice (%decl (:thread_local int) *depth*))")
+
+(%doc %typeof
+  :sig (%typeof expr)
+  :doc "Type form emitting GNU __typeof__(EXPR) — the type of EXPR. Used as a type wherever a concrete type is expected (e.g. a %decl), to infer a declaration's type from a value. EXPR must be valid at the point of the declaration: file-scope globals (stdout) and literals work; a local variable does not (it isn't visible at file scope). Backs `with`'s bare-atom binding form."
+  :example "(%decl (:thread_local (%typeof stdout)) *out*)")
 
 (%doc %module
   :sig (%module name)
@@ -27,6 +37,11 @@
   :sig (%raw part...)
   :doc "Inline raw C expression fragments; strings are copied as-is, non-strings are emitted as expressions."
   :example "(%raw \"(\" x \" + 1)\")")
+
+(%doc %expr
+  :sig (%expr form)
+  :doc "Force FORM to be parsed as an expression (identity). Mainly useful inside %raw, where a bare string is raw C text: (%expr \"x\") emits the string literal \"x\" (quoted + escaped) instead of x. Used by `init` to carry string field values."
+  :example "(%raw \"{\" (%expr \"hi\") \"}\")  ; => {\"hi\"}")
 
 (%doc $quote
   :sig ($quote form)

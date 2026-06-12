@@ -443,6 +443,61 @@ let is_doc_decl = function
   | Raw.List ((Raw.Atom ("%doc", _) :: _), _) -> true
   | _ -> false
 
+(* Pull every %top-level-splice up to the top level, from ANY nesting depth.
+   A splice node is removed from its position and its inner forms are emitted as
+   sibling top-level forms (before the form that contained them). This lets a
+   macro used deep inside a function body (e.g. `with`/`defer1`) hoist a shared
+   helper typedef/function to file scope; dedup is the macro's concern (e.g. via
+   an #ifndef guard). quote/quasiquote subtrees are left untouched.
+
+   %file-head-splice is similar but its inner forms go to the FILE HEAD (before
+   the first function), not next to the containing form — used by `with` to emit
+   the dynamic variable's declaration where every reader can see it. Collected
+   into [file_head]; deduped/placed by the caller.
+   Returns (hoisted_top_forms, cleaned_node_option). *)
+let rec hoist_splices ~file_head raw : Raw.t list * Raw.t option =
+  match raw with
+  | Raw.List ((Raw.Atom ("%file-head-splice", _) :: inner), _) ->
+      file_head := !file_head @ inner;
+      ([], None)
+  | Raw.List ((Raw.Atom ("%top-level-splice", _) :: inner), _) ->
+      let hoisted =
+        List.concat_map inner ~f:(fun f ->
+            let h, c = hoist_splices ~file_head f in
+            h @ Option.to_list c)
+      in
+      (hoisted, None)
+  | Raw.List ((Raw.Atom (("quote" | "quasiquote"), _) :: _), _) -> ([], Some raw)
+  | Raw.List (elems, sp) ->
+      let hoisted, cleaned =
+        List.fold elems ~init:([], []) ~f:(fun (hacc, cacc) el ->
+            let h, c = hoist_splices ~file_head el in
+            (hacc @ h, cacc @ Option.to_list c))
+      in
+      (hoisted, Some (Raw.List (cleaned, sp)))
+  | other -> ([], Some other)
+
+(* A function definition (possibly wrapped in %static/%inline/%extern). The
+   collected file-head declarations are injected right before the first one. *)
+let rec is_fn_def_form = function
+  | Raw.List ((Raw.Atom (("defn" | "%def-fn"), _) :: _), _) -> true
+  | Raw.List ((Raw.Atom (("%static" | "%inline" | "%extern"), _) :: [ inner ]), _) ->
+      is_fn_def_form inner
+  | _ -> false
+
+(* Name of a (%decl TYPE NAME [INIT]) head-splice declaration, for deduping a
+   dynamic variable declared at several `with` sites. *)
+let decl_var_name = function
+  | Raw.List ((Raw.Atom ("%decl", _) :: _ :: Raw.Atom (name, _) :: _), _) -> Some name
+  | _ -> None
+
+let dedup_file_head forms =
+  let seen = String.Hash_set.create () in
+  List.filter forms ~f:(fun f ->
+      match decl_var_name f with
+      | Some n -> if Hash_set.mem seen n then false else (Hash_set.add seen n; true)
+      | None -> true)
+
 let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   (* Core compile pipeline (in order):
      1) normalize %module names
@@ -470,17 +525,16 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   let mctx, _ = Macro.collect (raw_only non_doc_tops) in
   let non_macro_tops = List.filter non_doc_tops ~f:(fun t -> not (is_macro_decl t.form)) in
   logf "macro collect: %d forms — %s" (List.length non_doc_tops) (since t);
+  (* Declarations destined for the file head (dynamic variables from `with`),
+     accumulated across all forms and injected before the first function. *)
+  let file_head = ref [] in
   let emit_one (top : top_form) : string =
     let run () =
       let expanded = Macro.expand_program mctx [ top.form ] in
       let flattened_raws =
         List.concat_map expanded ~f:(fun raw ->
-          let rec flat = function
-            | Raw.List ((Raw.Atom ("%top-level-splice", _) :: inner), _) ->
-                List.concat_map inner ~f:flat
-            | other -> [ other ]
-          in
-          flat raw)
+          let hoisted, cleaned = hoist_splices ~file_head raw in
+          hoisted @ Option.to_list cleaned)
       in
       let parsed = List.map flattened_raws ~f:Frontend.parse_top in
       let body = List.map parsed ~f:Codegen_c.emit_top |> String.concat ~sep:"\n\n" in
@@ -519,6 +573,25 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   (match List.rev !errors with
    | [] -> ()
    | items -> raise (Common.Sexc_errors items));
+  (* Render file-head declarations (deduped) and splice them in just before the
+     first function definition — after includes/type defs, before any reader. *)
+  let chunks =
+    match dedup_file_head !file_head with
+    | [] -> chunks
+    | decls ->
+        let head =
+          List.map decls ~f:Frontend.parse_top
+          |> List.map ~f:Codegen_c.emit_top
+          |> String.concat ~sep:"\n\n"
+        in
+        let idx =
+          List.findi non_macro_tops ~f:(fun _ t -> is_fn_def_form t.form)
+          |> Option.map ~f:fst
+        in
+        (match idx with
+         | Some i -> List.concat [ List.take chunks i; [ head ]; List.drop chunks i ]
+         | None -> chunks @ [ head ])
+  in
   let c = String.concat ~sep:"\n\n" (List.filter chunks ~f:(fun s -> not (String.is_empty s))) in
   logf "compile per-form (%d tops) — %s" (List.length non_macro_tops) (since t);
   logf "codegen C: %d bytes" (String.length c);

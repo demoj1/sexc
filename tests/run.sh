@@ -58,7 +58,7 @@ if [[ ${total} -eq 0 && ${#example_files[@]} -eq 0 ]]; then
     exit 1
 fi
 
-printf 'Running %d snapshot cases + %d example compiles on %d workers\n' \
+printf 'Running %d snapshot cases + %d example compile/run checks on %d workers\n' \
     "${total}" "${#example_files[@]}" "${JOBS}"
 
 start_ns=$(date +%s%N)

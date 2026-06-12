@@ -1,0 +1,18 @@
+;; sexc-flags: --no-prelude
+; Declaration specifiers via :keyword attrs (thread_local etc.), composed with
+; the existing %storage classes; normal type forms must still parse.
+(%decl (:thread_local int) counter 0)
+(%decl (:static :thread_local (%ptr char)) buf)
+(%decl (:const (%ptr int)) cp)
+(%decl (%static int) plain 5)
+(%decl (%ptr int) normal)
+;==EXPECTED==
+_Thread_local int counter = 0;
+
+static _Thread_local char *buf;
+
+const int *cp;
+
+static int plain = 5;
+
+int *normal;

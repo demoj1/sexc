@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
-# Compile a SexC example end-to-end through gcc and check exit status.
+# Compile a SexC example end-to-end through gcc AND clang, and — if an expected
+# output sidecar exists — run it and diff stdout.
 #
 # Args: $1 = relative path to example .sexc (from repo root)
-# Env:  SEXC, ROOT, RESULTS_DIR
+# Env:  SEXC, ROOT, RESULTS_DIR, UPDATE
 #
-# Examples that need extra link flags can declare them in their first line:
+# Per-example knobs (first line of the .sexc):
 #   ;; sexc-test-flags: -lm -lpthread
+#
+# Expected stdout sidecar (optional): <example>.expected next to the .sexc.
+#   - present  -> the example is also run (gcc build) and its stdout diffed.
+#   - absent   -> compilation-only (both compilers must build it).
+#   - UPDATE=1 -> the sidecar is (re)generated from the actual run.
+#
+# clang is used only if installed; gcc is always required.
 
 set -uo pipefail
 
@@ -14,11 +22,11 @@ abs="${ROOT}/${src}"
 name="$(basename "${src%.sexc}")"
 slug="example-$(printf '%s' "${src}" | tr -c 'a-zA-Z0-9' '_')"
 results="${RESULTS_DIR:-/tmp}"
+expected="${abs%.sexc}.expected"
 
 if [[ ! -f "${abs}" ]]; then
-    {
-        printf '\033[31mFAIL\033[0m compile %s (file not found)\n' "${src}"
-    } | tee "${results}/${slug}.fail"
+    printf '\033[31mFAIL\033[0m compile %s (file not found)\n' "${src}" \
+        | tee "${results}/${slug}.fail"
     exit 0
 fi
 
@@ -29,20 +37,55 @@ if [[ "${first_line}" =~ sexc-test-flags:[[:space:]]*(.+)$ ]]; then
     extra_flags=(${BASH_REMATCH[1]})
 fi
 
-out_bin="$(mktemp -t "sexc_${name}.XXXXXX")"
-log="${results}/${slug}.log"
+# gcc is required; add clang to the matrix when available (portability check —
+# the examples lean on GNU extensions that both compilers must accept).
+compilers=(gcc)
+command -v clang >/dev/null 2>&1 && compilers+=(clang)
 
-if "${SEXC}" --quiet "${abs}" -C gcc % -O0 -w "${extra_flags[@]}" -lm -o "${out_bin}" \
-        > "${log}" 2>&1; then
-    rm -f "${out_bin}"
+gcc_bin=""
+for cc in "${compilers[@]}"; do
+    bin="$(mktemp -t "sexc_${name}_${cc}.XXXXXX")"
+    log="${results}/${slug}.${cc}.log"
+    if "${SEXC}" --quiet "${abs}" -C "${cc}" % -O0 -w "${extra_flags[@]}" -lm -o "${bin}" \
+            > "${log}" 2>&1; then
+        if [[ "${cc}" == gcc ]]; then gcc_bin="${bin}"; else rm -f "${bin}"; fi
+    else
+        rm -f "${bin}"
+        {
+            printf '\033[31mFAIL\033[0m compile %s (%s)\n' "${src}" "${cc}"
+            sed 's/^/    /' "${log}" | head -30
+        } | tee "${results}/${slug}.fail"
+        exit 0
+    fi
+done
+
+# Compilation-only when there's no expected sidecar and we're not creating one.
+if [[ ! -f "${expected}" && -z "${UPDATE:-}" ]]; then
+    rm -f "${gcc_bin}"
     printf '\033[32mPASS\033[0m compile %s\n' "${src}"
     touch "${results}/${slug}.pass"
     exit 0
 fi
 
-rm -f "${out_bin}"
+# Run the gcc-built binary and capture stdout.
+actual="${results}/${slug}.out"
+"${gcc_bin}" > "${actual}" 2>/dev/null
+rm -f "${gcc_bin}"
+
+if [[ -n "${UPDATE:-}" ]]; then
+    cp "${actual}" "${expected}"
+    printf '\033[36mUPDATE\033[0m run %s\n' "${src}"
+    touch "${results}/${slug}.pass"
+    exit 0
+fi
+
+if diff -q "${actual}" "${expected}" > /dev/null 2>&1; then
+    printf '\033[32mPASS\033[0m run %s\n' "${src}"
+    touch "${results}/${slug}.pass"
+    exit 0
+fi
 {
-    printf '\033[31mFAIL\033[0m compile %s\n' "${src}"
-    sed 's/^/    /' "${log}" | head -30
+    printf '\033[31mFAIL\033[0m run %s (output mismatch)\n' "${src}"
+    diff -u "${expected}" "${actual}" | sed 's/^/    /' | head -40
 } | tee "${results}/${slug}.fail"
 exit 0

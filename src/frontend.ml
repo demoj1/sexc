@@ -36,6 +36,7 @@ type ty =
   | TStruct of string * field list option
   | TUnion of string * field list option
   | TEnum of string * enum_variant list  (* [] = ссылка `enum Name`; иначе определение тела *)
+  | TTypeof of expr  (* GNU __typeof__(expr): infer a declaration's type from a value *)
 
 and field = {
   f_ty : ty;
@@ -50,8 +51,9 @@ and enum_variant = {
   ev_value : Raw.t option;
 }
 
-type decl = {
+and decl = {
   d_storage : storage list;
+  d_specs : string list;   (* raw C specifiers from :keyword attrs, e.g. ["_Thread_local"] *)
   d_ty : ty;
   d_name : string;
   d_init : expr option;
@@ -145,6 +147,26 @@ let storage_of_atom = function
   | "%typedef" -> Some Typedef
   | _ -> None
 
+(* :keyword declaration specifiers → raw C specifier text. *)
+let spec_of_keyword = function
+  | ":thread_local" -> Some "_Thread_local"
+  | ":static" -> Some "static"
+  | ":extern" -> Some "extern"
+  | ":register" -> Some "register"
+  | ":auto" -> Some "auto"
+  | ":inline" -> Some "inline"
+  | ":const" -> Some "const"
+  | ":volatile" -> Some "volatile"
+  | ":atomic" | ":_Atomic" -> Some "_Atomic"
+  | _ -> None
+
+let allowed_decl_specifiers =
+  ":thread_local :static :extern :register :auto :inline :const :volatile :atomic"
+
+(* Forward reference to parse_expr: parse_type needs it for (%typeof EXPR), but
+   parse_expr is defined later (it depends on parse_type). Set just below. *)
+let parse_expr_fwd : (Raw.t -> expr) ref = ref (fun _ -> fail "parse_expr not initialized")
+
 let rec parse_type_from_elems elems =
   match elems with
   | [] -> fail "Empty type"
@@ -189,6 +211,7 @@ and parse_type = function
             | _ -> args, false
           in
           TFn (parse_type ret, List.map args_t ~f:parse_type, varargs)
+      | "%typeof", [ e ] -> TTypeof (!parse_expr_fwd e)
       | "%const", [ inner ] -> apply_qual Const (parse_type inner)
       | "%volatile", [ inner ] -> apply_qual Volatile (parse_type inner)
       | "%restrict", [ inner ] -> apply_qual Restrict (parse_type inner)
@@ -203,22 +226,37 @@ and parse_type = function
   | Raw.List (elems, _) -> parse_type_from_elems elems
 
 let parse_decl_type raw =
+  let bare ty = { d_storage = []; d_specs = []; d_ty = ty; d_name = ""; d_init = None } in
   match raw with
-  | Raw.List ((Raw.Atom (h, _) :: tail), _) -> (
-      match storage_of_atom h with
-      | None -> { d_storage = []; d_ty = parse_type raw; d_name = ""; d_init = None }
-      | Some _ ->
-          let rec collect stor rem =
-            match rem with
-            | Raw.Atom (a, _) :: tl -> (
-                match storage_of_atom a with
-                | Some s -> collect (s :: stor) tl
-                | None -> (List.rev stor, rem))
-            | _ -> (List.rev stor, rem)
-          in
-          let stor, rest = collect [] (Raw.Atom (h, None) :: tail) in
-          { d_storage = stor; d_ty = parse_type_from_elems rest; d_name = ""; d_init = None })
-  | _ -> { d_storage = []; d_ty = parse_type raw; d_name = ""; d_init = None }
+  | Raw.List ((Raw.Atom _ :: _) as items, _) ->
+      (* Peel leading :keyword specifiers and %storage atoms; the rest is the type.
+         A ':'-prefixed atom must be a known specifier, else it is an error. *)
+      let rec collect specs stor rem =
+        match rem with
+        | Raw.Atom (a, _) :: tl when String.is_prefix a ~prefix:":" -> (
+            match spec_of_keyword a with
+            | Some s -> collect (s :: specs) stor tl
+            | None ->
+                failf "Unknown decl specifier %s (allowed: %s)" a allowed_decl_specifiers)
+        | Raw.Atom (a, _) :: tl -> (
+            match storage_of_atom a with
+            | Some s -> collect specs (s :: stor) tl
+            | None -> (List.rev specs, List.rev stor, rem))
+        | _ -> (List.rev specs, List.rev stor, rem)
+      in
+      let specs, stor, rest = collect [] [] items in
+      if List.is_empty specs && List.is_empty stor then
+        (* No specifiers peeled: parse the whole form as an intrinsic/named type
+           (so (%ptr int), (%array int 4), (%const int) keep working). *)
+        bare (parse_type raw)
+      else
+        let ty =
+          match rest with
+          | [] -> fail "decl type: specifiers given but no type follows"
+          | _ -> parse_type_from_elems rest
+        in
+        { d_storage = stor; d_specs = specs; d_ty = ty; d_name = ""; d_init = None }
+  | _ -> bare (parse_type raw)
 
 let ensure_arity name args expected =
   if List.length args <> expected then
@@ -285,6 +323,12 @@ and parse_intrinsic_expr h args =
         | other -> RawExpr (parse_expr other)
       in
       ERaw (List.map args ~f:parse_raw_part)
+  | "%expr" ->
+      (* Force the argument to be parsed as an expression. Useful inside %raw,
+         where a bare string is raw C text — (%expr "x") makes it the string
+         literal "x" instead. Identity for everything else. *)
+      ensure_arity h args 1;
+      parse_expr (List.hd_exn args)
   | "%!" | "%~" ->
       ensure_arity h args 1;
       EUnary (String.drop_prefix h 1, parse_expr (List.hd_exn args))
@@ -347,6 +391,9 @@ and parse_intrinsic_expr h args =
       EAssign (c_binary_op op, parse_expr (List.nth_exn args 0), parse_expr (List.nth_exn args 1))
   | _ -> failf "Unknown intrinsic expression: %s" h
 
+(* Wire the forward reference now that parse_expr exists (see parse_expr_fwd). *)
+let () = parse_expr_fwd := parse_expr
+
 let parse_decl args =
   match args with
   | ty_s :: Raw.Atom (name, _) :: rest ->
@@ -357,7 +404,8 @@ let parse_decl args =
         | [ x ] -> Some (parse_expr x)
         | _ -> fail "%decl accepts at most one initializer"
       in
-      { d_storage = ty_rec.d_storage; d_ty = ty_rec.d_ty; d_name = name; d_init = init }
+      { d_storage = ty_rec.d_storage; d_specs = ty_rec.d_specs;
+        d_ty = ty_rec.d_ty; d_name = name; d_init = init }
   | _ -> fail "%decl must be (%decl type name [init])"
 
 let rec parse_stmt_or_decl raw =

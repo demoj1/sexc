@@ -1,0 +1,68 @@
+; Explicit-type `with`: the (Type var) binding states the type (no __typeof__).
+; The hoisted decl lands at the file head — before `reader`, which is defined
+; above its first binder; two binds of `depth` dedup to one declaration; a
+; pointer type (%ptr FILE) is supported too.
+(include <stdio.h>)
+
+(defn void reader ()
+  (printf "%d\n" depth))
+
+(defn int main ()
+  (with (int depth) 1
+    (reader)
+    (with (int depth) 2
+      (reader)))
+  (with ((%ptr FILE) *out*) stdout
+    (fprintf *out* "done\n"))
+  (return 0))
+;==EXPECTED==
+#include <stdio.h>
+
+_Thread_local int depth;
+
+_Thread_local FILE *_u002A_out_u002A_;
+
+void reader(void)
+{
+  printf("%d\n", depth);
+}
+
+#ifndef SX_WITH_GUARD_
+
+#define SX_WITH_GUARD_
+
+typedef struct __sx_with_guard {
+  void *slot;
+  const void *saved;
+  unsigned long size;
+} __sx_with_guard;
+
+static inline void __sx_with_restore(const __sx_with_guard *g)
+{
+  unsigned char *__d=(unsigned char*)g->slot;const unsigned char *__s=(const unsigned char*)g->saved;for(unsigned long __i=0;__i<g->size;__i++)__d[__i]=__s[__i];;
+}
+
+#endif
+
+int main(void)
+{
+  {
+    __auto_type sx_with_saved_0 = depth;
+    __sx_with_guard sx_with_guard_1 __attribute__((cleanup(__sx_with_restore))) = { &(depth), &sx_with_saved_0, sizeof(depth) };
+    depth = 1;
+    reader();
+    {
+      __auto_type sx_with_saved_2 = depth;
+      __sx_with_guard sx_with_guard_3 __attribute__((cleanup(__sx_with_restore))) = { &(depth), &sx_with_saved_2, sizeof(depth) };
+      depth = 2;
+      reader();
+    }
+  }
+  {
+    __auto_type sx_with_saved_4 = _u002A_out_u002A_;
+    __sx_with_guard sx_with_guard_5 __attribute__((cleanup(__sx_with_restore))) = { &(_u002A_out_u002A_), &sx_with_saved_4, sizeof(_u002A_out_u002A_) };
+    _u002A_out_u002A_ = stdout;
+    fprintf(_u002A_out_u002A_, "done\n");
+  }
+  return 0;
+}

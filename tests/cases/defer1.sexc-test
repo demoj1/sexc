@@ -1,0 +1,37 @@
+; `defer1` registers a scoped cleanup in the CURRENT block (no extra scope), so
+; two defer1s run LIFO at block exit; the defer-runtime helper is hoisted once.
+(include <stdlib.h>)
+
+(defn int demo ()
+  (decl ((%ptr int) a) (cast (%ptr int) (malloc (%raw "sizeof(int)"))))
+  (defer1 free a)
+  (decl ((%ptr int) b) (cast (%ptr int) (malloc (%raw "sizeof(int)"))))
+  (defer1 free b)
+  (return 0))
+;==EXPECTED==
+#include <stdlib.h>
+
+#ifndef SX_DEFER_GUARD_
+
+#define SX_DEFER_GUARD_
+
+typedef struct __sx_defer_guard {
+  void (*fn)(void *);
+  void *arg;
+} __sx_defer_guard;
+
+static inline void __sx_defer_run(const __sx_defer_guard *g)
+{
+  g->fn(g->arg);;
+}
+
+#endif
+
+int demo(void)
+{
+  int *a = (int *)malloc(sizeof(int));
+  __sx_defer_guard sx_defer_guard_0 __attribute__((cleanup(__sx_defer_run))) = { (void (*)(void *))free, (void *)(a) };
+  int *b = (int *)malloc(sizeof(int));
+  __sx_defer_guard sx_defer_guard_1 __attribute__((cleanup(__sx_defer_run))) = { (void (*)(void *))free, (void *)(b) };
+  return 0;
+}

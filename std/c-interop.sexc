@@ -508,10 +508,12 @@
 ; (Point# :x 1 :y 2) => (cast Point (init :x 1 :y 2)) => (Point){.x = 1, .y = 2}.
 
 ; positional: e1 ", " e2 ", " e3
+; Values are wrapped in (%expr ...) so a string value emits as a C string
+; literal ("x"), not as raw %raw text (x); identity for non-strings.
 ($defun $init-positional (elems)
   ($if ($null? ($cdr elems))
-    ($list ($car elems))
-    ($cons ($car elems) ($cons ", " ($init-positional ($cdr elems))))))
+    ($list `(%expr ,($car elems)))
+    ($cons `(%expr ,($car elems)) ($cons ", " ($init-positional ($cdr elems))))))
 
 ; designated: :f v ... → ".f = " v ", " ".g = " w ...
 ($defun $init-fields (pairs)
@@ -521,7 +523,7 @@
       ($assert ($keyword? ($car pairs)) "init: designated field must be a :keyword")
       ($assert ($not ($null? ($cdr pairs))) "init: :keyword field needs a value")
       ($let ((piece ($str "." ($keyword-name ($car pairs)) " = "))
-             (val   ($car ($cdr pairs)))
+             (val   `(%expr ,($car ($cdr pairs))))
              (rest  ($cdr ($cdr pairs))))
         ($if ($null? rest)
           ($list piece val)
@@ -787,3 +789,91 @@
   ($if ($null? clauses)
     ($error "cond! requires at least one clause")
     `(%top-level-splice ,@($cond!-clauses clauses 't))))
+
+; ─── Dynamic binding (`with`) and scoped cleanup (`defer1`) ──────────────────
+;
+; Both ride on __attribute__((cleanup)) (GCC + Clang), so the bound value is
+; restored / the deferred call runs on ANY exit from the enclosing block —
+; including return/break/goto — in LIFO order. Each helper (a guard struct +
+; restore/run fn) is hoisted to file scope on first use via %top-level-splice;
+; the $sx-*-runtime emitters fire once apiece (and #ifndef-guard themselves), so
+; a file using only one of with/defer1 carries only that helper.
+
+($defun $sx-with-runtime ()
+  ($if ($m-get 'sx-cleanup :with)
+    ($list)
+    ($do
+      ($m-put 'sx-cleanup :with 't)
+      ($list
+        `(%top-level-splice
+           (%cpp "ifndef SX_WITH_GUARD_")
+           (%cpp "define SX_WITH_GUARD_")
+           (%typedef
+             (%struct __sx_with_guard
+               ((%ptr void) slot) ((%ptr (%const void)) saved) ((unsigned long) size))
+             __sx_with_guard)
+           (%static (%inline (%def-fn void __sx_with_restore (((%ptr (%const __sx_with_guard)) g))
+             (%block (%raw "unsigned char *__d=(unsigned char*)g->slot;const unsigned char *__s=(const unsigned char*)g->saved;for(unsigned long __i=0;__i<g->size;__i++)__d[__i]=__s[__i];")))))
+           (%cpp "endif"))))))
+
+($defun $sx-defer-runtime ()
+  ($if ($m-get 'sx-cleanup :defer)
+    ($list)
+    ($do
+      ($m-put 'sx-cleanup :defer 't)
+      ($list
+        `(%top-level-splice
+           (%cpp "ifndef SX_DEFER_GUARD_")
+           (%cpp "define SX_DEFER_GUARD_")
+           (%typedef
+             (%struct __sx_defer_guard
+               ((%ptr (%fn void ((%ptr void)))) fn) ((%ptr void) arg))
+             __sx_defer_guard)
+           (%static (%inline (%def-fn void __sx_defer_run (((%ptr (%const __sx_defer_guard)) g))
+             (%block (%raw "g->fn(g->arg);")))))
+           (%cpp "endif"))))))
+
+(%doc with
+  :sig (with binding value body...)
+  :doc "Dynamic binding: set the variable to VALUE for the dynamic extent of BODY, then restore its previous value on ANY exit from the block (return/break/goto included, via __attribute__((cleanup))). The variable is declared once (thread_local) at the file head, so callees down the stack see it — Clojure-binding / Odin-context style. BINDING chooses how its type is found: a bare atom `var` infers the type via __typeof__(VALUE); a list `(Type var)` states the type explicitly (needed for self-referential or local-typed values). GCC/Clang only."
+  :example "(with *out* stdout (run))  ; or (with (int depth) (+ depth 1) ...)")
+(%defmacro with (binding value &rest body)
+  ($let ((var   ($if ($atom? binding) binding ($|> binding $cdr $car)))
+         (ty    ($if ($atom? binding) `(%typeof ,value) ($car binding)))
+         (saved ($gensym "sx_with_saved_"))
+         (guard ($gensym "sx_with_guard_")))
+    ($assert ($atom? var) "with: variable name must be an atom")
+    `(%block
+       (%file-head-splice (%decl (:thread_local ,ty) ,var))
+       ,@($sx-with-runtime)
+       (%decl __auto_type ,saved ,var)
+       (%raw "__sx_with_guard " ,guard " __attribute__((cleanup(__sx_with_restore))) = { &(" ,var "), &" ,saved ", sizeof(" ,var ") }")
+       (set ,var ,value)
+       ,@body)))
+
+; Build one guard declaration form (a %raw statement) for FN(ARG) at scope exit.
+; Shared by defer1 and defer*; each call gensyms its own guard variable.
+($defun $sx-defer-decl (fn arg)
+  ($let ((guard ($gensym "sx_defer_guard_")))
+    `(%raw "__sx_defer_guard " ,guard " __attribute__((cleanup(__sx_defer_run))) = { (void (*)(void *))" ,fn ", (void *)(" ,arg ") }")))
+
+(%doc defer1
+  :sig (defer1 fn arg)
+  :doc "Scoped resource cleanup: call FN(ARG) when control leaves the enclosing block by ANY path (return/break/goto), via __attribute__((cleanup)). FN must take a single pointer argument; ARG is captured at the defer1 site. Runs LIFO with other defer1/with in the same block. For free/fclose/unlock/... GCC/Clang only. (Non-void returns / non-pointer args rely on a function-pointer cast that is practically portable but formally UB.)"
+  :example "(defer1 free buf)")
+(%defmacro defer1 (fn arg)
+  `(%evals (quote ,($append ($sx-defer-runtime) ($list ($sx-defer-decl fn arg))))))
+
+(%doc defer*
+  :sig (defer* (fn arg)...)
+  :doc "Batch of defer1: each clause is a one-argument call (FN ARG) registered as a scoped cleanup. Equivalent to writing a defer1 per clause; all run LIFO at block exit (so later clauses run first). GCC/Clang only. See defer1."
+  :example "(defer* (free a) (fclose f))")
+(%defmacro defer* (&rest clauses)
+  ($let ((decls
+          ($map
+            ($do
+              ($assert ($not ($atom? it))     "defer*: each clause must be (fn arg)")
+              ($assert ($eq? ($length it) 2)  "defer*: each clause must be exactly (fn arg)")
+              ($sx-defer-decl ($car it) ($|> it $cdr $car)))
+            clauses)))
+    `(%evals (quote ,($append ($sx-defer-runtime) decls)))))

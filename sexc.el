@@ -70,12 +70,13 @@ The command must accept source on stdin and print generated C to stdout."
 (defcustom sexc/surface-keywords
   '("include" "define" "defn" "decl" "block" "if" "cond"
     "while" "for" "return" "set" "cast" "struct" "union"
-    "adecl" "free*"
+    "adecl" "free*" "typedef" "enum" "init"
     "zero-init" "sizeof-type" "sizeof-expr" "aref" "dot" "arrow"
     "." "->" "not" "+" "-" "*" "/" "%" "=" "not=" "<" "<=" ">"
     ">=" "&&" "and" "||" "or" "post-inc" "nop"
     "when" "unless" "incf" "decf" "incf-by" "decf-by"
     "dotimes" "for-range" "repeat"
+    "when!" "if!" "cond!" "with" "defer1" "defer*"
     "|>" "||>" "|as>")
   "Surface DSL keywords/macros (no %/$ prefix)."
   :type '(repeat string)
@@ -107,6 +108,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("for" . (4 4 4 &body))
     ("dotimes" . (4 4 &body))
     ("for-range" . (4 4 4 &body))
+    ("with" . (4 4 &body))
     ("%defmacro" . (4 4 &body))
     ("%eval" . (&body))
     ("%evals" . (&body))
@@ -125,6 +127,9 @@ The command must accept source on stdin and print generated C to stdout."
     ("decl" . "(decl (TYPE NAME) INIT ...) -> let*-style declarations")
     ("adecl" . "(adecl (TYPE NAME) SIZE ...) -> let*-style malloc declarations")
     ("free*" . "(free* PTR...) -> emit block of free calls")
+    ("with" . "(with VAR VALUE BODY...) -> dynamic binding; restores VAR on any block exit")
+    ("defer1" . "(defer1 FN ARG) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
+    ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")
     ("set" . "(set LHS VALUE [LHS2 VALUE2 ...])")
     ("struct" . "(struct Name :fields ... [:methods (defn ...)...])")
     ("union" . "(union Name (TYPE FIELD) ...)")
