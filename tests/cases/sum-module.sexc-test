@@ -4,7 +4,7 @@
 ; qualified names itself (enum variants are name-protected by the %-IR pass) and
 ; is registered in collect_module_defined_names so user type refs qualify too.
 (%module geo)
-(defsum Shape (Circle (float r)) (Rect (float w) (float h)))
+(defsum Shape :variants (Circle (float r)) (Rect (float w) (float h)))
 (defn float area ((Shape s))
   (match s
     (Circle (r)   (return (* 3.14f r r)))

@@ -1,0 +1,76 @@
+; shapes.sexc — flagship showcase.
+;
+; Puts the headline features in one small program:
+;   - struct + methods   — fields, methods (Point/scale), a derived printer
+;   - defsum / match     — tagged unions with methods + exhaustive matching
+;   - adecl / decl / set — heap allocation, let*-style bindings, grouped assign
+;   - defer              — scoped cleanup on every exit path
+;   - |>                 — threading (pipe) instead of nested calls
+;   - %eval              — compile-time reflection: code generated from metadata
+;
+; (Modules live in their own file — a %module's `main` would be namespaced;
+;  see examples/complex-project. Everything here compiles to plain C.)
+
+(include <stdio.h>)
+(include <stdlib.h>)
+
+; ── a struct with a method and a printer DERIVED from its :fields metadata ────
+(struct Point
+  :fields (float x) (float y)
+  :methods
+  (derive/prints)                                ; => Point/print + Point/print*
+  (defn Point scale ((Point self) (float k))     ; a method → Point/scale
+    (return (Point# :x (* (. self x) k) :y (* (. self y) k)))))
+
+; ── a sum type: every Shape carries a center Point plus its own payload, and
+;    its own methods. `_` in a match arm ignores a field; miss a variant and
+;    the compiler stops you. ──────────────────────────────────────────────────
+(defsum Shape
+  :variants
+  (Circle (Point center) (float r))
+  (Rect   (Point center) (float w) (float h))
+  (Dot    (Point center))
+
+  :methods
+  (defn float area ((Shape self))                ; => Shape/area
+    (match self
+      (Shape/Circle (_ r)   (return (* 3.14159f r r)))
+      (Shape/Rect   (_ w h) (return (* w h)))
+      (Shape/Dot    (_)     (return 0.0f))))
+
+  (defn Point center ((Shape self))              ; => Shape/center (projection)
+    (match self
+      (Shape/Circle (c _)   (return c))
+      (Shape/Rect   (c _ _) (return c))
+      (Shape/Dot    (c)     (return c)))))
+
+; ── compile-time reflection: GENERATE shape-name from the variant metadata ────
+; reads ($m-get 'Shape :variants) and emits one match arm per variant.
+(%eval
+  `(defn (:* :const char) shape-name ((Shape s))
+     (match s
+       ,@($for (v ($m-get 'Shape :variants))
+           `(,($symcat 'Shape "/" ($car v)) () (return ,($str ($car v))))))))
+
+(defn int main ()
+  ; `#` is the constructor convention (like `new`); Point# is a struct literal.
+  (decl (Shape a) (Shape/Circle# (Point# :x 1.0f :y 1.0f) 3.0f)
+        (Shape b) (Shape/Rect#   (Point# :x 4.0f :y 2.0f) 4.0f 5.0f)
+        (Shape d) (Shape/Dot#    (Point# :x 0.0f :y 0.0f)))
+
+  ; adecl bump-allocates the array; defer frees it on every exit path.
+  (adecl (Shape items) (* 3 (sizeof Shape)))
+  (defer1 free items)
+
+  (set (aref items 0) a
+       (aref items 1) b
+       (aref items 2) d)
+
+  (dotimes i 3
+    (decl (Shape s) (aref items i))
+    (printf "%-6s area = %.2f\n" (shape-name s) (Shape/area s)))
+
+  ; thread a shape through a pipeline: center → scaled ×2 → derived printer
+  (printf "\ncircle's center, scaled x2:\n")
+  (|> a Shape/center (Point/scale 2.0f) Point/print)
+  (return 0))

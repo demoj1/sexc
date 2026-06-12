@@ -16,4 +16,4 @@ examples/with-infer.sexc
 examples/with-alloca.sexc
 examples/complex-project/main.sexc
 examples/predicates.sexc
-examples/sum-types.sexc
+examples/shapes.sexc

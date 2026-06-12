@@ -480,11 +480,17 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 Алгебраические типы (Rust/OCaml-вариант) — **чистый макрос**, ядро не трогали
 (кроме `#`-диспатча и `defsum` в `collect_module_defined_names`).
 
+Секции `:variants` (обязательна, первая) и `:methods` (опц.) — параллельно
+struct/enum (парсинг тем же `$reduce`):
 ```
 (defsum Shape
+  :variants
   (Circle (float r))
   (Rect   (float w) (float h))
-  (Unit))                          ; вариант без полей
+  (Unit)                           ; вариант без полей
+  :methods
+  (defn float area ((Shape self))  ; → Shape/area (как методы struct)
+    (match self ...)))
 ```
 Раскрывается в (всё имена квалифицируются модулем, печём `base = ($qualify Name)`):
 - enum-тег `Name/tag` { `Name/Circle`, … } — значения тегов;
@@ -492,6 +498,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 - сам тип `Name = struct { Name/tag tag; union { Name/Circle/p Circle; … } u; }`
   (union опускается, если НИ у одного варианта нет полей);
 - предикаты-функции `Name/Circle?` → `s.tag == Name/Circle`;
+- `:methods` → `defn` переименовывается в `Name/method` (как в struct);
 - метадата: на типе `:kind 'sum :variants :tag-type`; на каждом варианте
   `Name/Variant` → `:sum-of :member :fields`.
 

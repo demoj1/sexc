@@ -2,6 +2,7 @@
 ; + predicates VName? ; match → switch with positional field binding and a
 ; diverging default (exhaustive, so __builtin_unreachable silences -Wreturn-type).
 (defsum Shape
+  :variants
   (Circle (float r))
   (Rect   (float w) (float h)))
 

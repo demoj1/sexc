@@ -1,0 +1,9 @@
+Circle area = 28.27
+Rect   area = 20.00
+Dot    area = 0.00
+
+circle's center, scaled x2:
+Point {
+  x = 2.000000
+  y = 2.000000
+}

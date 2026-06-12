@@ -47,24 +47,59 @@
       ($sum-missing ($cdr allnames) covered)
       ($cons ($car allnames) ($sum-missing ($cdr allnames) covered)))))
 
-; зип (binder × (ty field)) → список (decl (ty binder) scrut.u.member.field)
+; зип (binder × (ty field)) → список (decl (ty binder) scrut.u.member.field).
+; Биндер `_` — поле игнорируется (decl не эмитится), позиция всё равно съедается.
 ($defun $sum-binds (scrut member binders fields)
   ($if ($null? binders) ($list)
     ($do
       ($assert ($not ($null? fields)) "match: more binders than fields in variant")
-      ($cons
-        `(decl (,($car ($car fields)) ,($car binders))
-               (. (. (. ,scrut u) ,member) ,($car ($cdr ($car fields)))))
-        ($sum-binds scrut member ($cdr binders) ($cdr fields))))))
+      ($let ((rest ($sum-binds scrut member ($cdr binders) ($cdr fields))))
+        ($if ($eq? ($car binders) '_)
+          rest
+          ($cons
+            `(decl (,($car ($car fields)) ,($car binders))
+                   (. (. (. ,scrut u) ,member) ,($car ($cdr ($car fields)))))
+            rest))))))
 
 ; ─── defsum ─────────────────────────────────────────────────────────────────
 
+; Секции (параллельно struct/enum):
+;   :variants   (обязательна, первая) — (Variant (type field)...) ...
+;   :methods    (опц.)                — (defn ret method params body...) → Name/method
 (%doc defsum
-  :doc "Define a tagged union (sum type): (defsum Name (Variant (type field)...) ...). Construct with Name/Variant#, branch with match."
-  :example "(defsum Shape (Circle (float r)) (Rect (float w) (float h)))")
-(%defmacro defsum (name &rest variants)
+  :doc "Define a tagged union (sum type) with :variants and optional :methods sections. Construct with Name/Variant#, branch with match."
+  :example "(defsum Shape :variants (Circle (float r)) (Rect (float w) (float h)))")
+(%defmacro defsum (name &rest items)
   ($let ((base   ($qualify name))
-         (tagty  ($symcat base "/tag"))
+         ; разбор секций :variants / :methods
+         (state
+          ($reduce
+            ($let ((phase ($car acc))
+                   (vvals ($|> acc $cdr $car))
+                   (mvals ($|> acc $cdr $cdr $car)))
+              ($if ($eq? it :variants)
+                ($do
+                  ($assert ($eq? phase 'start) "defsum: ':variants' section must appear only once and first")
+                  ($list 'variants vvals mvals))
+                ($if ($eq? it :methods)
+                  ($do
+                    ($assert ($eq? phase 'variants) "defsum: ':methods' must appear after ':variants' and only once")
+                    ($list 'methods vvals mvals))
+                  ($do
+                    ($assert ($not ($eq? phase 'start)) "defsum must start with ':variants' section")
+                    ($if ($eq? phase 'variants)
+                      ($do
+                        ($assert ($not ($atom? it)) "defsum variant must be (Name (type field)...)")
+                        ($list phase ($append vvals ($list it)) mvals))
+                      ($do
+                        ($assert ($not ($atom? it)) "':methods' items must be lists: (defn ...) or a method-generator")
+                        ($list phase vvals ($append mvals ($list it)))))))))
+            ($list 'start ($list) ($list))
+            items))
+         (phase    ($car state))
+         (variants ($|> state $cdr $car))
+         (methods  ($|> state $cdr $cdr $car))
+         (tagty   ($symcat base "/tag"))
          (unionty ($symcat base "/u"))
          ; ключи тегов (enum-константы) и payload-имена
          (vkeys  ($map ($symcat base "/" ($car it)) variants))
@@ -82,7 +117,24 @@
          ; предикаты VName?
          (preds ($map `(defn int ,($symcat base "/" ($car it) "?") ((,base s))
                          (return (= (. s tag) ,($symcat base "/" ($car it)))))
-                      variants)))
+                      variants))
+         ; методы: (defn ret m params body) → (defn ret Name/m params body);
+         ; иначе генератор метода (GEN Name . args) — как в struct.
+         (methimpls ($map
+                      ($if ($eq? ($car it) 'defn)
+                        ($do
+                          ($assert ($not ($null? ($|> it $cdr)))           "defsum method must include return type")
+                          ($assert ($not ($null? ($|> it $cdr $cdr)))      "defsum method must include method name")
+                          ($assert ($not ($null? ($|> it $cdr $cdr $cdr))) "defsum method must include parameter list")
+                          ($let ((ret    ($|> it $cdr $car))
+                                 (mname  ($|> it $cdr $cdr $car))
+                                 (params ($|> it $cdr $cdr $cdr $car))
+                                 (mbody  ($|> it $cdr $cdr $cdr $cdr)))
+                            ($assert ($atom? mname) "defsum method name must be an atom")
+                            `(defn ,ret ,($symcat base "/" mname) ,params ,@mbody)))
+                        ($cons ($car it) ($cons base ($cdr it))))
+                      methods)))
+    ($assert ($not ($eq? phase 'start)) "defsum expects ':variants' section")
     ($do
       ; метадата типа + вариантов
       ($m-put base :kind 'sum :variants variants :tag-type tagty)
@@ -93,7 +145,8 @@
          (%typedef (%enum ,tagty ,@vkeys) ,tagty)
          ,@payloads
          (%typedef (%struct ,base ,@sumfields) ,base)
-         ,@preds))))
+         ,@preds
+         ,@methimpls))))
 
 ; ─── конструктор (вызывается правилом `#` из macro.ml) ───────────────────────
 
