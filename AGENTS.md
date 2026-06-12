@@ -499,7 +499,9 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 видит `:sum-of` в мете и делегирует sexc-макросу `sum-construct`, который читает
 мету и строит тегированный compound literal `(cast Name (init :tag … :u (init :Circle (init v1 v2))))`.
 
-**match** (`(match s (Variant (binders…) body…) … [...])`):
+**match** (`(match s (Type/Variant (binders…) body…) … [...])`):
+- имя варианта пишется **явно** `Shape/Circle` (рекомендуется, как конструктор/
+  предикат) или коротко `Circle`; `$sum-armkey` приводит оба к ключу `sty/Variant`;
 - тип скрутини берётся из `($m-get s :c-type)` → `:variants` (s — переменная);
 - → `%switch (. s tag)` + на каждый arm `%case Name/Variant` с позиционным
   биндингом полей через `(decl (ty bn) (. (. (. s u) member) field))` + `%break`;

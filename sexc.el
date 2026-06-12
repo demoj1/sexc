@@ -143,7 +143,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("struct" . "(struct Name :fields ... [:methods (defn ...)...])")
     ("union" . "(union Name (TYPE FIELD) ...)")
     ("defsum" . "(defsum Name (Variant (TYPE FIELD)...) ...) -> tagged union; construct Name/Variant#, branch with match")
-    ("match" . "(match SCRUT (Variant (BINDERS...) BODY...) ... [...]) -> switch on a sum; trailing ... allows non-exhaustive")
+    ("match" . "(match SCRUT (Type/Variant (BINDERS...) BODY...) ... [...]) -> switch on a sum; variant explicit (Type/Variant) or short; trailing ... allows non-exhaustive")
     ("%eval" . "(%eval EXPR) -> evaluate compile-time expression to one form")
     ("%evals" . "(%evals EXPR) -> evaluate compile-time expression to list splice")
     ("%raw" . "(%raw PART...) -> inline C fragment in expression context")

@@ -21,12 +21,14 @@
 
 ; ─── helpers ────────────────────────────────────────────────────────────────
 
-; найти fieldspec'ы варианта по простому имени в списке :variants
-($defun $sum-find (vname variants)
-  ($if ($null? variants) nil
-    ($if ($eq? ($car ($car variants)) vname)
-      ($cdr ($car variants))
-      ($sum-find vname ($cdr variants)))))
+; ключ варианта (тег/мета) по arm-имени. Принимаем оба написания:
+;   Circle        — короткое (внутри match тип известен) → sty/Circle
+;   Shape/Circle  — явное (как в конструкторе Shape/Circle# и предикате) →
+;                   квалифицируем модулем. Рекомендуется явное.
+($defun $sum-armkey (sty ahead)
+  ($if ($null? ($namespace-of ahead))
+    ($symcat sty "/" ahead)        ; без '/' → короткое имя варианта
+    ($qualify ahead)))             ; с '/' → Type/Variant, доквалифицируем модулем
 
 ; x ∈ lst ?
 ($defun $sum-has? (x lst)
@@ -109,12 +111,13 @@
 ; ─── match ──────────────────────────────────────────────────────────────────
 
 ; (match s
-;   (Circle (r)   body...)
-;   (Rect   (w h) body...)
+;   (Shape/Circle (r)   body...)
+;   (Shape/Rect   (w h) body...)
 ;   ...)              ; хвостовой ... = частичный match (без exhaustiveness)
+; Имя варианта — явное Shape/Circle (рекомендуется) или короткое Circle.
 (%doc match
-  :doc "Pattern-match on a sum value: (match s (Variant (binders...) body...) ...). Positional binders. A trailing ... allows a non-exhaustive match; otherwise all variants must be covered."
-  :example "(match s (Circle (r) (return (* 3.14 r r))) (Rect (w h) (return (* w h))))")
+  :doc "Pattern-match on a sum value: (match s (Type/Variant (binders...) body...) ...). Variant is written explicitly (Type/Variant) or short (Variant). Positional binders. A trailing ... allows a non-exhaustive match; otherwise all variants must be covered."
+  :example "(match s (Shape/Circle (r) (return (* 3.14 r r))) (Shape/Rect (w h) (return (* w h))))")
 (%defmacro match (scrut &rest clauses)
   ($do
     ($assert ($atom? scrut) "match: scrutinee must be a variable")
@@ -123,12 +126,14 @@
       ($let ((variants ($m-get sty :variants))
              (partial  ($if ($null? clauses) nil ($eq? ($car ($reverse clauses)) '...)))
              (arms     ($if partial ($reverse ($cdr ($reverse clauses))) clauses))
-             (covered  ($map ($car it) arms))
-             (allnames ($map ($car it) variants)))
+             ; ключи (полные, sty/Variant): и для покрытых, и для всех вариантов —
+             ; так короткое и явное написание arm'а сравниваются одинаково.
+             (covered  ($map ($sum-armkey sty ($car it)) arms))
+             (allkeys  ($map ($symcat sty "/" ($car it)) variants)))
         ($assert ($not ($null? variants)) "match: type is not a defsum")
         ; exhaustiveness (если нет хвостового ...)
         ($if partial nil
-          ($let ((missing ($sum-missing allnames covered)))
+          ($let ((missing ($sum-missing allkeys covered)))
             ($if ($null? missing) nil
               ($error ($str "match: non-exhaustive, missing variants: "
                             ($sum-names-str missing)
@@ -136,16 +141,20 @@
         ; собираем %case на каждый arm
         ($let ((cases
                 ($map
-                  ($let ((vname ($car it))
+                  ($let ((ahead   ($car it))
                          (binders ($car ($cdr it)))
-                         (body ($cdr ($cdr it)))
-                         (fields ($sum-find vname variants))
-                         (vkey ($symcat sty "/" vname)))
-                    `(%case ,vkey
-                       (%block
-                         ,@($sum-binds scrut vname binders fields)
-                         ,@body
-                         (%break))))
+                         (body    ($cdr ($cdr it)))
+                         (vkey    ($sum-armkey sty ahead))
+                         (member  ($m-get vkey :member))
+                         (fields  ($m-get vkey :fields)))
+                    ($do
+                      ($assert ($not ($null? member))
+                               ($str "match: unknown variant " ahead " for this type"))
+                      `(%case ,vkey
+                         (%block
+                           ,@($sum-binds scrut member binders fields)
+                           ,@body
+                           (%break)))))
                   arms))
                ; default в обоих случаях, чтобы не ловить -Wswitch:
                ; - exhaustive → недостижим (__builtin_unreachable; глушит и

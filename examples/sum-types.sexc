@@ -12,17 +12,19 @@
   (Rect   (float w) (float h))
   (Unit))                         ; вариант без полей (единичный квадрат)
 
+; Варианты в match пишем явно — Shape/Circle — как конструктор и предикат
+; (короткое Circle тоже принимается, но явное однозначнее).
 (defn float area ((Shape s))
   (match s
-    (Circle (r)   (return (* 3.14159f r r)))
-    (Rect   (w h) (return (* w h)))
-    (Unit   ()    (return 1.0f))))
+    (Shape/Circle (r)   (return (* 3.14159f r r)))
+    (Shape/Rect   (w h) (return (* w h)))
+    (Shape/Unit   ()    (return 1.0f))))
 
 ; Частичный match: считаем только прямоугольники, остальное игнорим через `...`.
 (defn float rect-perimeter ((Shape s))
   (decl (float p) 0.0f)
   (match s
-    (Rect (w h) (set p (* 2.0f (+ w h))))
+    (Shape/Rect (w h) (set p (* 2.0f (+ w h))))
     ...)
   (return p))
 
