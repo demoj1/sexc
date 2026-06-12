@@ -774,7 +774,10 @@ FILE is optional source path for project-aware lookup."
 ;; --- C-fallback via man pages ----------------------------------------------
 
 (defun sexc--extract-synopsis-line (man-output sym)
-  "Find the first line in SYNOPSIS block of MAN-OUTPUT that mentions SYM."
+  "Find the declaration of SYM in the SYNOPSIS block of MAN-OUTPUT.
+Joins a multi-line prototype into one string, up to its closing `);' — so
+modern man-pages forms (e.g. `void ptr[restrict size * n]`, whose inner `;'
+sits *inside* the parens) are captured whole instead of being cut short."
   (with-temp-buffer
     (insert man-output)
     (goto-char (point-min))
@@ -783,12 +786,32 @@ FILE is optional source path for project-aware lookup."
                          (if (re-search-forward "^[A-Z][A-Z ]+$" nil t)
                              (line-beginning-position)
                            (point-max)))))
-        (when (re-search-forward (regexp-quote sym) block-end t)
+        ;; Prefer the declaration line `... SYM(' over a bare mention
+        ;; (e.g. inside #include or prose).
+        (when (or (re-search-forward
+                   (concat "\\_<" (regexp-quote sym) "[[:space:]]*(") block-end t)
+                  (progn (goto-char (point-min))
+                         (re-search-forward "^SYNOPSIS" nil t)
+                         (re-search-forward (regexp-quote sym) block-end t)))
           (beginning-of-line)
-          (let ((line (string-trim
-                       (buffer-substring-no-properties
-                        (point) (line-end-position)))))
-            (and (not (string-empty-p line)) line)))))))
+          (let* ((start (point))
+                 ;; The declaration ends at the first `)' followed by `;'
+                 ;; (the real terminator), which may be several lines down.
+                 (end (save-excursion
+                        (if (re-search-forward ")[[:space:]]*;" block-end t)
+                            (point)
+                          (line-end-position))))
+                 (raw (buffer-substring-no-properties start end))
+                 ;; collapse newlines/indentation to single spaces, drop ';'.
+                 (one (string-trim
+                       (replace-regexp-in-string
+                        "[ \t\n]+" " "
+                        (replace-regexp-in-string ";\\'" "" raw))))
+                 ;; Drop the modern man-pages array-bound forward-decl prefix:
+                 ;; `name(size_t size, size_t n; void ptr[...]...)` -> `name(void ptr[...]...)`,
+                 ;; which otherwise reads as bogus leading parameters.
+                 (one (replace-regexp-in-string "(\\([^;()]*\\); *" "(" one)))
+            (and (not (string-empty-p one)) one)))))))
 
 (defun sexc--c-eldoc-fallback (sym)
   "Try man 3 SYM (then man 2) to find a C-library synopsis. Cache result."
