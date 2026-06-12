@@ -1,0 +1,21 @@
+; A bundled field/param name that collides with a module symbol must stay a name
+; (only the base type is qualified): rewrite_params/fields/struct_items precise.
+(%module m)
+(struct N :fields (:* float data) (int n))   ; field 'data' == the fn below
+(defn int data () (return 0))
+(defn float head ((:* N p)) (return (aref (-> p data) 0)))
+;==EXPECTED==
+typedef struct m_u002F_N {
+  float *data;
+  int n;
+} m_u002F_N;
+
+int m_u002F_data(void)
+{
+  return 0;
+}
+
+float m_u002F_head(m_u002F_N *p)
+{
+  return (p->data)[0];
+}

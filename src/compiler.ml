@@ -157,15 +157,29 @@ let rec rewrite_type_like name_map raw =
   | Raw.Str (_, _) -> raw
   | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:(rewrite_type_like name_map)), None)
 
+(* A binding group whose first element is a ':'-keyword is the flat bundled form
+   (:mods... base name...): the type spans the leading modifiers + the base. *)
+let is_kw_led = function
+  | Raw.List ((Raw.Atom (h, _) :: _), _) -> String.is_prefix h ~prefix:":"
+  | _ -> false
+
+(* Qualify only the base type of a bundled group; leave the leading :modifiers
+   AND the trailing name(s) untouched (a name must never be namespaced, even if
+   it happens to collide with a module symbol). *)
+let rewrite_bundled_group name_map elems =
+  let rec go acc = function
+    | (Raw.Atom (h, _) as m) :: tl when String.is_prefix h ~prefix:":" -> go (m :: acc) tl
+    | base :: names -> List.rev_append acc (rewrite_type_like name_map base :: names)
+    | [] -> List.rev acc
+  in
+  Raw.List (go [] elems, None)
+
 let rewrite_params name_map = function
   | Raw.List (groups, _) ->
-      let rewrite_group = function
+      let rewrite_group g =
+        match g with
         | Raw.List ([], _) -> Raw.List ([], None)
-        (* bundled flat form (:mods base name...): the type spans several leading
-           elements, so rewrite the whole group — modifiers and names aren't
-           module-defined types, only the base gets qualified. *)
-        | Raw.List ((Raw.Atom (h, _) :: _), _) as g when String.is_prefix h ~prefix:":" ->
-            rewrite_type_like name_map g
+        | Raw.List (elems, _) when is_kw_led g -> rewrite_bundled_group name_map elems
         | Raw.List ((ty :: names), _) -> Raw.List ((rewrite_type_like name_map ty :: names), None)
         | other -> other
       in
@@ -173,7 +187,9 @@ let rewrite_params name_map = function
   | other -> other
 
 let rewrite_fields name_map fields =
-  let rewrite_field = function
+  let rewrite_field f =
+    match f with
+    | Raw.List (elems, _) when is_kw_led f -> rewrite_bundled_group name_map elems
     | Raw.List ([ ty; Raw.Atom (name, _) ], _) -> Raw.List ([ rewrite_type_like name_map ty; Raw.Atom (name, None) ], None)
     | other -> rewrite_type_like name_map other
   in
@@ -224,6 +240,7 @@ let rewrite_form name_map =
                 match phase with
                 | `Fields -> (
                     match item with
+                    | Raw.List (elems, _) when is_kw_led item -> rewrite_bundled_group name_map elems
                     | Raw.List ([ ty; Raw.Atom (field, _) ], _) -> Raw.List ([ rewrite_type_like name_map ty; Raw.Atom (field, None) ], None)
                     | _ -> rw item)
                 | `Methods -> rw item
