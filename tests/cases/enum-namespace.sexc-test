@@ -1,0 +1,15 @@
+; An enum inside a %module must be namespace-qualified consistently: the typedef
+; name AND every reference to it (cast target, return type) become `pal/Color`,
+; while the variant names (Red/Green/Blue) stay bare C identifiers. This is
+; handled by the post-expansion %-IR pass (qualify_ir) — the enum macro emits a
+; bare `%enum`, qualify_ir qualifies the name and protects the variant names.
+(%module pal)
+(enum Color :variants Red Green Blue)
+(defn Color pick ((int n)) (return (cast Color n)))
+;==EXPECTED==
+typedef enum pal_u002F_Color { Red, Green, Blue } pal_u002F_Color;
+
+pal_u002F_Color pal_u002F_pick(int n)
+{
+  return (pal_u002F_Color)n;
+}

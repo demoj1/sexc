@@ -385,17 +385,22 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 ## File-level module namespace
 
 - Поддержан `%module` на уровне файла: `(%module foo)`.
-- `%module` применяет префикс `foo/` к именованным top-level сущностям файла (`defn`, `define`, `struct`, `union`, `%def-fn`, `%decl-fn`, `%define`, `%typedef`) и локальным ссылкам на них в этом же файле.
+- `%module` применяет префикс `foo/` к именованным top-level сущностям файла (`defn`, `define`, `struct`, `union`, `enum`, `%def-fn`, `%decl-fn`, `%define`, `%typedef`) и локальным ссылкам на них в этом же файле.
 - Внутри файла можно использовать короткие имена без префикса; снаружи доступны имена с префиксом `foo/...`.
 - `%module` удаляется на раннем compiler-pass и не попадает в frontend/codegen как runtime-форма.
-- **ПЛАНИРУЕТСЯ РЕФАКТОР (следующий шаг):** namespace-квалификация сейчас работает
-  на surface-формах ДО раскрытия макросов, поэтому rewriter знает позиции
-  «тип/имя» пер-форму (`rewrite_params`/`rewrite_fields`/`rewrite_struct_items`,
-  `is_kw_led`/`rewrite_bundled_group`) — хрупко, любой новый type-сахар требует
-  OCaml. Цель: квалифицировать на `%`-IR ПОСЛЕ раскрытия (фиксированный набор
-  `%`-форм), тогда весь surface-сахар — чистый sexc. Полное описание задачи — в
-  backlog (`namespace-квалификация на %-IR`). До рефактора: новые binding-формы
-  должны переиспользовать `is_kw_led`/`rewrite_bundled_group`, а не плодить копии.
+- **Квалификация работает на раскрытом `%`-IR (после макрофазы), НЕ на surface.**
+  Каждая top-форма тегается своим `%module` (`top_form.module_name`); проход
+  `qualify_ir` (`src/compiler.ml`) рерайтит фиксированный набор `%`-форм с
+  известными позициями типов/имён (`%def-fn`/`%decl-fn`/`%struct`/`%union`/
+  `%enum`/`%typedef`/`%arrow`/`%dot` + catch-all для вызовов/типов), защищая
+  name-позиции (имена параметров/полей/вариантов). Весь surface-сахар (flat/
+  bundled-типы, любой будущий) разворачивается в `%`-IR ДО прохода → **новый
+  type-сахар НЕ требует правок OCaml**.
+- Метадату квалифицируют сами макросы: builtin `$qualify` (ключи: `Buffer` →
+  `ring/Buffer`, идемпотентно) и `$qualify-type` (типы в значениях `:c-type`/
+  `:params`/`:fields`/`:return-type`/`:underlying` — по name_map модуля, чтобы
+  `int`/чужие типы не трогать). Оба читают `ctx.current_module`/
+  `ctx.current_name_map`, выставляемые per-form в `compile_forms`.
 
 ## Именование уровней (строго)
 
@@ -412,7 +417,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Expr/operators: `%raw`, `%expr`, `%typeof`, `%null`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`, `%&=`, `%|=`, `%^=`, `%<<=`, `%>>=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
-  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
   - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `defer1`, `defer*`

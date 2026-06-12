@@ -1,5 +1,8 @@
 ; A bundled field/param name that collides with a module symbol must stay a name
-; (only the base type is qualified): rewrite_params/fields/struct_items precise.
+; (only the base type is qualified). The post-expansion %-IR pass (qualify_ir)
+; protects name positions (%struct field names, %arrow field) while qualifying
+; the type, so the field/param `data` is untouched but `(defn data ...)` becomes
+; m/data.
 (%module m)
 (struct N :fields (:* float data) (int n))   ; field 'data' == the fn below
 (defn int data () (return 0))

@@ -34,6 +34,19 @@ type ctx = {
   max_depth : int;
   mutable gensym_counter : int;
   mutable sym_meta : Raw.t String.Map.t String.Map.t;
+  (* Имя %module текущей раскрываемой top-формы (или None). Ставится
+     извне (compile_forms/metadata_of_file) ПЕРЕД раскрытием каждой формы,
+     чтобы compile-time builtin [$qualify] мог квалифицировать метадату
+     именем модуля. IR-имена квалифицирует отдельный пост-expand проход в
+     compiler.ml — это разделение убирает зависимость макросов от
+     пред-квалифицированных surface-имён. *)
+  mutable current_module : string option;
+  (* name_map (голое-имя → квалифицированное) текущего модуля. Ставится извне
+     вместе с [current_module]; нужен builtin'у [$qualify-type], чтобы
+     квалифицировать атомы-типы в ЗНАЧЕНИЯХ метадаты (:c-type/:fields/…) — IR
+     квалифицируется отдельно проходом, но meta пишется на этапе раскрытия,
+     поэтому типы в ней доквалифицируем здесь, по той же карте. *)
+  mutable current_name_map : string String.Map.t;
   (* Span формы-вызова текущего раскрываемого макроса. Устанавливается
      [apply] перед выполнением тела макроса; используется
      [eval_quasiquote] чтобы помечать синтезированные узлы (которые иначе
@@ -166,6 +179,51 @@ and eval_expr_inner ctx env expr =
        | None -> Raw.Atom ("nil", None))
   | Raw.List ((Raw.Atom ("$namespace-of", _) :: _), _) ->
       fail "$namespace-of expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$current-module", _) :: []), _) ->
+      (* Имя текущего %module ("ring") или nil вне модуля. *)
+      (match ctx.current_module with
+       | Some m -> Raw.Atom (m, None)
+       | None -> Raw.Atom ("nil", None))
+  | Raw.List ((Raw.Atom ("$current-module", _) :: _), _) ->
+      fail "$current-module expects no arguments"
+  | Raw.List ((Raw.Atom ("$qualify", _) :: [ x ]), _) ->
+      (* Квалифицирует имя текущим модулем: "Buffer" → "ring/Buffer".
+         Идемпотентно (уже-"ring/…" не трогает) и пропускает %/$-имена.
+         Вне модуля — no-op. Используется макросами для ключей метадаты;
+         IR квалифицирует отдельный проход в compiler.ml. *)
+      let s = expect_atom_or_string (eval_expr ctx env x) in
+      (match ctx.current_module with
+       | None -> Raw.Atom (s, None)
+       | Some _ when String.is_prefix s ~prefix:"%" || String.is_prefix s ~prefix:"$" ->
+           Raw.Atom (s, None)
+       | Some m ->
+           if String.is_prefix s ~prefix:(m ^ "/") then Raw.Atom (s, None)
+           else Raw.Atom (m ^ "/" ^ s, None))
+  | Raw.List ((Raw.Atom ("$qualify", _) :: _), _) ->
+      fail "$qualify expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$qualify-type", _) :: [ x ]), _) ->
+      (* Квалифицирует атомы-ТИПЫ в форме именем текущего модуля по name_map:
+         "Buffer" → "ring/Buffer", "(%ptr Buffer)" → "(%ptr ring/Buffer)".
+         Встроенные/чужие типы (int, othermod/T) не в карте → не трогаются.
+         Используется макросами ТОЛЬКО для значений метадаты; IR квалифицирует
+         проход в compiler.ml. *)
+      let nm = ctx.current_name_map in
+      let qatom a =
+        match Map.find nm a with
+        | Some q -> q
+        | None -> (
+            match String.lsplit2 a ~on:'/' with
+            | Some (base, rest) when Map.mem nm base -> Map.find_exn nm base ^ "/" ^ rest
+            | _ -> a)
+      in
+      let rec go = function
+        | Raw.Atom (a, _) -> Raw.Atom (qatom a, None)
+        | Raw.Str (_, _) as s -> s
+        | Raw.List (xs, _) -> Raw.List (List.map xs ~f:go, None)
+      in
+      go (eval_expr ctx env x)
+  | Raw.List ((Raw.Atom ("$qualify-type", _) :: _), _) ->
+      fail "$qualify-type expects exactly one argument"
   | Raw.List ((Raw.Atom ("$keyword?", _) :: [ x ]), _) ->
       (* true iff the value is an atom starting with ':' (a keyword like :x). *)
       (match eval_expr ctx env x with
@@ -563,7 +621,7 @@ let format_meta_json sym_meta =
 let collect forms =
   let rec loop defs ct_fns normal = function
     | [] ->
-        ( { defs; ct_fns; max_depth = 200; gensym_counter = 0; sym_meta = String.Map.empty; expand_site_span = None },
+        ( { defs; ct_fns; max_depth = 200; gensym_counter = 0; sym_meta = String.Map.empty; current_module = None; current_name_map = String.Map.empty; expand_site_span = None },
           List.rev normal )
     | raw :: tl -> (
         match raw with

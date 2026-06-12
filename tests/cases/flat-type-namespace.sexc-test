@@ -1,6 +1,7 @@
 ; Bundled flat type in a %module: the base type (Buf) must still be namespace-
-; qualified (ring/Buf) even though it sits inside the flat group — covered by
-; rewrite_params treating a :keyword-led group as a whole type.
+; qualified (ring/Buf) even though it sits inside the flat group. The flat sugar
+; expands to plain (%ptr Buf) before the post-expansion %-IR pass (qualify_ir)
+; runs, so the type gets qualified without the namespace code knowing the sugar.
 (%module ring)
 
 (struct Buf :fields (:* float data) (int n))

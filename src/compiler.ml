@@ -24,18 +24,25 @@ open Common
 type top_form = {
   form : Raw.t;
   span : Common.span option;
+  (* Имя %module файла, из которого пришла форма (или None). Тег ставится
+     загрузчиком (per-file) ВМЕСТО ранней surface-квалификации: namespace
+     теперь применяется к %-IR ПОСЛЕ раскрытия макросов (см. [qualify_ir] и
+     [compile_forms]). Хранить модуль per-form нужно для cross-module:
+     импортированные файлы со своими %module конкатенируются в один список,
+     и каждая форма должна квалифицироваться именем своего модуля. *)
+  module_name : string option;
 }
 
 let raw_only (tops : top_form list) : Raw.t list = List.map tops ~f:(fun t -> t.form)
 
 let with_form (t : top_form) (form : Raw.t) : top_form = { t with form }
 
-let attach_span (sp : Common.span option) (form : Raw.t) : top_form = { form; span = sp }
+let attach_span (sp : Common.span option) (form : Raw.t) : top_form = { form; span = sp; module_name = None }
 
 (* Конвертирует span-aware Raw.t-список (от Reader.parse_many) в top_form-список.
    Span каждой top-формы берётся прямо из узла. *)
 let top_forms_of_raws (forms : Raw.t list) : top_form list =
-  List.map forms ~f:(fun form -> { form; span = Raw.span_of form })
+  List.map forms ~f:(fun form -> { form; span = Raw.span_of form; module_name = None })
 
 let default_stdlib_dir = "/usr/local/include/sexc/std"
 
@@ -157,29 +164,18 @@ let rec rewrite_type_like name_map raw =
   | Raw.Str (_, _) -> raw
   | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:(rewrite_type_like name_map)), None)
 
-(* A binding group whose first element is a ':'-keyword is the flat bundled form
-   (:mods... base name...): the type spans the leading modifiers + the base. *)
-let is_kw_led = function
-  | Raw.List ((Raw.Atom (h, _) :: _), _) -> String.is_prefix h ~prefix:":"
-  | _ -> false
-
-(* Qualify only the base type of a bundled group; leave the leading :modifiers
-   AND the trailing name(s) untouched (a name must never be namespaced, even if
-   it happens to collide with a module symbol). *)
-let rewrite_bundled_group name_map elems =
-  let rec go acc = function
-    | (Raw.Atom (h, _) as m) :: tl when String.is_prefix h ~prefix:":" -> go (m :: acc) tl
-    | base :: names -> List.rev_append acc (rewrite_type_like name_map base :: names)
-    | [] -> List.rev acc
-  in
-  Raw.List (go [] elems, None)
-
+(* Legacy surface-level qualification (used now only by [apply_module_namespace]
+   for the docs/index graph path — [load_graph_from_file]). The compile path
+   qualifies the %-IR post-expansion instead (see [qualify_ir]), so the flat /
+   bundled type sugar no longer needs to be understood here — by the time it
+   would matter it has already expanded to plain %ptr/%const/atom type forms.
+   A bundled group's base type is left unqualified on this legacy path (purely
+   cosmetic: it only affects how a module-local type renders in generated docs). *)
 let rewrite_params name_map = function
   | Raw.List (groups, _) ->
       let rewrite_group g =
         match g with
         | Raw.List ([], _) -> Raw.List ([], None)
-        | Raw.List (elems, _) when is_kw_led g -> rewrite_bundled_group name_map elems
         | Raw.List ((ty :: names), _) -> Raw.List ((rewrite_type_like name_map ty :: names), None)
         | other -> other
       in
@@ -189,7 +185,6 @@ let rewrite_params name_map = function
 let rewrite_fields name_map fields =
   let rewrite_field f =
     match f with
-    | Raw.List (elems, _) when is_kw_led f -> rewrite_bundled_group name_map elems
     | Raw.List ([ ty; Raw.Atom (name, _) ], _) -> Raw.List ([ rewrite_type_like name_map ty; Raw.Atom (name, None) ], None)
     | other -> rewrite_type_like name_map other
   in
@@ -240,7 +235,6 @@ let rewrite_form name_map =
                 match phase with
                 | `Fields -> (
                     match item with
-                    | Raw.List (elems, _) when is_kw_led item -> rewrite_bundled_group name_map elems
                     | Raw.List ([ ty; Raw.Atom (field, _) ], _) -> Raw.List ([ rewrite_type_like name_map ty; Raw.Atom (field, None) ], None)
                     | _ -> rw item)
                 | `Methods -> rw item
@@ -278,6 +272,7 @@ let collect_module_defined_names forms =
       | Raw.List ((Raw.Atom ("%define", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
       | Raw.List ((Raw.Atom ("struct", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
       | Raw.List ((Raw.Atom ("union", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
+      | Raw.List ((Raw.Atom ("enum", _) :: Raw.Atom (name, _) :: _), _) -> add_name acc name
       | Raw.List ((Raw.Atom ("%typedef", _) :: ty :: Raw.Atom (name, _) :: []), _) ->
           let acc = add_name acc name in
           Option.value_map (from_typedef_type ty) ~default:acc ~f:(fun n -> add_name acc n)
@@ -293,15 +288,81 @@ let apply_module_namespace module_name forms =
     in
     List.map forms ~f:(rewrite_form name_map)
 
-let apply_module_namespace_top module_name (tops : top_form list) : top_form list =
-  let names = collect_module_defined_names (raw_only tops) in
-  if Set.is_empty names then tops
-  else
-    let name_map =
-      Set.fold names ~init:String.Map.empty ~f:(fun acc name ->
-          Map.set acc ~key:name ~data:(qualify_name module_name name))
-    in
-    List.map tops ~f:(fun t -> with_form t (rewrite_form name_map t.form))
+let name_map_for_module module_name forms =
+  let names = collect_module_defined_names forms in
+  Set.fold names ~init:String.Map.empty ~f:(fun acc name ->
+      Map.set acc ~key:name ~data:(qualify_name module_name name))
+
+(* Группирует tops по %module и строит одну name_map на модуль (голое →
+   квалифицированное). Используется и для [qualify_ir] (IR), и для проброса в
+   [ctx.current_name_map] (типы в метадате). *)
+let build_module_maps (tops : top_form list) : string String.Map.t String.Map.t =
+  let module_forms =
+    List.fold tops ~init:String.Map.empty ~f:(fun acc t ->
+        match t.module_name with
+        | None -> acc
+        | Some m -> Map.add_multi acc ~key:m ~data:t.form)
+  in
+  Map.mapi module_forms ~f:(fun ~key:m ~data:forms -> name_map_for_module m forms)
+
+let name_map_for_top module_maps (top : top_form) : string String.Map.t =
+  match top.module_name with
+  | None -> String.Map.empty
+  | Some m -> Option.value (Map.find module_maps m) ~default:String.Map.empty
+
+(* Namespace-квалификация на РАСКРЫТОМ %-IR (после макрофазы). Весь surface-сахар
+   (flat/bundled-типы, defn/struct/...) к этому моменту уже разложен в фиксированный
+   набор %-форм с известными позициями типов и имён, поэтому проход НЕ угадывает
+   «где тип, где имя» по форме — он просто матчит этот набор. Имена ОПРЕДЕЛЕНИЙ,
+   которые макросы уже квалифицировали через [$qualify] ("ring/Buffer"), проход не
+   ломает: [rewrite_atom] идемпотентен (модульный префикс не ключ name_map). Так что
+   фактическая работа здесь — доквалифицировать оставшиеся ГОЛЫЕ ссылки (вызовы,
+   атомы-типы) и при этом НЕ трогать name-позиции (имена параметров/полей/вариантов,
+   поле в %arrow/%dot). [name_map] строится по голым именам модуля, поэтому ссылка
+   `Buffer` → `ring/Buffer`, а уже-`ring/Buffer` остаётся как есть. *)
+let qualify_ir name_map =
+  let rw_type = rewrite_type_like name_map in
+  let rw_params = function
+    | Raw.List (groups, _) ->
+        Raw.List
+          ((List.map groups ~f:(function
+             | Raw.List ((ty :: names), _) -> Raw.List ((rw_type ty :: names), None)
+             | other -> other)), None)
+    | other -> other
+  in
+  let rw_variant rw = function
+    | Raw.List ([ (Raw.Atom _ as v); value ], _) -> Raw.List ([ v; rw value ], None)
+    | other -> other
+  in
+  let rw_field = function
+    | Raw.List ([ ty; (Raw.Atom _ as fname) ], _) -> Raw.List ([ rw_type ty; fname ], None)
+    | other -> rw_type other
+  in
+  let rec rw raw =
+    match raw with
+    | Raw.Atom (a, _) -> Raw.Atom ((rewrite_atom name_map a), None)
+    | Raw.Str (_, _) -> raw
+    | Raw.List ((Raw.Atom (("quote" | "quasiquote"), _) :: _), _) -> raw
+    | Raw.List ([ Raw.Atom ("%def-fn", _); ret; name; params; body ], _) ->
+        Raw.List ([ Raw.Atom ("%def-fn", None); rw_type ret; rw name; rw_params params; rw body ], None)
+    | Raw.List ([ Raw.Atom ("%decl-fn", _); ret; name; params ], _) ->
+        Raw.List ([ Raw.Atom ("%decl-fn", None); rw_type ret; rw name; rw_params params ], None)
+    | Raw.List ([ Raw.Atom ("%typedef", _); ty; name ], _) ->
+        (* ty может быть (%struct ...)/(%union ...)/(%enum ...) — гоним через rw,
+           чтобы их name-позиции защитились нижними кейсами; либо простой тип. *)
+        Raw.List ([ Raw.Atom ("%typedef", None); rw ty; rw name ], None)
+    | Raw.List ((Raw.Atom ("%struct", _) :: name :: fields), _) ->
+        Raw.List ((Raw.Atom ("%struct", None) :: rw name :: List.map fields ~f:rw_field), None)
+    | Raw.List ((Raw.Atom ("%union", _) :: name :: fields), _) ->
+        Raw.List ((Raw.Atom ("%union", None) :: rw name :: List.map fields ~f:rw_field), None)
+    | Raw.List ((Raw.Atom ("%enum", _) :: name :: variants), _) ->
+        Raw.List ((Raw.Atom ("%enum", None) :: rw name :: List.map variants ~f:(rw_variant rw)), None)
+    | Raw.List ([ Raw.Atom (("%arrow" | "%dot") as head, _); obj; field ], _) ->
+        (* Поле — это имя члена, не квалифицируем; квалифицируем только объект. *)
+        Raw.List ([ Raw.Atom (head, None); rw obj; field ], None)
+    | Raw.List (xs, _) -> Raw.List ((List.map xs ~f:rw), None)
+  in
+  rw
 
 (* Replace each atom `alias/X[/Y/...]` with `real-module-name/X[/Y/...]`.
    Tree-walks everything (incl. quoted contents) since aliases are pure
@@ -392,11 +453,14 @@ let rec load_forms_from_file ~visited ~module_names ~use_prelude path
       else rewrite_alias_top aliases own_tops
     in
 
-    (* 4. Применяем свой %module к собственным определениям. *)
+    (* 4. Тегаем свои формы именем модуля. Сама namespace-квалификация
+       применяется позже, к %-IR после раскрытия макросов (см. [qualify_ir]
+       в [compile_forms]); per-form тег нужен, чтобы импортированные файлы со
+       своими %module квалифицировались корректно после конкатенации. *)
     let own_tops =
       match module_name with
       | None -> own_tops
-      | Some name -> apply_module_namespace_top name own_tops
+      | Some name -> List.map own_tops ~f:(fun t -> { t with module_name = Some name })
     in
 
     (visited, module_names, imported_tops @ own_tops)
@@ -530,11 +594,20 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
         Любая bare Sexc_error внутри per-form секции автоматически
         "поднимается" в Sexc_diagnostic с привязкой к файлу/строке. *)
   let module_name, tops = strip_module_decl_top tops in
+  (* Стдин-путь (compile_source) даёт нетегированные формы + %module здесь;
+     тегаем их. Файловый путь (load_forms_from_file) уже протегал и снял
+     %module, так что [module_name] тут None и теги сохраняются. *)
   let tops =
     match module_name with
     | None -> tops
-    | Some name -> apply_module_namespace_top name tops
+    | Some name ->
+        List.map tops ~f:(fun t ->
+            match t.module_name with Some _ -> t | None -> { t with module_name = Some name })
   in
+  (* Per-module name_map'ы (голое-имя → квалифицированное), по которым
+     [qualify_ir] доквалифицирует ссылки в %-IR, а [$qualify-type] — типы в
+     метадате. *)
+  let module_maps = build_module_maps tops in
   let prelude_tops =
     if use_prelude then with_stage "prelude" (fun () -> load_prelude_forms ()) else []
   in
@@ -552,7 +625,19 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   let file_head = ref [] in
   let emit_one (top : top_form) : string =
     let run () =
+      (* Модуль текущей формы → макросы квалифицируют свою метадату через
+         [$qualify] (ключи) и [$qualify-type] (типы в значениях, по name_map);
+         IR доквалифицируем сами ниже. *)
+      let nm = name_map_for_top module_maps top in
+      mctx.current_module <- top.module_name;
+      mctx.current_name_map <- nm;
       let expanded = Macro.expand_program mctx [ top.form ] in
+      (* Namespace на %-IR ДО hoist'а: так квалифицируются и формы, всплывающие
+         через %top-level-splice / %file-head-splice (методы, file-head decl'ы). *)
+      let expanded =
+        if Map.is_empty nm then expanded
+        else List.map expanded ~f:(qualify_ir nm)
+      in
       let flattened_raws =
         List.concat_map expanded ~f:(fun raw ->
           let hoisted, cleaned = hoist_splices ~file_head raw in
@@ -643,14 +728,18 @@ let metadata_of_file ?(use_prelude = true) path =
       ~module_names:String.Map.empty
       ~use_prelude path
   in
-  let module_name, tops = strip_module_decl_top tops in
-  let tops =
-    match module_name with
-    | None -> tops
-    | Some name -> apply_module_namespace_top name tops
-  in
+  (* tops уже протегированы модулем загрузчиком; %module-форм в них нет. *)
+  let module_maps = build_module_maps tops in
   let prelude_tops = if use_prelude then load_prelude_forms () else [] in
-  let non_doc = List.filter (raw_only (prelude_tops @ tops)) ~f:(fun f -> not (is_doc_decl f)) in
-  let mctx, non_macro = Macro.collect non_doc in
-  let _ = Macro.expand_program mctx non_macro in
+  let all_tops = prelude_tops @ tops in
+  let non_doc_tops = List.filter all_tops ~f:(fun t -> not (is_doc_decl t.form)) in
+  let mctx, _ = Macro.collect (raw_only non_doc_tops) in
+  let non_macro_tops = List.filter non_doc_tops ~f:(fun t -> not (is_macro_decl t.form)) in
+  (* Раскрываем по одной форме, выставляя модуль и его name_map — чтобы
+     [$qualify]/[$qualify-type] в макросах дали квалифицированные ключи И типы
+     метадаты (как в compile_forms). *)
+  List.iter non_macro_tops ~f:(fun t ->
+      mctx.current_module <- t.module_name;
+      mctx.current_name_map <- name_map_for_top module_maps t;
+      ignore (Macro.expand_program mctx [ t.form ]));
   mctx.sym_meta

@@ -28,11 +28,12 @@
   :doc "Define a C preprocessor symbol."
   :example "(define PI 3.14)")
 (%defmacro define (name value)
-  ($do
-    ($m-put name :kind 'define :value value)
-    ($let ((ns ($namespace-of name)))
-      ($if ($null? ns) nil ($m-append ns :defines name)))
-    `(%define ,name ,value)))
+  ($let ((name ($qualify name)))
+    ($do
+      ($m-put name :kind 'define :value value)
+      ($let ((ns ($namespace-of name)))
+        ($if ($null? ns) nil ($m-append ns :defines name)))
+      `(%define ,name ,value))))
 
 ; defn
 ; (defn [:static] [:inline] ret name params form...)
@@ -116,19 +117,23 @@
          (flags  ($car split))
          (rest   ($cdr split))
          (ret    ($unpack-type ($car rest)))
-         (name   ($car ($cdr rest)))
+         (name   ($qualify ($car ($cdr rest))))
          ; нормализуем каждую группу параметров: классика (type name...) или
          ; bundled (:mods base name...) → (распакованный-тип name...)
          (params ($map ($if ($atom? it) it ($binding-split it))
                        ($car ($cdr ($cdr rest)))))
+         ; те же ret/params, но с типами, квалифицированными именем модуля —
+         ; для МЕТАДАТЫ (эмит ниже идёт с bare-типами, их квалифицирует %-IR проход).
+         (qret    ($qualify-type ret))
+         (qparams ($map ($if ($atom? it) it ($cons ($qualify-type ($car it)) ($cdr it))) params))
          (body   ($cdr ($cdr ($cdr rest)))))
     ($do
-      ($m-put name :kind 'fn :return-type ret :params params)
+      ($m-put name :kind 'fn :return-type qret :params qparams)
       ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
       ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
       ; параметров — (type name...); глобально по имени (последний выигрывает, но
       ; раскрытие тела идёт сразу после defn, поэтому в теле тип верный).
-      ($dolist (g params)
+      ($dolist (g qparams)
         ($if ($atom? g) nil
           ($dolist (n ($cdr g))
             ($m-put n :kind 'var :c-type ($car g)))))
@@ -152,7 +157,7 @@
            (name  ($car names)))
       ($assert ($eq? ($length names) 1) "decl: exactly one name per binding")
       ($assert ($atom? name) "decl: variable name must be an atom")
-      ($m-put name :kind 'var :c-type ty)
+      ($m-put name :kind 'var :c-type ($qualify-type ty))
       ($if ($null? rest)
         `(%decl ,ty ,name ,init)
         ($do
@@ -174,7 +179,7 @@
            (name  ($car names)))
       ($assert ($eq? ($length names) 1) "adecl: exactly one name per binding")
       ($assert ($atom? name) "adecl: variable name must be an atom")
-      ($m-put name :kind 'var :c-type `(%ptr ,ty) :allocated t)
+      ($m-put name :kind 'var :c-type ($qualify-type `(%ptr ,ty)) :allocated t)
       ($if ($null? rest)
         `(decl ((%ptr ,ty) ,name) (cast (%ptr ,ty) (malloc ,size)))
         ($do
@@ -495,10 +500,12 @@
 (%defmacro typedef (ty name)
   ($do
     ($assert ($atom? name) "typedef: name must be an atom")
-    ($m-put name :kind 'typedef :underlying ty)
-    ($let ((ns ($namespace-of name)))
-      ($if ($null? ns) nil ($m-append ns :types name)))
-    `(%typedef ,ty ,name)))
+    ($let ((name ($qualify name)))
+      ($do
+        ($m-put name :kind 'typedef :underlying ($qualify-type ty))
+        ($let ((ns ($namespace-of name)))
+          ($if ($null? ns) nil ($m-append ns :types name)))
+        `(%typedef ,ty ,name)))))
 
 ; struct
 ; Strict section syntax:
@@ -512,6 +519,7 @@
   :doc "Define typedef struct with :fields and optional :methods sections."
   :example "(struct Vec2 :fields (float x) (float y))")
 (%defmacro struct (name &rest items)
+  ($let ((name ($qualify name)))
   ($let ((state
           ($reduce
             ($let ((phase ($car acc))
@@ -543,7 +551,11 @@
          (fields ($map ($binding-split it) ($|> state $cdr $car)))
          (methods ($|> state $cdr $cdr $car)))
     ($assert ($not ($eq? phase 'start)) "struct expects ':fields' section")
-    ($m-put name :kind 'struct :fields fields :methods methods)
+    ; fields для метадаты — с квалифицированными типами полей (эмит %struct ниже
+    ; идёт с bare-типами, их доквалифицирует %-IR проход).
+    ($m-put name :kind 'struct
+      :fields ($map ($cons ($qualify-type ($car it)) ($cdr it)) fields)
+      :methods methods)
     ; Регистрация структуры в parent namespace ('s :types).
     ($let ((ns ($namespace-of name)))
       ($if ($null? ns) nil ($m-append ns :types name)))
@@ -565,7 +577,7 @@
                  `(defn ,ret ,($symcat name "/" mname) ,params ,@body)))
              ; иначе — генератор методов: (GEN Type . args), раскроется позже
              ($cons ($car it) ($cons name ($cdr it))))
-           methods))))
+           methods)))))
 
 ; union
 ; (union Name (type field) ...)
@@ -574,11 +586,12 @@
   :doc "Define typedef union with named fields."
   :example "(union Number (int i) (float f))")
 (%defmacro union (name &rest fields)
+  ($let ((name ($qualify name)))
   ($let ((fields ($map ($binding-split it) fields)))
-    ($m-put name :kind 'union :fields fields)
+    ($m-put name :kind 'union :fields ($map ($cons ($qualify-type ($car it)) ($cdr it)) fields))
     ($let ((ns ($namespace-of name)))
       ($if ($null? ns) nil ($m-append ns :types name)))
-    `(%typedef (%union ,name ,@fields) ,name)))
+    `(%typedef (%union ,name ,@fields) ,name))))
 
 ; enum (параллельно struct: секции :variants + :methods)
 ; (enum Color
@@ -591,6 +604,7 @@
   :doc "Define typedef enum with :variants and optional :methods sections."
   :example "(enum Dir :variants North East South West)")
 (%defmacro enum (name &rest items)
+  ($let ((name ($qualify name)))
   ($let ((state
           ($reduce
             ($let ((phase ($car acc))
@@ -637,7 +651,7 @@
                  ($assert ($atom? mname) "enum method name must be an atom")
                  `(defn ,ret ,($symcat name "/" mname) ,params ,@body)))
              ($cons ($car it) ($cons name ($cdr it))))
-           mvals))))
+           mvals)))))
 
 ; zero-init
 ; (zero-init) => {0}
