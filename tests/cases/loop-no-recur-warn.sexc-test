@@ -1,0 +1,10 @@
+; A loop with no recur runs once and exits — almost always a mistake. The compiler
+; WARNS (non-fatal) at the loop call-site, via the $warn builtin.
+(defn int main ()
+  (loop ((int i 0))
+    (printf "this never repeats\n"))
+  (return 0))
+;==EXPECTED-WARNING==
+<stdin>:4:3: warning[macro]: loop has no recur — it runs once and exits; did you forget (recur ...)?
+  (loop ((int i 0))
+  ^

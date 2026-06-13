@@ -465,6 +465,14 @@
         (($eq? ($car form) 'loop)       form)
         (else ($map ($loop-rewrite it names types top end) form))))))
 
+; Count recur forms belonging to THIS loop (does not descend into a nested loop).
+($defun $loop-count-recur (form)
+  ($if ($atom? form) 0
+    ($if ($null? form) 0
+      ($if ($eq? ($car form) 'recur) 1
+        ($if ($eq? ($car form) 'loop) 0
+          ($reduce ($+ acc ($loop-count-recur it)) 0 form))))))
+
 (%doc loop
   :sig (loop ((type name init)...) body...)
   :doc "Named recursion point compiled to a labelled block (no stack growth). (recur v...) rebinds all loop vars in parallel and jumps to the top; (break-loop) jumps past the loop. Both work from any nesting depth and target the nearest enclosing loop. Exit by not recurring (fall through) or with (break-loop). It is a statement, so carry results out via an outer variable or (return ...)."
@@ -475,13 +483,18 @@
          (top   ($gensym "__loop_top_"))
          (end   ($gensym "__loop_end_")))
     ($let ((decls ($map `(%decl ,($unpack-type ($car it)) ,($car ($cdr it)) ,($car ($cdr ($cdr it)))) bindings))
-           (rbody ($map ($loop-rewrite it names types top end) body)))
+           (rbody ($map ($loop-rewrite it names types top end) body))
+           (nrecur ($reduce ($+ acc ($loop-count-recur it)) 0 body)))
+      ($do
+        ($if ($zero? nrecur)
+          ($warn "loop has no recur — it runs once and exits; did you forget (recur ...)?")
+          nil)
       `(%block
          ,@decls
          (%label ,top)
          ,@rbody
          (%label ,end)
-         (%nop)))))
+         (%nop))))))
 
 (%doc break-loop
   :sig (break-loop)
