@@ -1,0 +1,126 @@
+; Conway's Game of Life — idiomatic SexC port of life.c (a deterministic trim of
+; RuiBorgesDev/CGameOfLife). Same stdout as life.c byte-for-byte (differential test:
+; tests/expected/ holds the C reference output).
+;
+; Idiomatic rewrite, not a transliteration: the board + its history ring buffer
+; live in a `struct Life` with methods, dispatched via `obj::method` / `doto`,
+; cleaned up with `defer1`, looping with `for-range`/`dotimes` and `?`-predicates.
+
+(include <stdio.h> <stdlib.h> <string.h>)
+
+(define DEAD  (%raw "'.'"))
+(define ALIVE (%raw "'o'"))
+
+(struct Life
+  :fields
+  (int rows)
+  (int cols)
+  (int window)              ; history ring size (for loop detection)
+  ((:* (:* char)) hist)     ; window generations; hist[1] = current, hist[0] = scratch
+
+  :methods
+  (defn (:* Life) make ((int rows) (int cols) (int window))
+    (adecl (Life self) (sizeof Life))
+    (set (-> self rows) rows
+         (-> self cols) cols
+         (-> self window) window)
+    (set (-> self hist) (cast (:* (:* char)) (malloc (* window (sizeof-type (:* char))))))
+    (dotimes g window
+      (set (aref (-> self hist) g) (cast (:* char) (malloc (* rows cols)))))
+    (return self))
+
+  ; Reset every generation buffer to DEAD.
+  (defn void clear ((:* Life self))
+    (dotimes g (-> self window)
+      (dotimes i (* (-> self rows) (-> self cols))
+        (set (aref (aref (-> self hist) g) i) DEAD))))
+
+  ; Seed the PULSAR pattern (period-3 oscillator) into the current generation.
+  (defn void seed ((:* Life self))
+    (decl ((:* char) row) (aref (-> self hist) 1)
+          ((%array int) idx)
+          (init 22 28 39 45 56 57 61 62 86 87 88 91 92 94 95 98 99 100 105 107 109
+                111 113 115 124 125 129 130 158 159 163 164 173 175 177 179 181 183
+                188 189 190 193 194 196 197 200 201 202 226 227 231 232 243 249 260 266))
+    (for-range k 0 56
+      (set (aref row (aref idx k)) ALIVE)))
+
+  ; One Conway step: hist[1] -> hist[0]. Bounded grid (no wrap).
+  (defn void evolve ((:* Life self))
+    (decl ((:* char) cur) (aref (-> self hist) 1)
+          ((:* char) nxt) (aref (-> self hist) 0)
+          (int rows) (-> self rows)
+          (int cols) (-> self cols))
+    (dotimes i (* rows cols)
+      (decl (int row) (/ i cols)
+            (int col) (% i cols)
+            (int count) 0)
+      (for-range dk -1 2
+        (for-range dj -1 2
+          (unless (and (zero? dk) (zero? dj))
+            (decl (int nr) (+ row dk)
+                  (int nc) (+ col dj))
+            (when (and (>= nr 0) (< nr rows) (>= nc 0) (< nc cols)
+                       (= (aref cur (+ (* nr cols) nc)) ALIVE))
+              (incf count)))))
+      (set (aref nxt i)
+           (%ternary (or (= count 3) (and (= count 2) (= (aref cur i) ALIVE)))
+                     ALIVE DEAD))))
+
+  ; Print the current generation as an ASCII frame.
+  (defn void show ((:* Life self))
+    (decl ((:* char) g) (aref (-> self hist) 1))
+    (dotimes r (-> self rows)
+      (fwrite (+ g (* r (-> self cols))) 1 (-> self cols) stdout)
+      (putchar 10)))
+
+  ; If the freshly evolved hist[0] equals one of the previous generations, return
+  ; that distance (the loop period); else 0.
+  (defn int period ((:* Life self))
+    (decl (int sz) (* (-> self rows) (-> self cols)))
+    (for-range i 1 (-> self window)
+      (when (zero? (memcmp (aref (-> self hist) 0) (aref (-> self hist) i) sz))
+        (return i)))
+    (return 0))
+
+  ; Rotate the ring: hist[0] (evolved) becomes the new current; oldest buffer recycles.
+  (defn void slide ((:* Life self))
+    (decl ((:* char) oldest) (aref (-> self hist) (- (-> self window) 1))
+          (int g) (- (-> self window) 1))
+    (while (gtz? g)
+      (set (aref (-> self hist) g) (aref (-> self hist) (- g 1)))
+      (decf g))
+    (set (aref (-> self hist) 0) oldest))
+
+  (defn void free ((:* Life self))
+    (dotimes g (-> self window)
+      (free (aref (-> self hist) g)))
+    (free (-> self hist))
+    (free self)))
+
+(defn int main ()
+  (decl (:* Life life) (Life/make 17 17 5))
+  (defer1 life::free)
+
+  (doto life clear seed)            ; reset + plant the pulsar
+
+  (decl (int niter) 0
+        (int max) 100
+        (int found) 0)
+  (while (< niter max)
+    (life::show)
+    (printf "Iteration: %d / %d\n" (+ niter 1) max)
+    (life::evolve)
+    (decl (int p) life::period)
+    (when (gtz? p)
+      (printf "\nLoop detected after %d iterations!\n" (+ niter 1))
+      (printf "Loop Period: %d\n" p)
+      (set found 1)
+      (%break))
+    (life::slide)
+    (incf niter))
+
+  (when (and (zero? found) (= niter max))
+    (printf "\nMaximum iterations (%d) reached without detecting a loop (within history window %d).\n"
+            max (-> life window)))
+  (return 0))

@@ -18,3 +18,4 @@ examples/complex-project/main.sexc
 examples/predicates.sexc
 examples/shapes.sexc
 examples/method-calls.sexc
+examples/game-of-life/main.sexc
