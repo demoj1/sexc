@@ -56,6 +56,9 @@ type ctx = {
 }
 
 let evals_splice_tag = "__sexc_internal_evals_splice__"
+(* Транзиентный маркер, которым $recur сигналит $loop'у «повторить с этими
+   значениями». Живёт только внутри одного $loop-вычисления и им же поглощается. *)
+let loop_recur_tag = "__sexc_internal_loop_recur__"
 
 let bool_raw b = if b then Raw.Atom ("t", None) else Raw.Atom ("nil", None)
 
@@ -298,6 +301,34 @@ and eval_expr_inner ctx env expr =
              eval_expr ctx env body)), None)
   | Raw.List ((Raw.Atom ("$dolist", _) :: _), _) ->
       fail "$dolist expects ($dolist (var list-expr) body)"
+  (* $loop / $recur — compile-time tail loop (mirror of the runtime `loop`). Binds
+     names to evaluated inits, evaluates the body; if it yields a $recur marker,
+     rebinds and re-evaluates; otherwise that value is the result. $recur in tail
+     position propagates the marker up through $if/$cond/$do. *)
+  | Raw.List ((Raw.Atom ("$recur", _) :: args), _) ->
+      Raw.List (Raw.Atom (loop_recur_tag, None) :: List.map args ~f:(eval_expr ctx env), None)
+  | Raw.List ((Raw.Atom ("$loop", _) :: Raw.List (bindings, _) :: body), _) ->
+      let names, inits =
+        List.unzip
+          (List.map bindings ~f:(function
+             | Raw.List ([ Raw.Atom (n, _); e ], _) -> (n, e)
+             | _ -> fail "$loop: each binding must be (name init-expr)"))
+      in
+      let env0 = with_bound env names (List.map inits ~f:(eval_expr ctx env)) in
+      let cap = 10_000_000 in
+      let rec go env' i =
+        if i > cap then fail "$loop exceeded iteration cap (infinite $recur?)";
+        match eval_body_last ctx env' body with
+        | Raw.List (Raw.Atom (tag, _) :: vals, _) when String.equal tag loop_recur_tag ->
+            if List.length vals <> List.length names then
+              failf "$recur: expected %d value(s) to match the $loop bindings, got %d"
+                (List.length names) (List.length vals)
+            else go (with_bound env' names vals) (i + 1)
+        | other -> other
+      in
+      go env0 0
+  | Raw.List ((Raw.Atom ("$loop", _) :: _), _) ->
+      fail "$loop expects: ($loop ((name init)...) body...)"
   | Raw.List ((Raw.Atom ("$error", _) :: [ msg ]), _) ->
       let text =
         match eval_expr ctx env msg with

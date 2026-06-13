@@ -158,6 +158,16 @@
   :doc "Compile-time diagnostic FAMILY (error/warn/info), all pointing at the macro call-site. $error raises a fatal error (aborts), with MESSAGE."
   :example "($error \"bad input\")")
 
+(%doc $loop
+  :sig ($loop ((name init)...) body...)
+  :doc "Compile-time tail loop (meta mirror of the runtime `loop`): binds NAMEs to evaluated INITs, evaluates the body, and repeats with new values whenever the body yields a ($recur ...); otherwise that value is the result. Lets a macro accumulate without a separate recursive $defun."
+  :example "($loop ((i n) (acc 0)) ($if ($zero? i) acc ($recur ($- i 1) ($+ acc i))))")
+
+(%doc $recur
+  :sig ($recur value...)
+  :doc "Inside $loop (tail position): repeat the loop with these values (one per binding). Propagates up through $if/$cond/$do."
+  :example "($recur ($- i 1) ($+ acc i))")
+
 (%doc $warn
   :sig ($warn message)
   :doc "Emit a non-fatal compile-time WARNING at the macro call-site and return nil; compilation continues. See $error / $info."
