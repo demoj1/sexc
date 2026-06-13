@@ -376,7 +376,7 @@
 ; => (%while cond (%block form...))
 (%doc while
   :doc "While-loop over COND with BODY forms."
-  :example "(while (< i n) (post-inc i))")
+  :example "(while (< i n) (1++ i))")
 (%defmacro while (cond &rest body)
   `(%while ,cond (%block ,@body)))
 
@@ -394,7 +394,7 @@
 ; => for i in [0, n)
 (%doc dotimes
   :doc "Loop I from 0 to N-1."
-  :example "(dotimes i 10 (post-inc sum))")
+  :example "(dotimes i 10 (1++ sum))")
 (%defmacro dotimes (i n &rest body)
   `(%for (%decl int ,i 0) (%< ,i ,n) (%post-inc ,i) (%block ,@body)))
 
@@ -412,7 +412,7 @@
 ; Repeats body n times without exposing an index variable.
 (%doc repeat
   :doc "Repeat BODY N times without exposing an index variable."
-  :example "(repeat 3 (post-inc ticks))")
+  :example "(repeat 3 (1++ ticks))")
 (%defmacro repeat (n &rest body)
   `(repeat-expand ,($gensym "repeat_i_") ,n (block ,@body)))
 
@@ -451,20 +451,38 @@
          (%set ,lhs ,value)
          (set ,($car more) ,($car ($cdr more)) ,@($cdr ($cdr more)))))))
 
-; incf / decf
-; (incf x) => (set x (+ x 1))
-; (decf x) => (set x (- x 1))
-(%doc incf
-  :doc "Increment X by 1."
-  :example "(incf i)")
-(%defmacro incf (x)
-  `(%set ,x (%+ ,x 1)))
+; break / continue — loop/switch control.
+(%doc break
+  :doc "Break out of the enclosing loop or switch."
+  :example "(when done (break))")
+(%defmacro break () '(%break))
 
-(%doc decf
-  :doc "Decrement X by 1."
-  :example "(decf i)")
-(%defmacro decf (x)
-  `(%set ,x (%- ,x 1)))
+(%doc continue
+  :doc "Skip to the next iteration of the enclosing loop."
+  :example "(when (zero? x) (continue))")
+(%defmacro continue () '(%continue))
+
+; Increment / decrement operators. Names mirror C: `i` marks the operand position
+; relative to the `++`/`--`, so (++1 x) => ++x, (1++ x) => x++, etc.
+(%doc ++1
+  :doc "Pre-increment: ++X (increment, then yield the new value)."
+  :example "(++1 i)")
+(%defmacro ++1 (x) `(%pre-inc ,x))
+
+(%doc 1++
+  :doc "Post-increment: X++ (yield the old value, then increment)."
+  :example "(1++ i)")
+(%defmacro 1++ (x) `(%post-inc ,x))
+
+(%doc --1
+  :doc "Pre-decrement: --X (decrement, then yield the new value)."
+  :example "(--1 i)")
+(%defmacro --1 (x) `(%pre-dec ,x))
+
+(%doc 1--
+  :doc "Post-decrement: X-- (yield the old value, then decrement)."
+  :example "(1-- i)")
+(%defmacro 1-- (x) `(%post-dec ,x))
 
 ; incf-by / decf-by
 ; (incf-by x n) => (set x (+ x n))
@@ -902,12 +920,6 @@
   :example "(or a b)")
 (%defmacro or (a b &rest rest)
   `(%|| ,a ,b ,@rest))
-
-(%doc post-inc
-  :doc "Post-increment expression helper."
-  :example "(post-inc i)")
-(%defmacro post-inc (x)
-  `(%raw "(" ,x ")++"))
 
 (%doc nop
   :doc "No-op statement helper."

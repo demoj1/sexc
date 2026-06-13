@@ -14,7 +14,7 @@
   (decl (int x) 0)
   (when (zero? x)
     (printf "%s v%d\n" APP_NAME APP_VERSION))
-  (incf x)
+  (1++ x)
   (unless (zero? x)
     (printf "x is now %d\n" x))
   (twice (printf "twice!\n"))

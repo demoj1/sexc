@@ -1,15 +1,19 @@
 (defn void bumps ()
   (decl (int x) 0)
-  (incf x)
-  (decf x)
+  (++1 x)
+  (1++ x)
+  (--1 x)
+  (1-- x)
   (incf-by x 10)
   (decf-by x 3))
 ;==EXPECTED==
 void bumps(void)
 {
   int x = 0;
-  x = x + 1;
-  x = x - 1;
+  ++x;
+  x++;
+  --x;
+  x--;
   x = x + 10;
   x = x - 3;
 }

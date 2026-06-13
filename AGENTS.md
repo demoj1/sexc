@@ -38,7 +38,7 @@
 ## Карта stdlib (SexC)
 
 - `std/core.sexc` — агрегатор prelude (`%import` цепочки), сюда не добавлять большую логику.
-- `std/c-interop.sexc` — **всё, что (в конечном счёте) разворачивается в `%`-IR**. От прямых C-mirror (`defn`/`decl`/`adecl`/`struct`/`union`/операторы) до высокоуровневого C-statement sugar (`when`/`unless`/`incf`/`decf`/`incf-by`/`decf-by`/`dotimes`/`for-range`/`repeat`). Декларативные макросы (`defn`, `decl`, `adecl`, `struct`, `union`, `define`) дополнительно населяют compile-time metadata через `$m-put`.
+- `std/c-interop.sexc` — **всё, что (в конечном счёте) разворачивается в `%`-IR**. От прямых C-mirror (`defn`/`decl`/`adecl`/`struct`/`union`/операторы) до высокоуровневого C-statement sugar (`when`/`unless`/`break`/`continue`/`++1`/`1++`/`--1`/`1--`/`incf-by`/`decf-by`/`dotimes`/`for-range`/`repeat`). Декларативные макросы (`defn`, `decl`, `adecl`, `struct`, `union`, `define`) дополнительно населяют compile-time metadata через `$m-put`.
 - `std/meta.sexc` — **то, что НЕ привязано к C**. Compile-time `$defun` библиотека (`$list`, `$append`, `$subst`, `$length`, `$reverse`, `$nth`, `$--reverse-aux`) и generic structural sugar (`|>`, `||>`, `|as>`).
 - `std/ocaml-api.sexc` — docs-only `%doc` записи для OCaml-only символов (`%...`, `$...`) и для `$defun`-функций из meta.sexc.
 
@@ -475,7 +475,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Числовые мета-предикаты (`$zero?`/`$nonzero?`/`$pos?`/`$neg?`/`$ltz?`/`$letz?`/`$gtz?`/`$getz?`/`$even?`/`$odd?`) — compile-time-зеркала surface-предикатов, работают на целочисленных атомах (в т.ч. результат `$+`/`$-`/…). nil-предикаты (`$nil?`/`$not-nil?`) — на falsey-значениях, зеркало `$null?`.
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defslot`, `defer1`, `defer*`, `%send`, `doto`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `break`, `continue`, `++1`, `1++`, `--1`, `1--`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defslot`, `defer1`, `defer*`, `%send`, `doto`
   - **Метод-вызовы** (диспатч по compile-time типу объекта; объект — обязательно
     объявленная переменная, тип читается из `:c-type`): `(%send obj method arg…)` —
     примитив, резолвит `<ТипОбъекта>/<метод>` (через `$resolve-method-fn` +
@@ -498,7 +498,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 
 - `(zero-init)` -> `{0}` (позиция инициализатора); `(zero-init Type)` ->
   `(Type){0}` compound literal (валидно как выражение где угодно).
-- Часть простых оберток выражается через `%raw` (например `not`, `aref`, `post-inc`, `sizeof-expr`).
+- Часть простых оберток выражается через `%raw` (например `not`, `aref`, `sizeof-expr`).
 
 ## Struct и инициализация
 

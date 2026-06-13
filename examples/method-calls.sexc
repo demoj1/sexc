@@ -33,10 +33,10 @@
       (set (-> self data)
            (cast (:* int) (realloc (-> self data) (* (-> self cap) (sizeof int))))))
     (set (aref (-> self data) (-> self len)) x)
-    (incf (-> self len)))
+    (1++ (-> self len)))
 
   (defn int pop ((:* Stack self))
-    (decf (-> self len))
+    (1-- (-> self len))
     (return (aref (-> self data) (-> self len))))
 
   (defn int len ((:* Stack self))

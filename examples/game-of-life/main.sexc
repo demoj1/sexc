@@ -62,7 +62,7 @@
                   (int nc) (+ col dj))
             (when (and (>= nr 0) (< nr rows) (>= nc 0) (< nc cols)
                        (= (aref cur (+ (* nr cols) nc)) ALIVE))
-              (incf count)))))
+              (1++ count)))))
       (set (aref nxt i)
            (%ternary (or (= count 3) (and (= count 2) (= (aref cur i) ALIVE)))
                      ALIVE DEAD))))
@@ -89,7 +89,7 @@
           (int g) (- (-> self window) 1))
     (while (gtz? g)
       (set (aref (-> self hist) g) (aref (-> self hist) (- g 1)))
-      (decf g))
+      (1-- g))
     (set (aref (-> self hist) 0) oldest))
 
   (defn void free ((:* Life self))
@@ -116,9 +116,9 @@
       (printf "\nLoop detected after %d iterations!\n" (+ niter 1))
       (printf "Loop Period: %d\n" p)
       (set found 1)
-      (%break))
+      (break))
     (life::slide)
-    (incf niter))
+    (1++ niter))
 
   (when (and (zero? found) (= niter max))
     (printf "\nMaximum iterations (%d) reached without detecting a loop (within history window %d).\n"

@@ -32,7 +32,7 @@
     (set (aref (-> b data) slot) v
          (-> b head) (% (+ slot 1) (-> b cap)))
     (when (< (-> b count) (-> b cap))
-      (incf (-> b count))))
+      (1++ (-> b count))))
 
   (defn float get ((:* Buffer b) (int idx))
     ; idx: 0 → самый старый сэмпл, count-1 → самый свежий.

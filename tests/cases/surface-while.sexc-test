@@ -1,13 +1,13 @@
 (defn int countdown ((int n))
   (while (> n 0)
-    (decf n))
+    (1-- n))
   (return n))
 ;==EXPECTED==
 int countdown(int n)
 {
   while (n > 0)
     {
-      n = n - 1;
+      n--;
     }
   return n;
 }

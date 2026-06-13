@@ -1,0 +1,25 @@
+(defn int scan ((int n))
+  (decl (int hits) 0)
+  (for (decl (int i) 0) (< i n) (1++ i)
+    (when (= i 3) (continue))
+    (when (= i 7) (break))
+    (1++ hits))
+  (return hits))
+;==EXPECTED==
+int scan(int n)
+{
+  int hits = 0;
+  for (int i = 0; i < n; i++)
+    {
+      if (i == 3)
+        {
+          continue;
+        }
+      if (i == 7)
+        {
+          break;
+        }
+      hits++;
+    }
+  return hits;
+}
