@@ -12,6 +12,9 @@
 #   - present  -> the example is also run (gcc build) and its stdout diffed.
 #   - absent   -> compilation-only (both compilers must build it).
 #   - UPDATE=1 -> the sidecar is (re)generated from the actual run.
+# Sidecars live in tests/expected/ (not next to the .sexc), named after the
+# example's path with '/' flattened to '__': examples/foo/bar.sexc ->
+# tests/expected/examples__foo__bar.expected.
 #
 # clang is used only if installed; gcc is always required.
 
@@ -22,7 +25,9 @@ abs="${ROOT}/${src}"
 name="$(basename "${src%.sexc}")"
 slug="example-$(printf '%s' "${src}" | tr -c 'a-zA-Z0-9' '_')"
 results="${RESULTS_DIR:-/tmp}"
-expected="${abs%.sexc}.expected"
+# Sidecar lives in tests/expected/, named after the example path with '/' -> '__'.
+flat="${src%.sexc}"; flat="${flat//\//__}"
+expected="${ROOT}/tests/expected/${flat}.expected"
 
 if [[ ! -f "${abs}" ]]; then
     printf '\033[31mFAIL\033[0m compile %s (file not found)\n' "${src}" \
@@ -73,6 +78,7 @@ actual="${results}/${slug}.out"
 rm -f "${gcc_bin}"
 
 if [[ -n "${UPDATE:-}" ]]; then
+    mkdir -p "$(dirname "${expected}")"
     cp "${actual}" "${expected}"
     printf '\033[36mUPDATE\033[0m run %s\n' "${src}"
     touch "${results}/${slug}.pass"
