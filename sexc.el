@@ -83,7 +83,7 @@ merge into the output via `2>&1'."
     "if-nil" "when-nil" "unless-nil"
     "when" "unless" "break" "continue"
     "++1" "1++" "--1" "1--" "incf-by" "decf-by"
-    "dotimes" "for-range" "repeat"
+    "dotimes" "for-range" "repeat" "loop" "recur" "break-loop"
     "when!" "if!" "cond!" "with" "slot*" "defslot" "defer1" "defer*"
     "doto"
     "|>" "||>" "|as>")
@@ -120,6 +120,7 @@ merge into the output via `2>&1'."
     ("for" . (4 4 4 &body))
     ("dotimes" . (4 4 &body))
     ("for-range" . (4 4 4 &body))
+    ("loop" . (4 &body))
     ("with" . (4 4 &body))
     ("doto" . (4 &body))
     ("%defmacro" . (4 4 &body))
@@ -143,6 +144,9 @@ merge into the output via `2>&1'."
     ("with" . "(with VAR VALUE BODY...) -> dynamic binding; restores VAR on any block exit")
     ("slot*" . "(slot* TYPE *a* TYPE *b* ...) -> declare the dynamic slots this fn requires, as (type name) pairs (even count); declares each slot + requires it. A caller that doesn't `with`-bind one is a compile-time error at the call")
     ("defslot" . "(defslot TYPE *slot* [default]) -> top-level dynamic slot: explicit TYPE, optional DEFAULT (startup constructor). Defaulted/scalar = optional; pointer w/o default must be bound (`with`) before any read")
+    ("loop" . "(loop ((TYPE NAME INIT)...) BODY...) -> named recursion point, no stack growth. (recur V...) rebinds all vars in parallel + jumps to top; (break-loop) exits. Statement; carry result via outer var or (return ...)")
+    ("recur" . "(recur VALUE...) -> inside (loop ...): parallel-rebind loop vars (old values read) and jump to the top. One value per binding")
+    ("break-loop" . "(break-loop) -> exit the nearest enclosing (loop ...) from any depth. For C for/while use (break)")
     ("doto" . "(doto OBJ (method ARG...) | method ...) -> call methods on OBJ in order (comma); returns result of the LAST. OBJ must be a declared variable")
     ("%send" . "(%send OBJ METHOD ARG...) -> dispatch METHOD on OBJ by its compile-time type: Type/method(OBJ, ARG...). Usually via obj::method sugar")
     ("defer1" . "(defer1 FN ARG) | (defer1 obj::method) -> call FN(ARG) at block exit, LIFO (cleanup attr)")

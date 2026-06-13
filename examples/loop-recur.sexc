@@ -1,0 +1,56 @@
+; loop / recur / break-loop — tail recursion as iteration (no stack growth).
+;
+;   sexc loop-recur.sexc -C gcc -o /tmp/lr && /tmp/lr
+;
+; Expected output:
+;   fact(10) = 3628800
+;   sum(1..100) = 5050
+;   gcd(48,36) = 12
+;   first 9 at index 2
+
+(include <stdio.h>)
+
+; Accumulate: recur until i hits 0, carry the running product/sum out.
+(defn long fact ((int n))
+  (decl (long result) 1)
+  (loop ((int i n) (long acc 1))
+    (if (zero? i)
+      (set result acc)
+      (recur (- i 1) (* acc (cast long i)))))
+  (return result))
+
+(defn int sum-range ((int lo) (int hi))
+  (decl (int total) 0)
+  (loop ((int i lo) (int acc 0))
+    (if (> i hi)
+      (set total acc)
+      (recur (+ i 1) (+ acc i))))
+  (return total))
+
+; Euclid's algorithm as a two-variable loop.
+(defn int gcd ((int a) (int b))
+  (decl (int result) 0)
+  (loop ((int x a) (int y b))
+    (if (zero? y)
+      (set result x)
+      (recur y (% x y))))
+  (return result))
+
+; Linear search with an explicit break-loop from inside the body.
+(defn int index-of ((:* int a) (int n) (int target))
+  (decl (int idx) -1)
+  (loop ((int i 0))
+    (when (>= i n) (break-loop))
+    (when (= (aref a i) target)
+      (set idx i)
+      (break-loop))
+    (recur (+ i 1)))
+  (return idx))
+
+(defn int main ()
+  (decl ((%array int) data) (init 5 3 9 7 2))
+  (printf "fact(10) = %ld\n" (fact 10))
+  (printf "sum(1..100) = %d\n" (sum-range 1 100))
+  (printf "gcd(48,36) = %d\n" (gcd 48 36))
+  (printf "first 9 at index %d\n" (index-of data 5 9))
+  (return 0))

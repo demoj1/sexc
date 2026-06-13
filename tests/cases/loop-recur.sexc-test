@@ -1,0 +1,70 @@
+; loop/recur/break-loop: named recursion point compiled to a labelled goto block.
+; recur rebinds in parallel through temps; break-loop jumps past the loop.
+(defn int sum-to ((int n))
+  (decl (int total) 0)
+  (loop ((int i n) (int acc 0))
+    (if (zero? i)
+      (set total acc)
+      (recur (- i 1) (+ acc i))))
+  (return total))
+
+(defn int first-neg ((:* int a) (int n))
+  (decl (int idx) -1)
+  (loop ((int i 0))
+    (when (>= i n) (break-loop))
+    (when (< (aref a i) 0) (set idx i) (break-loop))
+    (recur (+ i 1)))
+  (return idx))
+;==EXPECTED==
+int sum_u002D_to(int n)
+{
+  int total = 0;
+  {
+    int i = n;
+    int acc = 0;
+    __loop_top_0:
+    if (i == 0)
+      {
+        total = acc;
+      }
+    else
+      {
+        {
+          int __recur_2 = i - 1;
+          int __recur_3 = acc + i;
+          i = __recur_2;
+          acc = __recur_3;
+          goto __loop_top_0;
+        }
+      }
+    __loop_end_1:
+    ;
+  }
+  return total;
+}
+
+int first_u002D_neg(int *a, int n)
+{
+  int idx = -1;
+  {
+    int i = 0;
+    __loop_top_4:
+    if (i >= n)
+      {
+        goto __loop_end_5;
+      }
+    if ((a)[i] < 0)
+      {
+        idx = i;
+        goto __loop_end_5;
+      }
+    {
+      int __recur_6 = i + 1;
+      i = __recur_6;
+      goto __loop_top_4;
+    }
+    __loop_end_5:
+    ;
+  }
+  return idx;
+}

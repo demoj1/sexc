@@ -1,0 +1,13 @@
+; recur must pass exactly one value per loop binding; the error points at the
+; user's recur, not into std/c-interop.sexc.
+(defn int f ((int n))
+  (loop ((int i n) (int acc 0))
+    (recur (- i 1))))
+;==EXPECTED-ERROR==
+<stdin>:4:3: error[macro]: recur: number of values does not match the loop bindings
+  (loop ((int i n) (int acc 0))
+  ^
+
+Signature: (loop ((type name init) ...) body...)
+Doc: Named recursion point compiled to a labelled block (no stack growth). (recur v...) rebinds all loop vars in parallel and jumps to the top; (break-loop) jumps past the loop. Both work from any nesting depth and target the nearest enclosing loop. Exit by not recurring (fall through) or with (break-loop). It is a statement, so carry results out via an outer variable or (return ...).
+Example: (loop ((int i n) (int acc 0)) (if (zero? i) (set total acc) (recur (- i 1) (+ acc i))))

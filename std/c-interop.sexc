@@ -425,6 +425,78 @@
          (%post-inc ,i)
          ,body))
 
+; ─── loop / recur / break-loop — tail recursion as iteration (no stack growth) ─
+; (loop ((type name init)...) body...) is a named recursion point. It compiles to
+; a labelled block (pure goto, no while): (recur v...) rebinds ALL loop vars in
+; parallel and jumps to the top; (break-loop) jumps past the loop. Both work from
+; any nesting depth (goto escapes nested if/for/while) and target the NEAREST
+; enclosing loop (a nested loop keeps its own recur/break-loop). Exit by not
+; recurring (fall through) or with (break-loop). It is a statement — carry a result
+; out via an outer variable or (return ...).
+
+; (recur e...) -> parallel rebind through fresh temps (each e reads the OLD values),
+; then goto the top label. Returns ((decls...) (assigns...)).
+($defun $loop-recur-parts (exprs names types)
+  ($if ($null? exprs)
+    ($list ($list) ($list))
+    ($let ((tmp  ($gensym "__recur_"))
+           (rest ($loop-recur-parts ($cdr exprs) ($cdr names) ($cdr types))))
+      ($list
+        ($cons `(%decl ,($car types) ,tmp ,($car exprs)) ($car rest))
+        ($cons `(%set ,($car names) ,tmp)                ($car ($cdr rest)))))))
+
+($defun $loop-build-recur (exprs names types top)
+  ($do
+    ($assert ($eq? ($length exprs) ($length names))
+      "recur: number of values does not match the loop bindings")
+    ($let ((parts ($loop-recur-parts exprs names types)))
+      `(%block ,@($car parts) ,@($car ($cdr parts)) (%goto ,top)))))
+
+; Rewrite (recur ...) / (break-loop) in a body form. Atoms/strings pass through;
+; does NOT descend into a nested (loop ...) — that loop rewrites its own.
+($defun $loop-rewrite (form names types top end)
+  ($if ($atom? form)
+    form
+    ($if ($null? form)
+      form
+      ($cond
+        (($eq? ($car form) 'recur)      ($loop-build-recur ($cdr form) names types top))
+        (($eq? ($car form) 'break-loop) `(%goto ,end))
+        (($eq? ($car form) 'loop)       form)
+        (else ($map ($loop-rewrite it names types top end) form))))))
+
+(%doc loop
+  :sig (loop ((type name init)...) body...)
+  :doc "Named recursion point compiled to a labelled block (no stack growth). (recur v...) rebinds all loop vars in parallel and jumps to the top; (break-loop) jumps past the loop. Both work from any nesting depth and target the nearest enclosing loop. Exit by not recurring (fall through) or with (break-loop). It is a statement, so carry results out via an outer variable or (return ...)."
+  :example "(loop ((int i n) (int acc 0)) (if (zero? i) (set total acc) (recur (- i 1) (+ acc i))))")
+(%defmacro loop (bindings &rest body)
+  ($let ((types ($map ($unpack-type ($car it)) bindings))
+         (names ($map ($car ($cdr it)) bindings))
+         (top   ($gensym "__loop_top_"))
+         (end   ($gensym "__loop_end_")))
+    ($let ((decls ($map `(%decl ,($unpack-type ($car it)) ,($car ($cdr it)) ,($car ($cdr ($cdr it)))) bindings))
+           (rbody ($map ($loop-rewrite it names types top end) body)))
+      `(%block
+         ,@decls
+         (%label ,top)
+         ,@rbody
+         (%label ,end)
+         (%nop)))))
+
+(%doc break-loop
+  :sig (break-loop)
+  :doc "Exit the nearest enclosing (loop ...) from any nesting depth (compiles to a goto past the loop). For C for/while loops use (break)."
+  :example "(loop ((int i 0)) (when (= (aref a i) x) (set found i) (break-loop)) (recur (+ i 1)))")
+(%defmacro break-loop ()
+  ($error "break-loop is only valid inside a (loop ...) body"))
+
+(%doc recur
+  :sig (recur value...)
+  :doc "Inside (loop ...): rebind all loop vars in parallel (each value reads the old bindings) and jump back to the top. Must supply one value per loop binding."
+  :example "(recur (- i 1) (+ acc i))")
+(%defmacro recur (&rest _)
+  ($error "recur is only valid inside a (loop ...) body"))
+
 ; return
 ; (return expr)
 ; => (%return expr)
