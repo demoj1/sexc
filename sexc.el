@@ -922,8 +922,8 @@ sits *inside* the parens) are captured whole instead of being cut short."
   "Currently running SexC Flymake process for this buffer, if any.")
 
 (defconst sexc--flymake-diag-regexp
-  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): error\\[\\([^]]*\\)\\]: \\(.*\\)$"
-  "Matches a compiler diagnostic: FILE:LINE:COL: error[PHASE]: MESSAGE.")
+  "^\\(.*?\\):\\([0-9]+\\):\\([0-9]+\\): \\(error\\|warning\\)\\[\\([^]]*\\)\\]: \\(.*\\)$"
+  "Matches a compiler diagnostic: FILE:LINE:COL: SEVERITY[PHASE]: MESSAGE.")
 
 (defun sexc--flymake-parse (source report-fn)
   "Parse compiler stderr in the current buffer into Flymake diagnostics.
@@ -940,18 +940,19 @@ buffer-level diagnostics that name the originating file."
         (let* ((file (match-string 1))
                (line (string-to-number (match-string 2)))
                (col (string-to-number (match-string 3)))
-               (phase (match-string 4))
-               (msg (format "[%s] %s" phase (match-string 5))))
+               (type (if (string= (match-string 4) "warning") :warning :error))
+               (phase (match-string 5))
+               (msg (format "[%s] %s" phase (match-string 6))))
           (if (string= file "<stdin>")
               (pcase-let ((`(,beg . ,end)
                            (flymake-diag-region source line col)))
                 (when beg
-                  (push (flymake-make-diagnostic source beg end :error msg)
+                  (push (flymake-make-diagnostic source beg end type msg)
                         diags)))
-            ;; Error inside an imported file — can't point into SOURCE, so
+            ;; Diagnostic inside an imported file — can't point into SOURCE, so
             ;; surface it as a whole-buffer diagnostic naming the location.
             (push (flymake-make-diagnostic
-                   source (point-min) (min (point-max) (1+ (point-min))) :error
+                   source (point-min) (min (point-max) (1+ (point-min))) type
                    (format "%s (%s:%d:%d)" msg file line col))
                   diags))))
        ;; Locationless bare error (e.g. missing stdlib, CLI misuse).
