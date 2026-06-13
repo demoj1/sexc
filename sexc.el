@@ -51,14 +51,18 @@ Supported placeholders:
   :type 'string
   :group 'sexc)
 
-(defcustom sexc/expand-command "%b -"
+(defcustom sexc/expand-command "%b --quiet --no-line -"
   "Expand command template used by `sexc/expand'.
 
 Supported placeholders:
 - %b: quoted `sexc/binary'
 - %f: quoted current buffer file (when available)
 
-The command must accept source on stdin and print generated C to stdout."
+The command must accept source on stdin and print generated C to stdout.
+`--no-line' omits the `#line' directives (they map C back to the .sexc source
+for the C compiler, but only clutter the human-facing preview); `--quiet'
+suppresses the per-stage `[sexc] …' logs, which `sexc/expand' would otherwise
+merge into the output via `2>&1'."
   :type 'string
   :group 'sexc)
 
