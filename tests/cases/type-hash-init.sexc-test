@@ -1,0 +1,21 @@
+; Type# aggregate construction — all forms, incl. the regression: exactly ONE
+; designated field (used to fail with "single-argument form only as zero-init").
+(struct Bar :fields (int x) (int y))
+(defn void mk ()
+  (decl (Bar a) (Bar# :x 3)          ; one designated field (regression)
+        (Bar b) (Bar# :x 1 :y 2)     ; two designated
+        (Bar c) (Bar# 0)             ; zero / single positional
+        (Bar d) (Bar# 3 4)))         ; positional
+;==EXPECTED==
+typedef struct Bar {
+  int x;
+  int y;
+} Bar;
+
+void mk(void)
+{
+  Bar a = (Bar){.x = 3};
+  Bar b = (Bar){.x = 1, .y = 2};
+  Bar c = (Bar){0};
+  Bar d = (Bar){3, 4};
+}

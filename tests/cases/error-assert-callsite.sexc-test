@@ -1,0 +1,13 @@
+; A $assert inside the `decl` macro must point at the USER's call site (this file),
+; not at the assert's location in std/c-interop.sexc.
+(defn int main ()
+  (decl x 5)
+  (return 0))
+;==EXPECTED-ERROR==
+<stdin>:4:3: error[macro]: decl: binding must be (type name) or (:mods base name)
+  (decl x 5)
+  ^
+
+Signature: (decl binding init &rest rest)
+Doc: Let*-style variable declarations with required initializer.
+Example: (decl (int x) 10 (int y) (+ x 5))

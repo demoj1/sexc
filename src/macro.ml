@@ -304,7 +304,10 @@ and eval_expr_inner ctx env expr =
         | Raw.Atom (s, _) | Raw.Str (s, _) -> s
         | _ -> "macro error"
       in
-      fail text
+      (* Точку ошибки ставим на CALL-SITE макроса (где юзер написал форму), а не
+         на сам $error внутри тела макроса в stdlib. None → fallback на голый fail
+         (promote подхватит eval-span). *)
+      Common.fail_at ~phase:"macro" ctx.expand_site_span text
   | Raw.List ((Raw.Atom ("$gensym", _) :: []), _) -> gensym ctx "__g"
   | Raw.List ((Raw.Atom ("$gensym", _) :: [ prefix ]), _) ->
       let p =
@@ -325,7 +328,9 @@ and eval_expr_inner ctx env expr =
           | Raw.Atom (s, _) | Raw.Str (s, _) -> s
           | _ -> "assertion failed"
         in
-        fail text
+        (* Ошибку привязываем к CALL-SITE макроса (а не к $assert в теле stdlib-
+           макроса). None → fallback на голый fail. *)
+        Common.fail_at ~phase:"macro" ctx.expand_site_span text
       else Raw.Atom ("nil", None)
   | Raw.List ((Raw.Atom ("$assert", _) :: _), _) ->
       fail "$assert expects exactly two arguments: ($assert cond message)"
