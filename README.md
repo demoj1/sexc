@@ -347,7 +347,9 @@ instead a **whole-program pass catches it at compile time**: a call that reaches
 a function needing a slot without binding it is an error, pointing at the call
 (`say requires the dynamic slot *out* …`). `slot*` declares the dependency
 explicitly; scalar slots (e.g. an `int` depth that safely defaults to `0`) are
-exempt — only pointer slots that could NULL-deref are checked.
+exempt — only pointer slots that could NULL-deref are checked. The dual is a
+**warning**: a `with` that binds a slot nothing in its body reads or needs is
+dead, and the compiler says so (without failing the build).
 
 `defslot` declares a slot at the top level — an explicit type and an optional
 default set by a startup constructor:
@@ -889,7 +891,9 @@ _Thread_local FILE *out*;                 /* объявлено один раз 
 которой нужен слот, без связывания — ошибка на строке вызова (`say requires the
 dynamic slot *out* …`). `slot*` объявляет зависимость явно; скалярные слоты
 (напр. `int`-глубина с безопасным дефолтом `0`) исключены — проверяются только
-указательные, где возможен NULL-дереф.
+указательные, где возможен NULL-дереф. Дуально — **warning**: `with`, связывающий
+слот, который в теле никто не читает и не требует, — мёртвый, и компилятор об этом
+скажет (не фейля сборку).
 
 `defslot` объявляет слот на top-level — явный тип и опциональный дефолт,
 выставляемый стартап-конструктором:

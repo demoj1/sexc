@@ -1,0 +1,11 @@
+; A `with` that binds a pointer slot nothing in its body reads or needs is dead —
+; the compiler WARNS (but still succeeds; this is not an error).
+(include <stdio.h>)
+(defn void uses-out () (slot* (:* FILE) *out*) (fprintf *out* "x\n"))
+(defn int main ()
+  (with *out* stdout (printf "this body never touches *out*\n"))
+  (return 0))
+;==EXPECTED-WARNING==
+<stdin>:6:3: warning[analysis]: the `with` binding of *out* is unused — nothing in its body reads or needs that slot
+  (with *out* stdout (printf "this body never touches *out*\n"))
+  ^

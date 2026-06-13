@@ -173,26 +173,85 @@ let propagate_over_calls (defs : (string * Raw.t) list) ~step : string -> String
   done;
   get
 
-(* ── client: unbound dynamic-slot check ────────────────────────────────────
-   Returns diagnostics for slots that can reach `main` unbound. No `main`
-   (a library TU) ⇒ requirements are the external caller's responsibility,
-   so nothing is reported. *)
-let check_unbound_slots (forms : Raw.t list) : error_item list =
+(* ── unused-binding check (dual of unbound) ────────────────────────────────
+   A `with` that binds a slot nothing in its body reads or needs is dead — warn.
+
+   The slots a body actually CONSUMES: a tracked-slot read, or a slot required by
+   a function it calls (ignoring bindings — we just want "is it referenced"). *)
+let demanded_in ~fnset ~needs_of ~tracked raw =
+  let acc = ref String.Set.empty in
+  let rec go raw =
+    match raw with
+    | Raw.Atom (a, _) -> if Set.mem tracked a then acc := Set.add !acc a
+    | Raw.Str (_, _) -> ()
+    (* skip a nested `with` marker's VAR/TY head; look only at its body *)
+    | Raw.List ((Raw.Atom ("%dyn-scope", _) :: _ :: _ :: inner), _) -> List.iter inner ~f:go
+    | Raw.List ((Raw.Atom (callee, _) :: args), _) when Set.mem fnset callee ->
+        Set.iter (needs_of callee) ~f:(fun v -> acc := Set.add !acc v);
+        List.iter args ~f:go
+    | Raw.List (xs, _) -> List.iter xs ~f:go
+  in
+  go raw;
+  !acc
+
+(* The user body of a `with`: the statements AFTER the binding `(%set v …)`,
+   excluding the save/guard/set machinery the marker also wraps. *)
+let with_user_body v inner =
+  match inner with
+  | [ Raw.List ((Raw.Atom ("%block", _) :: stmts), _) ] ->
+      let rec after = function
+        | Raw.List ((Raw.Atom ("%set", _) :: Raw.Atom (v2, _) :: _), _) :: tl when String.equal v2 v -> tl
+        | _ :: tl -> after tl
+        | [] -> []
+      in
+      after stmts
+  | _ -> inner
+
+let check_unused_bindings ~fnset ~needs_of ~tracked forms : diagnostic list =
+  let warnings = ref [] in
+  let rec go raw =
+    (match raw with
+     | Raw.List ((Raw.Atom ("%dyn-scope", _) :: Raw.Atom (v, _) :: _ty :: inner), sp)
+       when Set.mem tracked v ->
+         let body = with_user_body v inner in
+         let demanded =
+           List.fold body ~init:String.Set.empty ~f:(fun acc f ->
+               Set.union acc (demanded_in ~fnset ~needs_of ~tracked f))
+         in
+         if not (Set.mem demanded v) then
+           Option.iter sp ~f:(fun span ->
+               let msg =
+                 Printf.sprintf
+                   "the `with` binding of %s is unused — nothing in its body reads or needs that slot"
+                   v
+               in
+               warnings := { phase = "analysis"; message = msg; span } :: !warnings)
+     | _ -> ());
+    match raw with
+    | Raw.List (xs, _) -> List.iter xs ~f:go
+    | _ -> ()
+  in
+  List.iter forms ~f:go;
+  List.rev !warnings
+
+(* Run all whole-program checks. Returns (errors, warnings): errors fail the
+   compile (unbound slot reaching `main`); warnings are printed, non-fatal
+   (a `with` binding nobody needs). No tracked slots / no `main` short-circuit. *)
+let check_program (forms : Raw.t list) : error_item list * diagnostic list =
   let defs = List.filter_map forms ~f:fn_def in
   let fnset = String.Set.of_list (List.map defs ~f:fst) in
   let tracked = tracked_slots forms in
-  if Set.is_empty tracked then []
+  if Set.is_empty tracked then ([], [])
   else begin
     let needs_of =
       propagate_over_calls defs ~step:(fun ~needs_of _name body ->
           fst (walk_requirements ~fnset ~tracked ~needs_of ~report:false body))
     in
-    match List.Assoc.find defs ~equal:String.equal "main" with
-    | None -> []
-    | Some body -> snd (walk_requirements ~fnset ~tracked ~needs_of ~report:true body)
+    let errors =
+      match List.Assoc.find defs ~equal:String.equal "main" with
+      | None -> []
+      | Some body -> snd (walk_requirements ~fnset ~tracked ~needs_of ~report:true body)
+    in
+    let warnings = check_unused_bindings ~fnset ~needs_of ~tracked forms in
+    (errors, warnings)
   end
-
-(* Run all whole-program checks; returns accumulated diagnostics (possibly
-   empty). Wired into [compile_forms] after expansion, before codegen. *)
-let check_program (forms : Raw.t list) : error_item list =
-  check_unbound_slots forms

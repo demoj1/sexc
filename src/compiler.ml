@@ -704,9 +704,13 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   in
   let t = now_ns () in
   let chunks = List.map non_macro_tops ~f:emit_safe in
-  (* Whole-program анализ по всей раскрытой программе; диагностики копим в общий
-     errors (вместе с per-form ошибками — пользователь видит всё за прогон). *)
-  errors := List.rev_append (Analysis.check_program (List.rev !program_forms)) !errors;
+  (* Whole-program анализ по всей раскрытой программе. Ошибки копим в общий errors
+     (вместе с per-form — всё за прогон); warnings печатаем сразу в stderr,
+     компиляцию они не фейлят. *)
+  let analysis_errors, analysis_warnings = Analysis.check_program (List.rev !program_forms) in
+  errors := List.rev_append analysis_errors !errors;
+  List.iter analysis_warnings ~f:(fun d ->
+      Stdlib.prerr_endline (Common.render_diagnostic ~severity:"warning" d));
   (match List.rev !errors with
    | [] -> ()
    | items -> raise (Common.Sexc_errors items));

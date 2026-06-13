@@ -128,7 +128,7 @@ let line_col source off =
   in
   loop 0 1 1
 
-let render_diagnostic d =
+let render_diagnostic ?(severity = "error") d =
   let len = String.length d.span.source in
   let off =
     if d.span.start_off >= len && len > 0 then len - 1
@@ -145,7 +145,7 @@ let render_diagnostic d =
   String.concat
     ~sep:"\n"
     [
-      Printf.sprintf "%s:%d:%d: error[%s]: %s" d.span.file line col d.phase d.message;
+      Printf.sprintf "%s:%d:%d: %s[%s]: %s" d.span.file line col severity d.phase d.message;
       line_text;
       caret;
     ]

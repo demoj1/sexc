@@ -439,6 +439,12 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 - требования текут вверх по вызовам; если доходят до `main` непогашенными → ошибка
   на строке вызова с именем функции («X requires the dynamic slot *v* …»). Нет
   `main` (библиотека) → требования — забота внешнего вызывающего, не репортим.
+- **дуал — unused-binding WARNING** (`check_unused_bindings`): `with`, связывающий
+  tracked-слот, тело которого его не читает и не зовёт ничего, кому он нужен →
+  `warning[analysis]` (НЕ ошибка, exit 0). Юзер-тело = после `(%set v …)` в блоке
+  (машинерию save/set исключаем). Warnings возвращаются отдельным списком
+  (`check_program → (errors, warnings)`), печатаются `render_diagnostic
+  ~severity:"warning"`. Тест-режим harness — `;==EXPECTED-WARNING==` (успех + stderr).
 
 Маркеры прозрачны для codegen — `strip_dyn_scope` в `compiler.ml` снимает
 `%dyn-scope` (→ тело) и `%dyn-require` (→ `%nop`) перед парсингом, а top-level

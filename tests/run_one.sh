@@ -36,6 +36,7 @@ results="${RESULTS_DIR:-/tmp}"
 
 OK_MARKER=';==EXPECTED=='
 ERR_MARKER=';==EXPECTED-ERROR=='
+WARN_MARKER=';==EXPECTED-WARNING=='
 
 # Флаги собираем из заголовка (первая строка):
 # - по умолчанию добавляем --no-line: обычные snapshot-тесты проверяют
@@ -54,6 +55,7 @@ fi
 # Detect which marker (if any) the file uses.
 ok_line=$(grep -nFx "${OK_MARKER}" "${case_path}" | head -n1 | cut -d: -f1)
 err_line=$(grep -nFx "${ERR_MARKER}" "${case_path}" | head -n1 | cut -d: -f1)
+warn_line=$(grep -nFx "${WARN_MARKER}" "${case_path}" | head -n1 | cut -d: -f1)
 
 mode=""
 marker=""
@@ -62,6 +64,10 @@ if [[ -n "${err_line}" ]]; then
     mode="error"
     marker="${ERR_MARKER}"
     marker_line="${err_line}"
+elif [[ -n "${warn_line}" ]]; then
+    mode="warn"
+    marker="${WARN_MARKER}"
+    marker_line="${warn_line}"
 elif [[ -n "${ok_line}" ]]; then
     mode="ok"
     marker="${OK_MARKER}"
@@ -112,6 +118,17 @@ case "${mode}" in
                 printf '\033[31mFAIL\033[0m %s (sexc exit 0, expected non-zero)\n' "${rel}"
                 printf '    stdout was:\n'
                 sed 's/^/      /' "${stdout_file}" | head -10
+            } | tee "${results}/${slug}.fail"
+            exit 0
+        fi
+        normalize "${stderr_file}" > "${actual_file}"
+        ;;
+    warn)
+        # Successful compile (exit 0) that emits a non-fatal warning on stderr.
+        if [[ ${status} -ne 0 ]]; then
+            {
+                printf '\033[31mFAIL\033[0m %s (sexc exit %d, expected success with a warning)\n' "${rel}" "${status}"
+                sed 's/^/    /' "${stderr_file}" | head -20
             } | tee "${results}/${slug}.fail"
             exit 0
         fi
