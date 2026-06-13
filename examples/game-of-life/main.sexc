@@ -8,8 +8,8 @@
 
 (include <stdio.h> <stdlib.h> <string.h>)
 
-(define DEAD  (%raw "'.'"))
-(define ALIVE (%raw "'o'"))
+(define DEAD  ?.)
+(define ALIVE ?o)
 
 (struct Life
   :fields

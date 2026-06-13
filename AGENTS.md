@@ -17,7 +17,7 @@
 
 - `src/sexc.ml` — CLI и флаги (`--no-prelude`, `--quiet`/`-q`, `-C`).
 - `src/compiler.ml` — orchestration пайплайна: import/prelude -> macro -> frontend -> codegen.
-- `src/reader.ml` — reader/парсер Raw-форм + quote/quasiquote sugars.
+- `src/reader.ml` — reader/парсер Raw-форм + quote/quasiquote sugars + char-литералы (`?c`, emacs-style: `?.` `?\n` `?\\` `?\'` `?\s`=space → десугарятся в `(%raw "'c'")`).
 - `src/macro.ml` — `%defmacro`, `%eval/%evals`, compile-time `$...` builtins.
 - `src/frontend.ml` — парсинг expanded Raw в AST (типы/stmt/expr/top-level).
 - `src/codegen_c.ml` — генерация C из AST + mangling идентификаторов.

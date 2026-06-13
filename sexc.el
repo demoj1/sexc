@@ -274,6 +274,8 @@ after edits settle and on save."
 (defun sexc--font-lock-keywords ()
   "Compute font-lock rules for SexC mode."
   `((,sexc/number-regexp . font-lock-constant-face)
+    ;; char literals: ?c / ?\n / ?\\ — token-leading `?` plus one (escaped) char.
+    ("\\(?:^\\|[[:space:]()]\\)\\(\\?\\(?:\\\\.\\|[^[:space:]()]\\)\\)" 1 font-lock-constant-face)
     (,(regexp-opt sexc/type-keywords 'symbols) . font-lock-type-face)
     ;; Prefix-based highlighting — single rule per family covers every existing
     ;; and future token without enumerating them.

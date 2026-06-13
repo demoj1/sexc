@@ -1,0 +1,21 @@
+; Emacs-style char literals: ?c desugars to an inline C char literal '(c)'.
+; Ordinary chars, escapes (?\n ?\t ?\\ ?\'), and ?\s for space.
+(defn void chars ()
+  (decl (char a) ?A
+        (char dot) ?.
+        (char nl) ?\n
+        (char tab) ?\t
+        (char quote) ?'
+        (char back) ?\\
+        (char space) ?\s))
+;==EXPECTED==
+void chars(void)
+{
+  char a = 'A';
+  char dot = '.';
+  char nl = '\n';
+  char tab = '\t';
+  char quote = '\'';
+  char back = '\\';
+  char space = ' ';
+}

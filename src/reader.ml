@@ -160,6 +160,26 @@ let rec parse_one st =
   | Some '"' ->
       bump st;
       parse_string st ~start
+  (* Char literal, emacs-style: `?c`, `?.`, `?\n`, `?\\`, `?\'`, `?\s` (space).
+     Desugars to (%raw "'c'") — an inline C char literal — so no frontend/codegen
+     changes are needed. `?` only leads a token here; a trailing `?` (predicates
+     like nil?) is consumed by parse_atom, never reaching this case. *)
+  | Some '?' ->
+      bump st;
+      let c_literal =
+        match peek st with
+        | None -> error st "unfinished char literal after '?'"
+        | Some '\\' ->
+            bump st;
+            (match peek st with
+             | None -> error st "unfinished char escape after '?\\'"
+             | Some 's' -> bump st; "' '"                       (* emacs \s = space *)
+             | Some e -> bump st; Printf.sprintf "'\\%c'" e)    (* \n \t \\ \' ... → '\X' *)
+        | Some '\'' -> bump st; "'\\''"                         (* ?' → apostrophe char *)
+        | Some c -> bump st; Printf.sprintf "'%c'" c
+      in
+      let sp = Some (mk_span st ~start_off:start) in
+      Raw.List ([ Raw.Atom ("%raw", sp); Raw.Str (c_literal, sp) ], sp)
   | Some _ -> parse_atom st
 
 and parse_list st ~start =
