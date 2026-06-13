@@ -40,8 +40,15 @@ type file_entry = {
 
 type t = file_entry String.Map.t
 
+(* Bump when the indexer's output format changes (e.g. a new field in a
+   signature) — the cache key is the file md5, which does NOT change when the
+   *indexer* changes, so a stale cache would otherwise serve old entries.
+   v2: function signatures gained a "requires: …" slots line. *)
+let cache_format_version = "v2"
+
 let cache_path () =
-  Filename.concat (Stdlib.Filename.get_temp_dir_name ()) "sexc-symbol-cache.marshal"
+  Filename.concat (Stdlib.Filename.get_temp_dir_name ())
+    (Printf.sprintf "sexc-symbol-cache-%s.marshal" cache_format_version)
 
 let load () : t =
   let path = cache_path () in
