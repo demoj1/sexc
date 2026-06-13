@@ -465,13 +465,14 @@
         (($eq? ($car form) 'loop)       form)
         (else ($map ($loop-rewrite it names types top end) form))))))
 
-; Count recur forms belonging to THIS loop (does not descend into a nested loop).
-($defun $loop-count-recur (form)
+; Count (HEAD ...) forms belonging to THIS loop (does not descend into a nested
+; loop). Used for both recur (warn if none) and break-loop (emit __end only if any).
+($defun $loop-count (head form)
   ($if ($atom? form) 0
     ($if ($null? form) 0
-      ($if ($eq? ($car form) 'recur) 1
+      ($if ($eq? ($car form) head) 1
         ($if ($eq? ($car form) 'loop) 0
-          ($reduce ($+ acc ($loop-count-recur it)) 0 form))))))
+          ($reduce ($+ acc ($loop-count head it)) 0 form))))))
 
 (%doc loop
   :sig (loop ((type name init)...) body...)
@@ -484,17 +485,17 @@
          (end   ($gensym "__loop_end_")))
     ($let ((decls ($map `(%decl ,($unpack-type ($car it)) ,($car ($cdr it)) ,($car ($cdr ($cdr it)))) bindings))
            (rbody ($map ($loop-rewrite it names types top end) body))
-           (nrecur ($reduce ($+ acc ($loop-count-recur it)) 0 body)))
+           (nrecur ($reduce ($+ acc ($loop-count 'recur it)) 0 body))
+           (nbreak ($reduce ($+ acc ($loop-count 'break-loop it)) 0 body)))
       ($do
         ($if ($zero? nrecur)
           ($warn "loop has no recur — it runs once and exits; did you forget (recur ...)?")
           nil)
-      `(%block
-         ,@decls
-         (%label ,top)
-         ,@rbody
-         (%label ,end)
-         (%nop))))))
+        ; Emit each label only when something targets it, else gcc -Wextra warns
+        ; "label defined but not used": __top needs a recur, __end needs a break-loop.
+        ($let ((top-part ($if ($zero? nrecur) ($list) ($list `(%label ,top))))
+               (end-part ($if ($zero? nbreak) ($list) ($list `(%label ,end) '(%nop)))))
+          `(%block ,@decls ,@top-part ,@rbody ,@end-part))))))
 
 (%doc break-loop
   :sig (break-loop)

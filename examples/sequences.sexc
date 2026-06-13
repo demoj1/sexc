@@ -1,0 +1,56 @@
+; loop / recur showcase — numeric sequences that carry state across iterations.
+; Each loop rebinds several vars IN PARALLEL (recur reads the old bindings), which a
+; sequential set would get wrong — most visibly in fib's (recur b (+ a b)).
+;
+;   sexc sequences.sexc -C gcc -o /tmp/seq && /tmp/seq
+;
+; Expected output:
+;   fib: 0 1 1 2 3 5 8 13 21 34
+;   collatz(27) = 111 steps
+;   isqrt(2000) = 44
+
+(include <stdio.h>)
+
+; Fibonacci: two-var loop. (recur b (+ a b)) advances the pair atomically — both
+; read the OLD a and b. Sequential (set a b)(set b (+ a b)) would corrupt it.
+(defn long fib ((int n))
+  (decl (long out) 0)
+  (loop ((int k n) (long a 0) (long b 1))
+    (if (zero? k)
+      (set out a)
+      (recur (- k 1) b (+ a b))))
+  (return out))
+
+; Collatz: carry (value, steps) until the value reaches 1.
+(defn int collatz ((int n))
+  (decl (int out) 0)
+  (loop ((int x n) (int steps 0))
+    (if (= x 1)
+      (set out steps)
+      (if (zero? (% x 2))
+        (recur (/ x 2) (+ steps 1))
+        (recur (+ (* 3 x) 1) (+ steps 1)))))
+  (return out))
+
+; Integer square root via Newton's method: iterate the guess until it stops
+; shrinking, then fall through (no recur) with the answer.
+(defn int isqrt ((int n))
+  (decl (int out) n)
+  (when (>= n 2)
+    (loop ((int g n))
+      (decl (int next) (/ (+ g (/ n g)) 2))
+      (if (< next g)
+        (recur next)
+        (set out g))))
+  (return out))
+
+(defn int main ()
+  (printf "fib:")
+  (loop ((int i 0))
+    (when (< i 10)
+      (printf " %ld" (fib i))
+      (recur (+ i 1))))
+  (printf "\n")
+  (printf "collatz(27) = %d steps\n" (collatz 27))
+  (printf "isqrt(2000) = %d\n" (isqrt 2000))
+  (return 0))

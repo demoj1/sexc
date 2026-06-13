@@ -37,8 +37,6 @@ int sum_u002D_to(int n)
           goto __loop_top_0;
         }
       }
-    __loop_end_1:
-    ;
   }
   return total;
 }
