@@ -1,7 +1,7 @@
 ; slot* can list several slots at once; every unbound one is reported.
 (include <stdio.h>)
 (defn void emit ((:* :const char m))
-  (slot* *out* *prefix*)
+  (slot* (:* FILE) *out* (:* :const char) *prefix*)
   (fprintf *out* "%s%s\n" *prefix* m))
 (defn int main ()
   (emit "hi")

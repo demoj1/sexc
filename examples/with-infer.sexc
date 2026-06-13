@@ -11,7 +11,7 @@
 (include <stdio.h>)
 
 (defn void note ((:* :const char msg) (int lvl))
-  (slot* *out*)                       ; requires the *out* sink (a caller must `with` it);
+  (slot* (:* FILE) *out*)                       ; requires the *out* sink (a caller must `with` it);
                                       ; *level* is optional — an int defaulting to 0 is fine
   (when (<= lvl *level*)
     (fprintf *out* "[%d] %s\n" lvl msg)))

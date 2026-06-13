@@ -2,7 +2,7 @@
 ; caller, so a bare call to it is fine (the requirement is discharged inside it).
 (include <stdio.h>)
 (defn void emit ((:* :const char m))
-  (slot* *out*)
+  (slot* (:* FILE) *out*)
   (fprintf *out* "%s\n" m))
 (defn void show ()
   (with *out* stdout (emit "self-provided")))
@@ -12,7 +12,7 @@
 ;==EXPECTED==
 #include <stdio.h>
 
-_Thread_local __typeof__(stdout) _u002A_out_u002A_;
+_Thread_local FILE *_u002A_out_u002A_;
 
 void emit(const char *m)
 {

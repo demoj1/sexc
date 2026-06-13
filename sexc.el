@@ -134,7 +134,7 @@ The command must accept source on stdin and print generated C to stdout."
     ("adecl" . "(adecl (TYPE NAME) SIZE ...) -> let*-style malloc declarations")
     ("free*" . "(free* PTR...) -> emit block of free calls")
     ("with" . "(with VAR VALUE BODY...) -> dynamic binding; restores VAR on any block exit")
-    ("slot*" . "(slot* *a* *b* ...) -> declare the dynamic slots this fn requires; a caller that doesn't `with`-bind one is a compile-time error at the call")
+    ("slot*" . "(slot* TYPE *a* TYPE *b* ...) -> declare the dynamic slots this fn requires, as (type name) pairs (even count); declares each slot + requires it. A caller that doesn't `with`-bind one is a compile-time error at the call")
     ("defslot" . "(defslot TYPE *slot* [default]) -> top-level dynamic slot: explicit TYPE, optional DEFAULT (startup constructor). Defaulted/scalar = optional; pointer w/o default must be bound (`with`) before any read")
     ("defer1" . "(defer1 FN ARG) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
     ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")

@@ -1051,17 +1051,34 @@
          (set ,var ,value)
          ,@body)))))
 
-; slot* — declare the dynamic slots a function REQUIRES from its caller. Put it
-; at the top of the body: (slot* *out* *arena*). It binds nothing and costs
-; nothing at runtime — it is an analysis marker (%dyn-require, see src/analysis.ml
-; / stripped in compiler.ml): if a caller reaches this function without binding a
-; declared slot (via `with`), the compiler reports it at the call site.
+; slot* — declare the dynamic slots a function REQUIRES from its caller, with an
+; explicit TYPE for each: (slot* (:* FILE) *out* (:* Arena) *arena*). Strictly
+; (type name) pairs — an even number of arguments. Each pair both declares the
+; slot's thread_local (so `with` doesn't need __typeof__) and records the
+; requirement (%dyn-require): a caller that reaches this function without binding
+; the slot (via `with`) is a compile-time error at the call site.
+($defun $slot-build (pairs)
+  ($if ($null? pairs) ($list)
+    ($do
+      ($assert ($not ($null? ($cdr pairs)))
+        "slot*: each slot needs a TYPE and a NAME — (slot* (type name)...), even count")
+      ($let ((ty   ($car pairs))
+             (name ($car ($cdr pairs)))
+             (rest ($cdr ($cdr pairs))))
+        ($assert ($atom? name) "slot*: slot name must be an atom (write the type before it)")
+        ($m-put name :slot t)
+        ($append
+          ($list `(%file-head-splice (%decl (:thread_local ,($unpack-type ty)) ,name))
+                 `(%dyn-require ,name))
+          ($slot-build rest))))))
 (%doc slot*
-  :sig (slot* *a* *b* ...)
-  :doc "Declare the dynamic slots this function requires from its caller (place at the top of the body). Analysis-only, zero runtime cost: a call that does not bind a required slot via `with` is a compile-time error at the call site."
-  :example "(defn void log-line ((:* :const char m)) (slot* *out*) (fprintf *out* \"%s\\n\" m))")
-(%defmacro slot* (&rest slots)
-  `(%dyn-require ,@slots))
+  :sig (slot* TYPE *a* TYPE *b* ...)
+  :doc "Declare the dynamic slots this function requires from its caller, each with an explicit type: strictly (type name) pairs, an even number of arguments. Declares each slot's thread_local and records the requirement — a call that does not bind a required slot via `with` is a compile-time error at the call site."
+  :example "(defn void log-line ((:* :const char m)) (slot* (:* FILE) *out*) (fprintf *out* \"%s\\n\" m))")
+(%defmacro slot* (&rest pairs)
+  ($do
+    ($assert ($not ($null? pairs)) "slot*: expects at least one (type name) pair")
+    `(%evals (quote ,($slot-build pairs)))))
 
 ; defslot — declare a dynamic slot at top level: its type (explicit) and an
 ; OPTIONAL default. The slot's thread_local is declared once at the file head;
@@ -1077,6 +1094,9 @@
   :doc "Declare a dynamic slot at top level with an explicit TYPE and an optional DEFAULT. A defaulted slot is initialized by a startup constructor and is optional; a pointer slot with no default must be bound (via `with`) before any read. Bind with `with`, declare a function's needs with `slot*`."
   :example "(defslot (:* FILE) *out* stdout)")
 (%defmacro defslot (ty slot &rest rest)
+  ($do
+  ($assert ($atom? slot) "defslot: slot name must be an atom — (defslot TYPE *name* [default])")
+  ($assert ($null? ($cdr rest)) "defslot: declares exactly ONE slot — (defslot TYPE *name* [default]); use a separate defslot per slot")
   ($let ((has-default ($not ($null? rest)))
          (uty         ($unpack-type ty))
          (ctor        ($gensym "sx_defslot_")))
@@ -1091,7 +1111,7 @@
          ,@($if has-default
               ($list `(%constructor (%static
                         (%def-fn void ,ctor () (%block (set ,slot ,($car rest)))))))
-              ($list))))))
+              ($list)))))))
 
 ; Build one guard declaration form (a %raw statement) for FN(ARG) at scope exit.
 ; Shared by defer1 and defer*; each call gensyms its own guard variable.

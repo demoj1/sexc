@@ -31,7 +31,7 @@
 
 ; work() allocates from the AMBIENT *arena* — no allocator argument anywhere.
 (defn void work ()
-  (slot* *arena*)                          ; requires the ambient arena — a caller must `with` it
+  (slot* (:* Arena) *arena*)                          ; requires the ambient arena — a caller must `with` it
   (decl
     (:* int xs)
     (arena-alloc *arena* (* 4 (sizeof int))))

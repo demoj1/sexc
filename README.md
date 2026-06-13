@@ -328,7 +328,7 @@ local-typed values):
 
 ```lisp
 (defn void say ((:* :const char m))   ; reads *out* — never passed in
-  (slot* *out*)                       ; declares: this function needs the *out* slot
+  (slot* (:* FILE) *out*)                       ; declares: this function needs the *out* slot
   (fprintf *out* "%s\n" m))
 
 (defn int main ()
@@ -337,7 +337,7 @@ local-typed values):
   (return 0))
 ```
 ```c
-_Thread_local __typeof__(stdout) *out*;   /* hoisted to the file head */
+_Thread_local FILE *out*;                 /* declared once (here, by slot*) at the file head */
 /* ... with body saves/sets/restores *out* around (say ...) ... */
 ```
 
@@ -870,7 +870,7 @@ self-referential или локально-типизированных значе
 
 ```lisp
 (defn void say ((:* :const char m))   ; читает *out* — не передаётся параметром
-  (slot* *out*)                       ; объявляет: функции нужен слот *out*
+  (slot* (:* FILE) *out*)                       ; объявляет: функции нужен слот *out*
   (fprintf *out* "%s\n" m))
 
 (defn int main ()
@@ -879,7 +879,7 @@ self-referential или локально-типизированных значе
   (return 0))
 ```
 ```c
-_Thread_local __typeof__(stdout) *out*;   /* поднято в начало файла */
+_Thread_local FILE *out*;                 /* объявлено один раз (тут — через slot*) в начале файла */
 /* ... тело with сохраняет/ставит/восстанавливает *out* вокруг (say ...) ... */
 ```
 

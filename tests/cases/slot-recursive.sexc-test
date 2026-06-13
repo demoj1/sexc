@@ -2,7 +2,7 @@
 ; requirement still reaches main.
 (include <stdio.h>)
 (defn void countdown ((int n))
-  (slot* *out*)
+  (slot* (:* FILE) *out*)
   (fprintf *out* "%d\n" n)
   (when (> n 0) (countdown (- n 1))))
 (defn int main ()

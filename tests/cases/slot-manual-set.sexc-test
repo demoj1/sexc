@@ -2,7 +2,7 @@
 ; (set *out* ...) on the same path is covered and not flagged.
 (include <stdio.h>)
 (defn void emit ((:* :const char m))
-  (slot* *out*)
+  (slot* (:* FILE) *out*)
   (fprintf *out* "%s\n" m))
 (defn int main ()
   (with *out* stdout (emit "via with"))
@@ -12,7 +12,7 @@
 ;==EXPECTED==
 #include <stdio.h>
 
-_Thread_local __typeof__(stdout) _u002A_out_u002A_;
+_Thread_local FILE *_u002A_out_u002A_;
 
 void emit(const char *m)
 {

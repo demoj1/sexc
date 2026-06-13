@@ -2,7 +2,7 @@
 ; lands on the call and names the (immediate) function that requires the slot.
 (include <stdio.h>)
 (defn void emit ((:* :const char m))
-  (slot* *out*)
+  (slot* (:* FILE) *out*)
   (fprintf *out* "%s\n" m))
 (defn void greet () (emit "hi"))
 (defn int main ()
