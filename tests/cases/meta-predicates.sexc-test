@@ -1,0 +1,30 @@
+; Числовые мета-предикаты на compile-time целых: zero?/pos?/neg?/even?/odd?/
+; nonzero?/ltz?/letz?/gtz?/getz? — зеркала surface-предикатов.
+(define A (%eval ($if ($zero? 0)   'yes 'no)))
+(define B (%eval ($if ($pos? 5)    'yes 'no)))
+(define C (%eval ($if ($neg? 5)    'yes 'no)))
+(define D (%eval ($if ($even? 4)   'yes 'no)))
+(define E (%eval ($if ($odd? 4)    'yes 'no)))
+(define F (%eval ($if ($nonzero? 0) 'yes 'no)))
+(define G (%eval ($if ($getz? 0)   'yes 'no)))
+(define H (%eval ($if ($letz? 0)   'yes 'no)))
+; вычисляются на результате арифметики
+(define I (%eval ($if ($even? ($+ 1 1)) 'yes 'no)))
+;==EXPECTED==
+#define A yes
+
+#define B yes
+
+#define C no
+
+#define D yes
+
+#define E no
+
+#define F no
+
+#define G yes
+
+#define H yes
+
+#define I yes

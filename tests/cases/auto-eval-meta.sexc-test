@@ -1,0 +1,14 @@
+; `$`-форма в обычной (рантайм) позиции авто-вычисляется как неявный %eval:
+; $defun, возвращающий код, раскрывается прямо в теле функции — без явного %eval.
+($defun $gen-greeting (name)
+  `(printf "hello %s\n" ,name))
+
+(defn int main ()
+  ($gen-greeting "world")
+  (return 0))
+;==EXPECTED==
+int main(void)
+{
+  printf("hello %s\n", "world");
+  return 0;
+}

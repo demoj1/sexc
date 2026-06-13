@@ -354,6 +354,46 @@ and eval_expr_inner ctx env expr =
   | Raw.List ((Raw.Atom (arith, _) :: _), _)
     when List.mem [ "$+"; "$-"; "$*"; "$/" ] arith ~equal:String.equal ->
       failf "%s expects exactly two arguments" arith
+  (* Числовые предикаты на compile-time целых — мета-зеркала surface-предикатов
+     zero?/ltz?/letz?/gtz?/getz?/pos?/neg?/nonzero?/even?/odd?. Аргумент должен
+     вычисляться в целочисленный атом. *)
+  | Raw.List ((Raw.Atom (pred, _) :: [ x ]), _)
+    when List.mem
+           [ "$zero?"; "$nonzero?"; "$pos?"; "$neg?"; "$ltz?"; "$letz?";
+             "$gtz?"; "$getz?"; "$even?"; "$odd?" ] pred ~equal:String.equal ->
+      let n =
+        match eval_expr ctx env x with
+        | Raw.Atom (s, _) -> (
+            match Int.of_string_opt s with
+            | Some n -> n
+            | None -> failf "%s: argument is not an integer: %s" pred s)
+        | _ -> failf "%s: argument must be an integer atom" pred
+      in
+      let b =
+        match pred with
+        | "$zero?" -> Int.equal n 0
+        | "$nonzero?" -> not (Int.equal n 0)
+        | "$pos?" | "$gtz?" -> n > 0
+        | "$neg?" | "$ltz?" -> n < 0
+        | "$letz?" -> n <= 0
+        | "$getz?" -> n >= 0
+        | "$even?" -> Int.equal (Int.rem n 2) 0
+        | "$odd?" -> not (Int.equal (Int.rem n 2) 0)
+        | _ -> assert false
+      in
+      bool_raw b
+  | Raw.List ((Raw.Atom (pred, _) :: _), _)
+    when List.mem
+           [ "$zero?"; "$nonzero?"; "$pos?"; "$neg?"; "$ltz?"; "$letz?";
+             "$gtz?"; "$getz?"; "$even?"; "$odd?" ] pred ~equal:String.equal ->
+      failf "%s expects exactly one argument" pred
+  (* nil-предикаты на мета-значениях (falsey = nil/пустой список), зеркала
+     surface nil?/not-nil?. $null? — исходное имя, $nil? — алиас. *)
+  | Raw.List ((Raw.Atom ("$nil?", _) :: [ x ]), _) -> bool_raw (is_falsey (eval_expr ctx env x))
+  | Raw.List ((Raw.Atom ("$nil?", _) :: _), _) -> fail "$nil? expects exactly one argument"
+  | Raw.List ((Raw.Atom ("$not-nil?", _) :: [ x ]), _) ->
+      bool_raw (not (is_falsey (eval_expr ctx env x)))
+  | Raw.List ((Raw.Atom ("$not-nil?", _) :: _), _) -> fail "$not-nil? expects exactly one argument"
   | Raw.List ((Raw.Atom ("$|>", _) :: init :: forms), _) ->
       let thread acc form =
         match form with
@@ -742,6 +782,15 @@ and expand_one ctx ~depth raw =
              всю форму (macro arg1 arg2 ...)), иначе span head-атома. *)
           let call_span = match list_sp with Some _ -> list_sp | None -> head_sp in
           let out = apply ctx (depth + 1) m ~call_span args in
+          expand_one ctx ~depth:(depth + 1) out
+      | None when String.is_prefix head ~prefix:"$" ->
+          (* `$`-форма в обычной (рантайм) позиции — это compile-time мета:
+             builtin ($assert, $symcat, ...) или пользовательская $defun. Авто-
+             вычисляем как неявный %eval и раскрываем результат. Раньше такие
+             формы молча утекали в codegen мэнглеными вызовами (_u0024_...) и
+             падали в gcc; теперь либо вычисляются, либо дают внятную мета-
+             ошибку (напр. Unbound variable на рантайм-переменной). *)
+          let out = eval_expr ctx String.Map.empty raw in
           expand_one ctx ~depth:(depth + 1) out
       | None -> Raw.List ((Raw.Atom (head, head_sp) :: expand_list_items ctx ~depth args), list_sp))
   (* Список, голова которого не атом (напр. ((%ptr char) name) — поле struct).

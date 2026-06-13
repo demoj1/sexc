@@ -456,6 +456,10 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
 
 - `%...` — системные/IR формы компилятора.
 - `$...` — compile-time meta builtins (доступны в `%defmacro`, `%eval`, `%evals`).
+  `$`-форма в обычной (рантайм) позиции авто-вычисляется как неявный `%eval`
+  (`macro.ml` `expand_one`): builtin или `$defun` исполняется в макрофазе, результат
+  раскрывается. Раньше такие формы молча утекали в codegen мэнглеными (`_u0024_...`);
+  теперь либо вычисляются, либо дают внятную мета-ошибку.
 - Имена без `%` и без `$` — только surface DSL (объявлены в prelude-файлах `std/c-interop.sexc` и `std/meta.sexc`).
 - Legacy meta-имена без `$` (`car`, `cdr`, `null?`, `if`, ...) запрещены.
 
@@ -467,7 +471,8 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Expr/operators: `%raw`, `%expr`, `%typeof`, `%null`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`, `%&=`, `%|=`, `%^=`, `%<<=`, `%>>=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
-  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$nil?`, `$not-nil?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$zero?`, `$nonzero?`, `$pos?`, `$neg?`, `$ltz?`, `$letz?`, `$gtz?`, `$getz?`, `$even?`, `$odd?`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - Числовые мета-предикаты (`$zero?`/`$nonzero?`/`$pos?`/`$neg?`/`$ltz?`/`$letz?`/`$gtz?`/`$getz?`/`$even?`/`$odd?`) — compile-time-зеркала surface-предикатов, работают на целочисленных атомах (в т.ч. результат `$+`/`$-`/…). nil-предикаты (`$nil?`/`$not-nil?`) — на falsey-значениях, зеркало `$null?`.
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
   - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defslot`, `defer1`, `defer*`
