@@ -150,6 +150,14 @@ let render_diagnostic ?(severity = "error") d =
       caret;
     ]
 
+(* Печатает НЕ фатальную диагностику (warning/info) на stderr и возвращает unit.
+   Используется $warn/$info из macro.ml. Со span — с локацией и кареткой; без
+   span — короткая строка. Компиляция продолжается. *)
+let note_at ~phase ~severity (span : span option) (message : string) =
+  match span with
+  | Some sp -> Stdlib.prerr_endline (render_diagnostic ~severity { phase; message; span = sp })
+  | None -> Stdlib.prerr_endline (Printf.sprintf "%s[%s]: %s" severity phase message)
+
 let fail_diag ~phase ~file ~source ~start_off ?(end_off = start_off) message =
   raise (Sexc_diagnostic { phase; message; span = { file; source; start_off; end_off } })
 

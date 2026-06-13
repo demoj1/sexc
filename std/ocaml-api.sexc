@@ -155,8 +155,18 @@
 
 (%doc $error
   :sig ($error message)
-  :doc "Raise compile-time error with MESSAGE."
+  :doc "Compile-time diagnostic FAMILY (error/warn/info), all pointing at the macro call-site. $error raises a fatal error (aborts), with MESSAGE."
   :example "($error \"bad input\")")
+
+(%doc $warn
+  :sig ($warn message)
+  :doc "Emit a non-fatal compile-time WARNING at the macro call-site and return nil; compilation continues. See $error / $info."
+  :example "($warn \"loop has no recur\")")
+
+(%doc $info
+  :sig ($info message)
+  :doc "Emit a non-fatal compile-time INFO note at the macro call-site and return nil; compilation continues. See $error / $warn."
+  :example "($info \"using the fast path\")")
 
 (%doc $gensym
   :sig ($gensym [prefix])

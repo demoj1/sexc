@@ -345,7 +345,7 @@ Example: (incf-by total 4)
 
 В `std/meta.sexc` как `$defun`: `$append` (binary), `$length`, `$reverse`, `$nth`, `$list` (variadic через `&rest`), `$subst` (рекурсивный обход дерева через `$atom?`/`$null?`).
 
-В OCaml остаются (irreducible bootstrap): `$if`, `$let`, `$do`, `$quote`, `quasiquote`, `$car`, `$cdr`, `$cons`, `$null?`, `$atom?`, `$eq?`, `$symcat`, `$gensym`, `$error`, `$assert`, `$not`, арифметика, `$|>`/`$||>`/`$|as>`, `$for`/`$dolist`/`$map`/`$filter`/`$reduce`, `$defun`, `$m-put`/`$m-get`.
+В OCaml остаются (irreducible bootstrap): `$if`, `$let`, `$do`, `$quote`, `quasiquote`, `$car`, `$cdr`, `$cons`, `$null?`, `$atom?`, `$eq?`, `$symcat`, `$gensym`, `$error`, `$warn`, `$info`, `$assert`, `$not`, арифметика, `$|>`/`$||>`/`$|as>`, `$for`/`$dolist`/`$map`/`$filter`/`$reduce`, `$defun`, `$m-put`/`$m-get`.
 
 ## Compile-time symbol metadata
 
@@ -471,7 +471,7 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Expr/operators: `%raw`, `%expr`, `%typeof`, `%null`, `%cast`, `%sizeof-type`, `%sizeof-expr`, `%ternary`, `%comma`, `%aref`, `%dot`, `%arrow`, `%call`, `%!`, `%~`, `%addr`, `%deref`, `%pre-inc`, `%pre-dec`, `%post-inc`, `%post-dec`, `%+`, `%-`, `%*`, `%/`, `%%`, `%==`, `%!=`, `%<`, `%<=`, `%>`, `%>=`, `%&&`, `%||`, `%set`, `%+=`, `%-=`, `%*=`, `%/=`, `%%=`, `%&=`, `%|=`, `%^=`, `%<<=`, `%>>=`
   - Compile-time control: `%defmacro`, `%eval`, `%evals`, `%module`, `%m-dump`
 - `Meta builtins ($...)`:
-  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$nil?`, `$not-nil?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$zero?`, `$nonzero?`, `$pos?`, `$neg?`, `$ltz?`, `$letz?`, `$gtz?`, `$getz?`, `$even?`, `$odd?`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
+  - В `src/macro.ml` (OCaml-primitives): `$quote`, `$if`, `$cond`, `$case`, `$cons`, `$car`, `$cdr`, `$null?`, `$nil?`, `$not-nil?`, `$atom?`, `$eq?`, `$keyword?`, `$keyword-name`, `$let`, `$do`, `$not`, `$error`, `$warn`, `$info`, `$assert`, `$gensym`, `$symcat`, `$str`, `$namespace-of`, `$current-module`, `$qualify`, `$qualify-type`, `$+`, `$-`, `$*`, `$/`, `$zero?`, `$nonzero?`, `$pos?`, `$neg?`, `$ltz?`, `$letz?`, `$gtz?`, `$getz?`, `$even?`, `$odd?`, `$defun`, `$|>`, `$||>`, `$|as>`, `$--map`, `$--filter`, `$--reduce`, `$dolist`, `$map`, `$filter`, `$reduce`, `$for`, `$m-put`, `$m-get`
   - Числовые мета-предикаты (`$zero?`/`$nonzero?`/`$pos?`/`$neg?`/`$ltz?`/`$letz?`/`$gtz?`/`$getz?`/`$even?`/`$odd?`) — compile-time-зеркала surface-предикатов, работают на целочисленных атомах (в т.ч. результат `$+`/`$-`/…). nil-предикаты (`$nil?`/`$not-nil?`) — на falsey-значениях, зеркало `$null?`.
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):

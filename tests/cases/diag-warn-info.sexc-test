@@ -1,0 +1,16 @@
+; $warn / $info emit non-fatal diagnostics at the macro call-site; compile succeeds.
+(%defmacro noisy (x)
+  ($do
+    ($warn "noisy: heads up")
+    ($info "noisy: just so you know")
+    `(printf "%d\n" ,x)))
+(defn int main ()
+  (noisy 42)
+  (return 0))
+;==EXPECTED-WARNING==
+<stdin>:8:3: warning[macro]: noisy: heads up
+  (noisy 42)
+  ^
+<stdin>:8:3: info[macro]: noisy: just so you know
+  (noisy 42)
+  ^

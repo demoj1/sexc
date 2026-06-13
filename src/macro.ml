@@ -308,6 +308,26 @@ and eval_expr_inner ctx env expr =
          на сам $error внутри тела макроса в stdlib. None → fallback на голый fail
          (promote подхватит eval-span). *)
       Common.fail_at ~phase:"macro" ctx.expand_site_span text
+  (* $warn / $info — НЕ фатальная диагностика на call-site макроса, возвращает nil
+     (компиляция продолжается). Семейство с $error: error прерывает, warn/info нет. *)
+  | Raw.List ((Raw.Atom ("$warn", _) :: [ msg ]), _) ->
+      let text =
+        match eval_expr ctx env msg with
+        | Raw.Atom (s, _) | Raw.Str (s, _) -> s
+        | _ -> "warning"
+      in
+      Common.note_at ~phase:"macro" ~severity:"warning" ctx.expand_site_span text;
+      Raw.Atom ("nil", None)
+  | Raw.List ((Raw.Atom ("$warn", _) :: _), _) -> fail "$warn expects exactly one argument: ($warn message)"
+  | Raw.List ((Raw.Atom ("$info", _) :: [ msg ]), _) ->
+      let text =
+        match eval_expr ctx env msg with
+        | Raw.Atom (s, _) | Raw.Str (s, _) -> s
+        | _ -> "info"
+      in
+      Common.note_at ~phase:"macro" ~severity:"info" ctx.expand_site_span text;
+      Raw.Atom ("nil", None)
+  | Raw.List ((Raw.Atom ("$info", _) :: _), _) -> fail "$info expects exactly one argument: ($info message)"
   | Raw.List ((Raw.Atom ("$gensym", _) :: []), _) -> gensym ctx "__g"
   | Raw.List ((Raw.Atom ("$gensym", _) :: [ prefix ]), _) ->
       let p =
