@@ -515,27 +515,34 @@ Keys: :name :kind :signature :doc :example :include-name :multiline."
       (concat head (if (and include-example example) (format " | eg: %s" example) "")))))
 
 (defun sexc--display-signature (candidate signature)
-  "Format SIGNATURE for completion display without repeating CANDIDATE."
+  "Format SIGNATURE for completion display without repeating CANDIDATE.
+A trailing \"\\nrequires: …\" line (the function's dynamic slots) is kept
+verbatim as a second line; only the first line is reformatted."
   (if (not (stringp signature))
       signature
-    (let* ((cand (regexp-quote candidate))
+    (let* ((nl (string-match "\n" signature))
+           (head (if nl (substring signature 0 nl) signature))
+           (tail (if nl (substring signature nl) ""))
+           (cand (regexp-quote candidate))
            (fn-re (concat "\\`(" cand "[[:space:]]+\\(.*\\))[[:space:]]*->[[:space:]]*\\(.*\\)\\'"))
            (simple-re (concat "\\`(" cand "[[:space:]]+\\(.*\\))\\'")))
-      (cond
-       ((string-match fn-re signature)
-        (let* ((params (match-string 1 signature))
-               (ret (match-string 2 signature))
-               (params
-                (cond
-                 ((string-equal params "()") "()")
-                 ((and (string-prefix-p "((" params)
-                       (string-suffix-p "))" params))
-                  (substring params 1 -1))
-                 (t params))))
-          (format "%s -> %s" params ret)))
-       ((string-match simple-re signature)
-        (format "(%s)" (match-string 1 signature)))
-       (t signature)))))
+      (concat
+       (cond
+        ((string-match fn-re head)
+         (let* ((params (match-string 1 head))
+                (ret (match-string 2 head))
+                (params
+                 (cond
+                  ((string-equal params "()") "()")
+                  ((and (string-prefix-p "((" params)
+                        (string-suffix-p "))" params))
+                   (substring params 1 -1))
+                  (t params))))
+           (format "%s -> %s" params ret)))
+        ((string-match simple-re head)
+         (format "(%s)" (match-string 1 head)))
+        (t head))
+       tail))))
 
 (defun sexc--lookup-completion-meta (sym)
   "Return completion metadata object for SYM, or nil."

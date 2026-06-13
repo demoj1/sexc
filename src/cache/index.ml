@@ -43,6 +43,24 @@ let rec render_raw = function
   | Raw.Str (s, _) -> "\"" ^ String.escaped s ^ "\""
   | Raw.List (xs, _) -> "(" ^ String.concat ~sep:" " (List.map xs ~f:render_raw) ^ ")"
 
+(* The dynamic slots a function declares it requires, scanned from any (slot*
+   TYPE NAME …) statements in its body (name = every other arg). Direct only —
+   the index does no macro/analysis phase. Used to enrich a function's eldoc. *)
+let required_slots body =
+  List.concat_map body ~f:(fun f ->
+      match Reader.to_raw f with
+      | Raw.List ((Raw.Atom ("slot*", _) :: pairs), _) ->
+          List.filteri pairs ~f:(fun i _ -> i % 2 = 1)
+          |> List.filter_map ~f:(function Raw.Atom (n, _) -> Some n | _ -> None)
+      | _ -> [])
+
+(* Append a "requires: …" second line to a function signature when it declares
+   dynamic slots, so eldoc shows them under the signature. *)
+let with_required_slots sig_s body =
+  match required_slots body with
+  | [] -> sig_s
+  | slots -> sig_s ^ "\nrequires: " ^ String.concat ~sep:" " slots
+
 type doc_meta = {
   signature : string option;
   doc : string option;
@@ -129,7 +147,7 @@ let index_file file =
             let fq = qualify module_name name in
             let d = parse_doc_meta (List.map props ~f:Reader.to_raw) in
             add_doc fq d
-        | Reader.LAtom ("defn", _) :: ret :: Reader.LAtom (name, _) :: params :: _body ->
+        | Reader.LAtom ("defn", _) :: ret :: Reader.LAtom (name, _) :: params :: body ->
             let fq =
               match owner_type with
               | Some t -> qualify module_name (t ^ "/" ^ name)
@@ -137,7 +155,7 @@ let index_file file =
             in
             let ret_s = render_raw (Reader.to_raw ret) in
             let params_s = render_raw (Reader.to_raw params) in
-            let sig_s = Printf.sprintf "(%s %s) -> %s" fq params_s ret_s in
+            let sig_s = with_required_slots (Printf.sprintf "(%s %s) -> %s" fq params_s ret_s) body in
             add_symbol
               (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind:"function" ~name:fq ~signature:sig_s ?scope:current_scope ())
         | Reader.LAtom ("%def-fn", _) :: ret :: Reader.LAtom (name, _) :: params :: _ ->
