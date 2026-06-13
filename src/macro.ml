@@ -707,6 +707,21 @@ let apply ctx depth m ~call_span args =
     ctx.expand_site_span <- prev_site;
     expanded)
 
+(* `obj::method` — инфиксный сахар метод-вызова. Атом, содержащий `::` (не в
+   начале и не в конце), режется на объект и метод. `::` нигде больше в атомах не
+   используется (namespace через `/`, keywords через одиночный `:`), поэтому
+   трактовка однозначна. *)
+let split_method_atom s =
+  match String.substr_index s ~pattern:"::" with
+  | Some i when i > 0 && i + 2 < String.length s ->
+      Some (String.sub s ~pos:0 ~len:i, String.sub s ~pos:(i + 2) ~len:(String.length s - i - 2))
+  | _ -> None
+
+(* Собрать форму примитива `(%send obj method args...)`. Резолв типа объекта в
+   `Type/method` делает stdlib-макрос `%send`; ядро только разбирает синтаксис. *)
+let make_send obj meth args sp =
+  Raw.List (Raw.Atom ("%send", None) :: Raw.Atom (obj, None) :: Raw.Atom (meth, None) :: args, sp)
+
 let rec expand_eval_form_for_arg ctx ~depth = function
   | Raw.List ((Raw.Atom ("%eval", _) :: [ expr ]), _) ->
       let out = eval_expr ctx String.Map.empty expr in
@@ -717,6 +732,13 @@ let rec expand_eval_form_for_arg ctx ~depth = function
       let items = expect_list out in
       List.map items ~f:(fun item -> expand_one ctx ~depth:(depth + 1) item)
   | Raw.List ((Raw.Atom ("%evals", _) :: _), _) -> fail "%evals expects exactly one argument"
+  (* `obj::method`-атом как аргумент макроса раскрываем в СЫРОЙ `(%send ...)` (без
+     резолва) — чтобы макрос (напр. defer1) мог его распознать и обработать особо.
+     Макросы, просто сплайсящие аргумент в выхлоп, до-раскроют `%send` потом. *)
+  | Raw.Atom (a, sp) when Option.is_some (split_method_atom a) ->
+      (match split_method_atom a with
+       | Some (obj, meth) -> [ make_send obj meth [] sp ]
+       | None -> assert false)
   | other -> [ other ]
 
 and expand_eval_args_for_macro ctx ~depth xs =
@@ -725,7 +747,12 @@ and expand_eval_args_for_macro ctx ~depth xs =
 and expand_one ctx ~depth raw =
   if depth > ctx.max_depth then failf "Macro expansion exceeded max depth (%d)" ctx.max_depth;
   match raw with
-  | Raw.Atom (_, _) | Raw.Str (_, _) -> raw
+  | Raw.Atom (a, sp) -> (
+      (* одиночный `obj::method` (как стейтмент или подвыражение) → метод-вызов *)
+      match split_method_atom a with
+      | Some (obj, meth) -> expand_one ctx ~depth:(depth + 1) (make_send obj meth [] sp)
+      | None -> raw)
+  | Raw.Str (_, _) -> raw
   | Raw.List ([], _) -> raw
   | Raw.List ((Raw.Atom ("quote", _) :: _), _) -> raw
   | Raw.List ((Raw.Atom ("quasiquote", _) :: _), _) -> raw
@@ -783,6 +810,10 @@ and expand_one ctx ~depth raw =
           let call_span = match list_sp with Some _ -> list_sp | None -> head_sp in
           let out = apply ctx (depth + 1) m ~call_span args in
           expand_one ctx ~depth:(depth + 1) out
+      | None when Option.is_some (split_method_atom head) ->
+          (* `(obj::method args...)` — инфиксный метод-вызов в голове формы. *)
+          let obj, meth = Option.value_exn (split_method_atom head) in
+          expand_one ctx ~depth:(depth + 1) (make_send obj meth args list_sp)
       | None when String.is_prefix head ~prefix:"$" ->
           (* `$`-форма в обычной (рантайм) позиции — это compile-time мета:
              builtin ($assert, $symcat, ...) или пользовательская $defun. Авто-

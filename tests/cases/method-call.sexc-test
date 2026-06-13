@@ -1,0 +1,80 @@
+; Method calls on a struct: obj::method infix, doto chain (comma, returns last),
+; %send primitive, getter as expression, and defer1 obj::method.
+(include <stdlib.h>)
+
+(struct Counter
+  :fields
+  (int value)
+  :methods
+  (defn (:* Counter) make ((int start))
+    (adecl (Counter self) (sizeof int))
+    (set (-> self value) start)
+    (return self))
+  (defn void inc ((:* Counter self) (int by))
+    (set (-> self value) (+ (-> self value) by)))
+  (defn int get ((:* Counter self))
+    (return (-> self value)))
+  (defn void free ((:* Counter self))
+    (free self)))
+
+(defn int main ()
+  (decl (:* Counter c) (Counter/make 10))
+  (defer1 c::free)
+  (c::inc 5)
+  (%send c inc 1)
+  (doto c (inc 1) (inc 1))
+  (return c::get))
+;==EXPECTED==
+#include <stdlib.h>
+
+typedef struct Counter {
+  int value;
+} Counter;
+
+Counter *Counter_u002F_make(int start)
+{
+  Counter *self = (Counter *)malloc(sizeof(int));
+  self->value = start;
+  return self;
+}
+
+void Counter_u002F_inc(Counter *self, int by)
+{
+  self->value = self->value + by;
+}
+
+int Counter_u002F_get(Counter *self)
+{
+  return self->value;
+}
+
+void Counter_u002F_free(Counter *self)
+{
+  free(self);
+}
+
+#ifndef SX_DEFER_GUARD_
+
+#define SX_DEFER_GUARD_
+
+typedef struct __sx_defer_guard {
+  void (*fn)(void *);
+  void *arg;
+} __sx_defer_guard;
+
+static inline void __sx_defer_run(const __sx_defer_guard *g)
+{
+  g->fn(g->arg);;
+}
+
+#endif
+
+int main(void)
+{
+  Counter *c = Counter_u002F_make(10);
+  __sx_defer_guard sx_defer_guard_0 __attribute__((cleanup(__sx_defer_run))) = { (void (*)(void *))Counter_u002F_free, (void *)(c) };
+  Counter_u002F_inc(c, 5);
+  Counter_u002F_inc(c, 1);
+  Counter_u002F_inc(c, 1), Counter_u002F_inc(c, 1);
+  return Counter_u002F_get(c);
+}

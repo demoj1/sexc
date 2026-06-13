@@ -1,0 +1,61 @@
+; Method calls: obj::method infix dispatch, doto chains, getters as expressions,
+; and defer1 obj::method — all dispatched by the object's compile-time type.
+;
+;   sexc method-calls.sexc -C gcc -std=c11 -Wall -Wextra -o /tmp/stack && /tmp/stack
+;
+; Expected output:
+;   len=4
+;   pop=40
+;   pop=30
+;   pop=20
+;   pop=10
+
+(include <stdio.h> <stdlib.h>)
+
+; A growable int stack as a struct with methods.
+(struct Stack
+  :fields
+  (int len)
+  (int cap)
+  ((:* int) data)
+
+  :methods
+  (defn (:* Stack) make ((int cap))
+    (adecl (Stack self) (sizeof Stack))
+    (set (-> self len) 0)
+    (set (-> self cap) cap)
+    (set (-> self data) (cast (:* int) (malloc (* cap (sizeof int)))))
+    (return self))
+
+  (defn void push ((:* Stack self) (int x))
+    (when (>= (-> self len) (-> self cap))
+      (set (-> self cap) (* (-> self cap) 2))
+      (set (-> self data)
+           (cast (:* int) (realloc (-> self data) (* (-> self cap) (sizeof int))))))
+    (set (aref (-> self data) (-> self len)) x)
+    (incf (-> self len)))
+
+  (defn int pop ((:* Stack self))
+    (decf (-> self len))
+    (return (aref (-> self data) (-> self len))))
+
+  (defn int len ((:* Stack self))
+    (return (-> self len)))
+
+  (defn void free ((:* Stack self))
+    (free (-> self data))
+    (free self)))
+
+(defn int main ()
+  (decl (:* Stack s) (Stack/make 2))
+  (defer1 s::free)                        ; deferred cleanup via obj::method
+
+  (doto s (push 10) (push 20) (push 30))  ; chain (grows cap 2 -> 4)
+  (s::push 40)                            ; infix call
+
+  (printf "len=%d\n" s::len)              ; getter as an argument
+
+  (while (gtz? s::len)                    ; getter in a condition
+    (printf "pop=%d\n" s::pop))
+
+  (return 0))

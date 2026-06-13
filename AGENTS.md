@@ -475,7 +475,18 @@ sexc [--no-prelude] m-dump [--json] <input.sexc>
   - Числовые мета-предикаты (`$zero?`/`$nonzero?`/`$pos?`/`$neg?`/`$ltz?`/`$letz?`/`$gtz?`/`$getz?`/`$even?`/`$odd?`) — compile-time-зеркала surface-предикатов, работают на целочисленных атомах (в т.ч. результат `$+`/`$-`/…). nil-предикаты (`$nil?`/`$not-nil?`) — на falsey-значениях, зеркало `$null?`.
   - В `std/meta.sexc` (sexc `$defun`): `$list`, `$append`, `$length`, `$reverse`, `$nth`, `$subst`
 - `Surface std macros` (без префикса, в std/*.sexc):
-  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defslot`, `defer1`, `defer*`
+  - `std/c-interop.sexc` (всё разворачивается в `%`-IR): `include`, `define`, `defn` (с опц. флагами `:static`/`:inline`), `decl`, `adecl`, `free*`, `block`, `if`, `cond`, `when`, `unless`, `while`, `for`, `dotimes`, `for-range`, `repeat`, `return`, `set`, `incf`, `decf`, `incf-by`, `decf-by`, `cast`, `struct`, `union`, `typedef`, `enum`, `init`, `zero-init`, `sizeof` (авто-диспатч type/expr), `sizeof-type`, `sizeof-expr`, `aref`, `dot`, `arrow`, `.`, `->`, `not`, `+`, `-`, `*`, `/`, `%`, `=`, `not=`, `<`, `<=`, `>`, `>=`, `&&`, `and`, `||`, `or`, `post-inc`, `nop`, `nil`, `do`, `nil?`, `not-nil?`, `zero?`, `nonzero?`, `ltz?`, `letz?`, `gtz?`, `getz?`, `pos?`, `neg?`, `even?`, `odd?`, `bit-set?`, `between?`, `if-nil`, `when-nil`, `unless-nil`, `when!`, `if!`, `cond!`, `with`, `slot*`, `defslot`, `defer1`, `defer*`, `%send`, `doto`
+  - **Метод-вызовы** (диспатч по compile-time типу объекта; объект — обязательно
+    объявленная переменная, тип читается из `:c-type`): `(%send obj method arg…)` —
+    примитив, резолвит `<ТипОбъекта>/<метод>` (через `$resolve-method-fn` +
+    `$base-type-name`) и подставляет объект первым аргументом. Инфикс-сахар
+    `obj::method` (хук в `macro.ml` `expand_one`/`expand_eval_form_for_arg`, рядом с
+    `#`) → `(%send obj method …)`, работает в голове формы, как одиночный атом и как
+    геттер-выражение. `(doto obj clause…)` — цепочка методов через `%comma`
+    (возвращает результат ПОСЛЕДНЕГО); клоз `(method args…)` или голый атом для
+    без-аргументного. `defer1` принимает и `obj::method` (ловит `(%send …)`). НЕТ
+    авто-`&`: метод хочет `(:* T)` — передаёшь указатель/`&` явно, иначе ошибка C.
+    Единый резолвер ⇒ методы struct/defsum/enum/union работают одинаково.
   - **Конвенция**: имя любого surface-предиката заканчивается на `?`
     (`nil?`/`not-nil?`/`zero?`/`ltz?`/`letz?`/`gtz?`/`getz?`). `do` — плоская
     последовательность стейтментов без скоупа (через `%evals`-сплайс), в отличие

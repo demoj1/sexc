@@ -1,0 +1,71 @@
+; Method dispatch works the same on a defsum value (by-value self): obj::method
+; resolves Shape/area from the variable's type, no special-casing per kind.
+(defsum Shape
+  :variants
+  (Circle (float r))
+  (Rect (float w) (float h))
+  :methods
+  (defn float area ((Shape self))
+    (match self
+      (Circle (r) (return (* 3.14 (* r r))))
+      (Rect (w h) (return (* w h))))))
+
+(defn float main ()
+  (decl (Shape s) (Shape/Circle# 2.0))
+  (return s::area))
+;==EXPECTED==
+typedef enum Shape_u002F_tag { Shape_u002F_Circle, Shape_u002F_Rect } Shape_u002F_tag;
+
+typedef struct Shape_u002F_Circle_u002F_p {
+  float r;
+} Shape_u002F_Circle_u002F_p;
+
+typedef struct Shape_u002F_Rect_u002F_p {
+  float w;
+  float h;
+} Shape_u002F_Rect_u002F_p;
+
+typedef struct Shape {
+  Shape_u002F_tag tag;
+  union Shape_u002F_u {
+  Shape_u002F_Circle_u002F_p Circle;
+  Shape_u002F_Rect_u002F_p Rect;
+} u;
+} Shape;
+
+int Shape_u002F_Circle_u003F_(Shape s)
+{
+  return s.tag == Shape_u002F_Circle;
+}
+
+int Shape_u002F_Rect_u003F_(Shape s)
+{
+  return s.tag == Shape_u002F_Rect;
+}
+
+float Shape_u002F_area(Shape self)
+{
+  switch (self.tag) {
+    case Shape_u002F_Circle:
+      {
+        float r = self.u.Circle.r;
+        return 3.14 * r * r;
+        break;
+      }
+    case Shape_u002F_Rect:
+      {
+        float w = self.u.Rect.w;
+        float h = self.u.Rect.h;
+        return w * h;
+        break;
+      }
+    default:
+      __builtin_unreachable();
+  }
+}
+
+float main(void)
+{
+  Shape s = (Shape){.tag = Shape_u002F_Circle, .u = {.Circle = {2.0}}};
+  return Shape_u002F_area(s);
+}

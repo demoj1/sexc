@@ -1,0 +1,52 @@
+; Tricky method-call codegen, locked against regressions:
+;  - doto in an INITIALIZER must parenthesize the comma operator, else the comma
+;    is read as a declarator separator (int last = a, b;) — a real bug.
+;  - doto / method-call as a CALL ARGUMENT must parenthesize the comma, else it
+;    splits into several arguments.
+;  - nested method call: a getter as an argument to another method.
+;  - getters composed inside an arithmetic expression.
+;  - single-clause doto still wraps (harmless parens).
+(struct C
+  :fields (int v)
+  :methods
+  (defn int  bump ((:* C self) (int by)) (incf-by (-> self v) by) (return (-> self v)))
+  (defn void reset ((:* C self)) (set (-> self v) 0))
+  (defn int  get  ((:* C self)) (return (-> self v))))
+
+(defn int run ((:* C a) (:* C b))
+  (decl (int one)  (doto a (bump 5)))        ; single clause -> (a.bump(5))
+  (decl (int last) (doto a (bump 10) get))   ; comma -> (a.bump(10), a.get())
+  (doto a reset)                             ; bare-atom clause, statement
+  (a::bump b::get)                           ; nested: getter as argument
+  (decl (int sum)  (+ a::get b::get))        ; getters in arithmetic
+  (return (+ one (+ last sum))))
+;==EXPECTED==
+typedef struct C {
+  int v;
+} C;
+
+int C_u002F_bump(C *self, int by)
+{
+  self->v = self->v + by;
+  return self->v;
+}
+
+void C_u002F_reset(C *self)
+{
+  self->v = 0;
+}
+
+int C_u002F_get(C *self)
+{
+  return self->v;
+}
+
+int run(C *a, C *b)
+{
+  int one = (C_u002F_bump(a, 5));
+  int last = (C_u002F_bump(a, 10), C_u002F_get(a));
+  C_u002F_reset(a);
+  C_u002F_bump(a, C_u002F_get(b));
+  int sum = C_u002F_get(a) + C_u002F_get(b);
+  return one + last + sum;
+}

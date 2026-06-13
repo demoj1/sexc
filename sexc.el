@@ -84,6 +84,7 @@ merge into the output via `2>&1'."
     "when" "unless" "incf" "decf" "incf-by" "decf-by"
     "dotimes" "for-range" "repeat"
     "when!" "if!" "cond!" "with" "slot*" "defslot" "defer1" "defer*"
+    "doto"
     "|>" "||>" "|as>")
   "Surface DSL keywords/macros (no %/$ prefix)."
   :type '(repeat string)
@@ -119,6 +120,7 @@ merge into the output via `2>&1'."
     ("dotimes" . (4 4 &body))
     ("for-range" . (4 4 4 &body))
     ("with" . (4 4 &body))
+    ("doto" . (4 &body))
     ("%defmacro" . (4 4 &body))
     ("%eval" . (&body))
     ("%evals" . (&body))
@@ -140,7 +142,9 @@ merge into the output via `2>&1'."
     ("with" . "(with VAR VALUE BODY...) -> dynamic binding; restores VAR on any block exit")
     ("slot*" . "(slot* TYPE *a* TYPE *b* ...) -> declare the dynamic slots this fn requires, as (type name) pairs (even count); declares each slot + requires it. A caller that doesn't `with`-bind one is a compile-time error at the call")
     ("defslot" . "(defslot TYPE *slot* [default]) -> top-level dynamic slot: explicit TYPE, optional DEFAULT (startup constructor). Defaulted/scalar = optional; pointer w/o default must be bound (`with`) before any read")
-    ("defer1" . "(defer1 FN ARG) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
+    ("doto" . "(doto OBJ (method ARG...) | method ...) -> call methods on OBJ in order (comma); returns result of the LAST. OBJ must be a declared variable")
+    ("%send" . "(%send OBJ METHOD ARG...) -> dispatch METHOD on OBJ by its compile-time type: Type/method(OBJ, ARG...). Usually via obj::method sugar")
+    ("defer1" . "(defer1 FN ARG) | (defer1 obj::method) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
     ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")
     ("sizeof" . "(sizeof X) -> sizeof(X); auto-picks type vs expr (use sizeof-type/sizeof-expr to force)")
     ("nil" . "nil -> ((void*)0), the null pointer (alias of %null)")

@@ -217,7 +217,9 @@ and emit_expr ?(ctx = 0) e =
     | EMember (x, f) -> emit_expr ~ctx:p x ^ "." ^ mangle_ident f
     | EPtrMember (x, f) -> emit_expr ~ctx:p x ^ "->" ^ mangle_ident f
     | ECall (callee, args) ->
-        emit_expr ~ctx:p callee ^ "(" ^ (List.map args ~f:emit_expr |> String.concat ~sep:", ") ^ ")"
+        (* аргументы — assignment-expression (ctx:2): comma-выражение в аргументе
+           обязано быть в скобках, иначе распадётся на несколько аргументов. *)
+        emit_expr ~ctx:p callee ^ "(" ^ (List.map args ~f:(emit_expr ~ctx:2) |> String.concat ~sep:", ") ^ ")"
   in
   if p < ctx then "(" ^ body ^ ")" else body
 
@@ -238,7 +240,9 @@ let emit_decl_stmt d =
   let sig_s = emit_decl_signature d in
   match d.d_init with
   | None -> sig_s ^ ";"
-  | Some init -> sig_s ^ " = " ^ emit_expr init ^ ";"
+  (* инициализатор — assignment-expression (ctx:2): голый comma-оператор иначе
+     прочитается как разделитель деклараторов (int x = a, b;). *)
+  | Some init -> sig_s ^ " = " ^ emit_expr ~ctx:2 init ^ ";"
 
 let emit_for_init = function
   | FNone -> ""
@@ -247,7 +251,7 @@ let emit_for_init = function
       let sig_s = emit_decl_signature d in
       (match d.d_init with
       | None -> sig_s
-      | Some init -> sig_s ^ " = " ^ emit_expr init)
+      | Some init -> sig_s ^ " = " ^ emit_expr ~ctx:2 init)
 
 let rec emit_stmt ?(lvl = 0) s =
   let i = indent lvl in

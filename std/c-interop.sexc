@@ -1113,6 +1113,51 @@
                         (%def-fn void ,ctor () (%block (set ,slot ,($car rest)))))))
               ($list)))))))
 
+; ─── Method calls: %send / obj::method / doto ────────────────────────────────
+; Dispatch a method on a struct/defsum/enum value by the compile-time type of the
+; object. The object MUST be a declared variable (param / decl / adecl): its type
+; is read from metadata (:c-type, written by decl/adecl/defn). No auto-&: pass the
+; object as-is and let the C compiler enforce pointer-ness (methods take (:* T)).
+
+; Strip type modifiers (%ptr/%const/:* ...) down to the base type name atom. The
+; type form keeps the base as its LAST element: (%ptr Arena) (:* :const Arena) ...
+($defun $base-type-name (ty)
+  ($if ($atom? ty) ty
+    ($base-type-name ($car ($reverse ty)))))
+
+; Resolve (obj-atom, method-atom) -> qualified Type/method function symbol, with
+; clear errors when the object's type is unknown or the method does not exist.
+($defun $resolve-method-fn (obj method)
+  ($let ((cty ($m-get obj :c-type)))
+    ($do
+      ($assert ($not ($null? cty))
+        ($str "method call: cannot infer type of '" obj "' — object must be a declared variable"))
+      ($let ((base ($base-type-name cty))
+             (fn   ($symcat ($base-type-name cty) '/ method)))
+        ($do
+          ($assert ($not ($null? ($filter ($eq? it fn) ($m-get base :fns))))
+            ($str "method call: type '" base "' has no method '" method "'"))
+          fn)))))
+
+(%doc %send
+  :sig (%send obj method arg...)
+  :doc "Method-call primitive: dispatch METHOD on OBJ by OBJ's compile-time type (Type/method), passing OBJ as the first argument. OBJ must be a declared variable. Usually written via the obj::method infix sugar or doto, not directly."
+  :example "(%send arena alloc 64)  ; => Arena_alloc(arena, 64)")
+(%defmacro %send (obj method &rest args)
+  ($do
+    ($assert ($atom? obj) "%send: object must be a variable atom")
+    `(,($resolve-method-fn obj method) ,obj ,@args)))
+
+(%doc doto
+  :sig (doto obj clause...)
+  :doc "Call several methods on OBJ in order (each clause is (method arg...) or a bare method atom for no args), threading OBJ as the first argument. Returns the result of the LAST method (comma operator). OBJ must be a declared variable."
+  :example "(doto arena (alloc 64) reset)  ; => (Arena_alloc(arena,64), Arena_reset(arena))")
+(%defmacro doto (obj &rest clauses)
+  ($do
+    ($assert ($atom? obj) "doto: object must be a variable atom")
+    ($assert ($not ($null? clauses)) "doto: expects at least one method clause")
+    `(%comma ,@($map ($if ($atom? it) `(%send ,obj ,it) `(%send ,obj ,@it)) clauses))))
+
 ; Build one guard declaration form (a %raw statement) for FN(ARG) at scope exit.
 ; Shared by defer1 and defer*; each call gensyms its own guard variable.
 ($defun $sx-defer-decl (fn arg)
@@ -1122,9 +1167,21 @@
 (%doc defer1
   :sig (defer1 fn arg)
   :doc "Scoped resource cleanup: call FN(ARG) when control leaves the enclosing block by ANY path (return/break/goto), via __attribute__((cleanup)). FN must take a single pointer argument; ARG is captured at the defer1 site. Runs LIFO with other defer1/with in the same block. For free/fclose/unlock/... GCC/Clang only. (Non-void returns / non-pointer args rely on a function-pointer cast that is practically portable but formally UB.)"
-  :example "(defer1 free buf)")
-(%defmacro defer1 (fn arg)
-  `(%evals (quote ,($append ($sx-defer-runtime) ($list ($sx-defer-decl fn arg))))))
+  :example "(defer1 free buf)  ; or (defer1 arena::free)")
+(%defmacro defer1 (&rest spec)
+  ; Two accepted shapes: classic (defer1 FN ARG), or method form (defer1 obj::method)
+  ; which arrives here as a single (%send obj method) form — resolve it to (FN OBJ).
+  ($let ((norm
+          ($if ($eq? ($length spec) 1)
+            ($let ((s ($car spec)))
+              ($do
+                ($assert ($not ($atom? s))      "defer1: expects (defer1 FN ARG) or (defer1 obj::method)")
+                ($assert ($eq? ($car s) '%send) "defer1: single-argument form must be a method call (obj::method)")
+                ($list ($resolve-method-fn ($nth s 1) ($nth s 2)) ($nth s 1))))
+            ($do
+              ($assert ($eq? ($length spec) 2) "defer1: expects (defer1 FN ARG) or (defer1 obj::method)")
+              spec))))
+    `(%evals (quote ,($append ($sx-defer-runtime) ($list ($sx-defer-decl ($car norm) ($nth norm 1))))))))
 
 (%doc defer*
   :sig (defer* (fn arg)...)
