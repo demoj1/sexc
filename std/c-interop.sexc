@@ -362,6 +362,9 @@
 (%defmacro when (cond &rest body)
   ($do
     ($if ($null? body) ($warn "when: empty body — does nothing") nil)
+    ($if ($if ($atom? cond) nil ($eq? ($car cond) 'not))
+      ($info "(when (not C) ...) reads better as (unless C ...)")
+      nil)
     `(%if ,cond (%block ,@body))))
 
 ; unless
@@ -373,6 +376,9 @@
 (%defmacro unless (cond &rest body)
   ($do
     ($if ($null? body) ($warn "unless: empty body — does nothing") nil)
+    ($if ($if ($atom? cond) nil ($eq? ($car cond) 'not))
+      ($info "(unless (not C) ...) reads better as (when C ...)")
+      nil)
     `(%if (%! ,cond) (%block ,@body))))
 
 ; while

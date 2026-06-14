@@ -1,0 +1,13 @@
+; Non-fatal $info refactor nudges: a negated when/unless reads better as its dual.
+(defn int main ()
+  (decl (int x) 5)
+  (when (not (> x 0)) (set x 0))
+  (unless (not (> x 0)) (set x 1))
+  (return x))
+;==EXPECTED-WARNING==
+<stdin>:4:3: info[macro]: (when (not C) ...) reads better as (unless C ...)
+  (when (not (> x 0)) (set x 0))
+  ^
+<stdin>:5:3: info[macro]: (unless (not C) ...) reads better as (when C ...)
+  (unless (not (> x 0)) (set x 1))
+  ^
