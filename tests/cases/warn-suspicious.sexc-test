@@ -1,0 +1,26 @@
+; Macros emit non-fatal warnings for suspicious-but-legal patterns: self-assignment,
+; empty when/unless bodies, and integer division/modulo by a literal zero.
+(defn int main ()
+  (decl (int x) 5)
+  (set x x)
+  (when (> x 0))
+  (unless (> x 0))
+  (decl (int y) (/ x 0)
+        (int z) (% x 0))
+  (return (+ y z)))
+;==EXPECTED-WARNING==
+<stdin>:5:3: warning[macro]: set: assigning a place to itself (no-op)
+  (set x x)
+  ^
+<stdin>:6:3: warning[macro]: when: empty body — does nothing
+  (when (> x 0))
+  ^
+<stdin>:7:3: warning[macro]: unless: empty body — does nothing
+  (unless (> x 0))
+  ^
+<stdin>:8:17: warning[macro]: division by a literal 0 — undefined behavior for integer operands
+  (decl (int y) (/ x 0)
+                ^
+<stdin>:9:17: warning[macro]: modulo by a literal 0 — undefined behavior for integer operands
+        (int z) (% x 0))
+                ^

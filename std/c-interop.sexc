@@ -360,7 +360,9 @@
   :doc "Execute BODY when COND is truthy."
   :example "(when (> x 0) (set y x))")
 (%defmacro when (cond &rest body)
-  `(%if ,cond (%block ,@body)))
+  ($do
+    ($if ($null? body) ($warn "when: empty body — does nothing") nil)
+    `(%if ,cond (%block ,@body))))
 
 ; unless
 ; (unless cond form...)
@@ -369,7 +371,9 @@
   :doc "Execute BODY when COND is falsey."
   :example "(unless done (set done 1))")
 (%defmacro unless (cond &rest body)
-  `(%if (%! ,cond) (%block ,@body)))
+  ($do
+    ($if ($null? body) ($warn "unless: empty body — does nothing") nil)
+    `(%if (%! ,cond) (%block ,@body))))
 
 ; while
 ; (while cond form...)
@@ -530,7 +534,9 @@
   :example "(set x 1 y 2)")
 (%defmacro set (lhs value &rest more)
   ($if ($null? more)
-    `(%set ,lhs ,value)
+    ($do
+      ($if ($eq? lhs value) ($warn "set: assigning a place to itself (no-op)") nil)
+      `(%set ,lhs ,value))
     ($if ($null? ($cdr more))
       ($error "set expects pairs: (set lhs value [lhs2 value2 ...])")
       `(%block
@@ -929,7 +935,11 @@
   :doc "N-ary division."
   :example "(/ a b)")
 (%defmacro / (a b &rest rest)
-  `(%/ ,a ,b ,@rest))
+  ($do
+    ($if ($member? '0 ($cons b rest))
+      ($warn "division by a literal 0 — undefined behavior for integer operands")
+      nil)
+    `(%/ ,a ,b ,@rest)))
 
 ; (% a b c ...)
 ; n-ary arithmetic, at least 2 args
@@ -937,7 +947,11 @@
   :doc "N-ary modulo."
   :example "(% a b)")
 (%defmacro % (a b &rest rest)
-  `(%% ,a ,b ,@rest))
+  ($do
+    ($if ($member? '0 ($cons b rest))
+      ($warn "modulo by a literal 0 — undefined behavior for integer operands")
+      nil)
+    `(%% ,a ,b ,@rest)))
 
 (%doc =
   :doc "Equality operator."

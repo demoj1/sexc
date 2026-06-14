@@ -33,6 +33,19 @@
     0
     ($+ 1 ($length ($cdr lst)))))
 
+; True when X (structurally) appears in LST.
+($defun $member? (x lst)
+  ($if ($null? lst) nil
+    ($if ($eq? x ($car lst)) t
+      ($member? x ($cdr lst)))))
+
+; The first element of LST that also appears later in it, or nil if all distinct.
+; Used by macros to report duplicate param/field/variant names.
+($defun $first-dup (lst)
+  ($if ($null? lst) nil
+    ($if ($member? ($car lst) ($cdr lst)) ($car lst)
+      ($first-dup ($cdr lst)))))
+
 ($defun $--reverse-aux (lst acc)
   ($if ($null? lst)
     acc
