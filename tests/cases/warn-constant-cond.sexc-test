@@ -1,0 +1,9 @@
+; An `if` whose two branches are identical: the condition has no effect (non-fatal).
+(defn int main ()
+  (decl (int i) 0)
+  (if (> i 0) (set i 3) (set i 3))
+  (return i))
+;==EXPECTED-WARNING==
+<stdin>:4:3: warning[macro]: if: both branches are identical — the condition has no effect
+  (if (> i 0) (set i 3) (set i 3))
+  ^

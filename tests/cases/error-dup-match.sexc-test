@@ -1,0 +1,10 @@
+(defsum Sh :variants (A (int x)) (B (int y)))
+(defn int f ((Sh s)) (match s (A (x) (return x)) (A (x) (return 0)) (B (y) (return y))))
+;==EXPECTED-ERROR==
+<stdin>:2:22: error[macro]: match: variant matched more than once: Sh/A
+(defn int f ((Sh s)) (match s (A (x) (return x)) (A (x) (return 0)) (B (y) (return y))))
+                     ^
+
+Signature: (match scrut &rest clauses)
+Doc: Pattern-match on a sum value: (match s (Type/Variant (binders...) body...) ...). Variant is written explicitly (Type/Variant) or short (Variant). Positional binders. A trailing ... allows a non-exhaustive match; otherwise all variants must be covered.
+Example: (match s (Shape/Circle (r) (return (* 3.14 r r))) (Shape/Rect (w h) (return (* w h))))

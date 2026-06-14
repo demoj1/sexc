@@ -1,0 +1,9 @@
+(struct Point :fields (int x) (int y) (int x))
+;==EXPECTED-ERROR==
+<stdin>:1:1: error[macro]: struct Point: duplicate field name 'x'
+(struct Point :fields (int x) (int y) (int x))
+^
+
+Signature: (struct name &rest items)
+Doc: Define typedef struct with :fields and optional :methods sections.
+Example: (struct Vec2 :fields (float x) (float y))

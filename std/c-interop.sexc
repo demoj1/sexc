@@ -128,6 +128,8 @@
          (qparams ($map ($if ($atom? it) it ($cons ($qualify-type ($car it)) ($cdr it))) params))
          (body   ($cdr ($cdr ($cdr rest)))))
     ($do
+      ($let ((d ($first-dup ($reduce ($if ($atom? it) acc ($append acc ($cdr it))) ($list) params))))
+        ($if ($null? d) nil ($error ($str "defn " name ": duplicate parameter name '" d "'"))))
       ($m-put name :kind 'fn :return-type qret :params qparams)
       ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
       ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
@@ -230,7 +232,11 @@
     ($assert ($null? ($cdr else-body)) "if accepts only 2 or 3 arguments; use cond for multi-branch logic")
     ($if ($null? else-body)
       `(%if ,cond (%block ,then))
-      `(%if ,cond (%block ,then) (%block ,($car else-body))))))
+      ($do
+        ($if ($eq? then ($car else-body))
+          ($warn "if: both branches are identical — the condition has no effect")
+          nil)
+        `(%if ,cond (%block ,then) (%block ,($car else-body)))))))
 
 ; ─── Predicates (convention: every predicate name ends with `?`) ─────────────
 ; Thin wrappers over the surface comparison operators; `nil` is ((void*)0).
@@ -667,6 +673,9 @@
          (fields ($map ($binding-split it) ($|> state $cdr $car)))
          (methods ($|> state $cdr $cdr $car)))
     ($assert ($not ($eq? phase 'start)) "struct expects ':fields' section")
+    ($assert ($not ($null? fields)) ($str "struct " name " has no fields — a struct needs at least one"))
+    ($let ((d ($first-dup ($reduce ($append acc ($cdr it)) ($list) fields))))
+      ($if ($null? d) nil ($error ($str "struct " name ": duplicate field name '" d "'"))))
     ; fields для метадаты — с квалифицированными типами полей (эмит %struct ниже
     ; идёт с bare-типами, их доквалифицирует %-IR проход).
     ($m-put name :kind 'struct
@@ -704,6 +713,9 @@
 (%defmacro union (name &rest fields)
   ($let ((name ($qualify name)))
   ($let ((fields ($map ($binding-split it) fields)))
+    ($assert ($not ($null? fields)) ($str "union " name " has no fields — a union needs at least one"))
+    ($let ((d ($first-dup ($reduce ($append acc ($cdr it)) ($list) fields))))
+      ($if ($null? d) nil ($error ($str "union " name ": duplicate field name '" d "'"))))
     ($m-put name :kind 'union :fields ($map ($cons ($qualify-type ($car it)) ($cdr it)) fields))
     ($let ((ns ($namespace-of name)))
       ($if ($null? ns) nil ($m-append ns :types name)))
