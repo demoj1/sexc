@@ -128,18 +128,7 @@
          (qparams ($map ($if ($atom? it) it ($cons ($qualify-type ($car it)) ($cdr it))) params))
          (body   ($cdr ($cdr ($cdr rest)))))
     ($do
-      ($let ((d ($first-dup ($reduce ($if ($atom? it) acc ($append acc ($cdr it))) ($list) params))))
-        ($if ($null? d) nil ($error ($str "defn " name ": duplicate parameter name '" d "'"))))
-      ; non-void function whose body has NO return anywhere → likely falls off the
-      ; end returning garbage. Conservative: skip void and main, and treat exit/
-      ; abort/__builtin_unreachable/%raw as escape hatches to avoid false positives.
-      ($if ($if ($eq? ret 'void) nil
-              ($if ($eq? name 'main) nil
-                ($not ($tree-has-head?
-                        ($list 'return '%return '%raw 'exit 'abort '__builtin_unreachable)
-                        body))))
-        ($warn ($str "defn " name ": non-void function with no return — it may fall off the end returning garbage"))
-        nil)
+      ($validate-defn name ret params body)
       ($m-put name :kind 'fn :return-type qret :params qparams)
       ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
       ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
@@ -243,9 +232,7 @@
     ($if ($null? else-body)
       `(%if ,cond (%block ,then))
       ($do
-        ($if ($eq? then ($car else-body))
-          ($warn "if: both branches are identical — the condition has no effect")
-          nil)
+        ($validate-if then ($car else-body))
         `(%if ,cond (%block ,then) (%block ,($car else-body)))))))
 
 ; ─── Predicates (convention: every predicate name ends with `?`) ─────────────
@@ -377,10 +364,7 @@
   :example "(when (> x 0) (set y x))")
 (%defmacro when (cond &rest body)
   ($do
-    ($if ($null? body) ($warn "when: empty body — does nothing") nil)
-    ($if ($if ($atom? cond) nil ($eq? ($car cond) 'not))
-      ($info "(when (not C) ...) reads better as (unless C ...)")
-      nil)
+    ($validate-when cond body)
     `(%if ,cond (%block ,@body))))
 
 ; unless
@@ -391,10 +375,7 @@
   :example "(unless done (set done 1))")
 (%defmacro unless (cond &rest body)
   ($do
-    ($if ($null? body) ($warn "unless: empty body — does nothing") nil)
-    ($if ($if ($atom? cond) nil ($eq? ($car cond) 'not))
-      ($info "(unless (not C) ...) reads better as (when C ...)")
-      nil)
+    ($validate-unless cond body)
     `(%if (%! ,cond) (%block ,@body))))
 
 ; while
@@ -557,7 +538,7 @@
 (%defmacro set (lhs value &rest more)
   ($if ($null? more)
     ($do
-      ($if ($eq? lhs value) ($warn "set: assigning a place to itself (no-op)") nil)
+      ($validate-set lhs value)
       `(%set ,lhs ,value))
     ($if ($null? ($cdr more))
       ($error "set expects pairs: (set lhs value [lhs2 value2 ...])")
@@ -683,9 +664,7 @@
          (fields ($map ($binding-split it) ($|> state $cdr $car)))
          (methods ($|> state $cdr $cdr $car)))
     ($assert ($not ($eq? phase 'start)) "struct expects ':fields' section")
-    ($assert ($not ($null? fields)) ($str "struct " name " has no fields — a struct needs at least one"))
-    ($let ((d ($first-dup ($reduce ($append acc ($cdr it)) ($list) fields))))
-      ($if ($null? d) nil ($error ($str "struct " name ": duplicate field name '" d "'"))))
+    ($validate-record-fields "struct" name fields)
     ; fields для метадаты — с квалифицированными типами полей (эмит %struct ниже
     ; идёт с bare-типами, их доквалифицирует %-IR проход).
     ($m-put name :kind 'struct
@@ -723,9 +702,7 @@
 (%defmacro union (name &rest fields)
   ($let ((name ($qualify name)))
   ($let ((fields ($map ($binding-split it) fields)))
-    ($assert ($not ($null? fields)) ($str "union " name " has no fields — a union needs at least one"))
-    ($let ((d ($first-dup ($reduce ($append acc ($cdr it)) ($list) fields))))
-      ($if ($null? d) nil ($error ($str "union " name ": duplicate field name '" d "'"))))
+    ($validate-record-fields "union" name fields)
     ($m-put name :kind 'union :fields ($map ($cons ($qualify-type ($car it)) ($cdr it)) fields))
     ($let ((ns ($namespace-of name)))
       ($if ($null? ns) nil ($m-append ns :types name)))
@@ -930,11 +907,7 @@
   :example "(not done)")
 (%defmacro not (x)
   ($do
-    ; (not (not X)) is the C `!!X` bool-normalization idiom — not always redundant,
-    ; so this is an INFO nudge, not a warning.
-    ($if ($if ($atom? x) nil ($eq? ($car x) 'not))
-      ($info "(not (not X)) normalizes to 0/1 (the !! idiom); if you only need truthiness, X alone works")
-      nil)
+    ($validate-not x)
     `(%raw "!(" ,x ")")))
 
 ; (+ a b c ...)
@@ -970,9 +943,7 @@
   :example "(/ a b)")
 (%defmacro / (a b &rest rest)
   ($do
-    ($if ($member? '0 ($cons b rest))
-      ($warn "division by a literal 0 — undefined behavior for integer operands")
-      nil)
+    ($validate-divisor "division" ($cons b rest))
     `(%/ ,a ,b ,@rest)))
 
 ; (% a b c ...)
@@ -982,9 +953,7 @@
   :example "(% a b)")
 (%defmacro % (a b &rest rest)
   ($do
-    ($if ($member? '0 ($cons b rest))
-      ($warn "modulo by a literal 0 — undefined behavior for integer operands")
-      nil)
+    ($validate-divisor "modulo" ($cons b rest))
     `(%% ,a ,b ,@rest)))
 
 (%doc =

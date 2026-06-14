@@ -1,0 +1,80 @@
+; std/validate.sexc
+;
+; Form validations / lint checks, factored OUT of the surface macros so their
+; bodies stay focused on what they emit. Each $validate-* takes the data a macro
+; already computed, emits diagnostics ($error/$assert fatal, $warn/$info advisory)
+; at the macro's call-site, and returns nil. Macros just call the validator.
+;
+; NOTE: deeply-embedded parser guards (the $assert's inside the $reduce section
+; parsers of struct/defsum, "field must be (type name)", etc.) stay inline — they
+; are part of parsing, not separable post-checks. Generic list/tree helpers used
+; here ($member?/$first-dup/$tree-has-head?) live in std/meta.sexc.
+
+; defn: duplicate parameter names + non-void function with no return anywhere.
+($defun $validate-defn (name ret params body)
+  ($do
+    ($let ((d ($first-dup ($reduce ($if ($atom? it) acc ($append acc ($cdr it))) ($list) params))))
+      ($if ($null? d) nil ($error ($str "defn " name ": duplicate parameter name '" d "'"))))
+    ($if ($if ($eq? ret 'void) nil
+            ($if ($eq? name 'main) nil
+              ($not ($tree-has-head?
+                      ($list 'return '%return '%raw 'exit 'abort '__builtin_unreachable)
+                      body))))
+      ($warn ($str "defn " name ": non-void function with no return — it may fall off the end returning garbage"))
+      nil)))
+
+; struct / union: at least one field + no duplicate field names. KIND is the word
+; used in the message ("struct" / "union"); FIELDS is a list of (type name...).
+($defun $validate-record-fields (kind name fields)
+  ($do
+    ($assert ($not ($null? fields)) ($str kind " " name " has no fields — a " kind " needs at least one"))
+    ($let ((d ($first-dup ($reduce ($append acc ($cdr it)) ($list) fields))))
+      ($if ($null? d) nil ($error ($str kind " " name ": duplicate field name '" d "'"))))))
+
+; defsum: at least one variant + no duplicate variant names.
+($defun $validate-defsum-variants (name variants)
+  ($do
+    ($assert ($not ($null? variants)) ($str "defsum " name " has no variants"))
+    ($let ((d ($first-dup ($map ($car it) variants))))
+      ($if ($null? d) nil ($error ($str "defsum " name ": duplicate variant '" d "'"))))))
+
+; match: no variant covered by more than one arm (COVERED is the list of arm keys).
+($defun $validate-match-arms (covered)
+  ($let ((d ($first-dup covered)))
+    ($if ($null? d) nil ($error ($str "match: variant matched more than once: " d)))))
+
+; set: assigning a place to itself is a no-op.
+($defun $validate-set (lhs value)
+  ($if ($eq? lhs value) ($warn "set: assigning a place to itself (no-op)") nil))
+
+; when: empty body warns; a (not C) condition reads better as unless.
+($defun $validate-when (cond body)
+  ($do
+    ($if ($null? body) ($warn "when: empty body — does nothing") nil)
+    ($if ($if ($atom? cond) nil ($eq? ($car cond) 'not))
+      ($info "(when (not C) ...) reads better as (unless C ...)")
+      nil)))
+
+; unless: empty body warns; a (not C) condition reads better as when.
+($defun $validate-unless (cond body)
+  ($do
+    ($if ($null? body) ($warn "unless: empty body — does nothing") nil)
+    ($if ($if ($atom? cond) nil ($eq? ($car cond) 'not))
+      ($info "(unless (not C) ...) reads better as (when C ...)")
+      nil)))
+
+; if: identical branches mean the condition has no effect.
+($defun $validate-if (then else)
+  ($if ($eq? then else) ($warn "if: both branches are identical — the condition has no effect") nil))
+
+; / and %: a literal 0 divisor is UB for integer operands. KIND = "division"/"modulo".
+($defun $validate-divisor (kind divisors)
+  ($if ($member? '0 divisors)
+    ($warn ($str kind " by a literal 0 — undefined behavior for integer operands"))
+    nil))
+
+; not: (not (not X)) is the !! bool-normalization idiom — an info nudge.
+($defun $validate-not (x)
+  ($if ($if ($atom? x) nil ($eq? ($car x) 'not))
+    ($info "(not (not X)) normalizes to 0/1 (the !! idiom); if you only need truthiness, X alone works")
+    nil))

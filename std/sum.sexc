@@ -135,9 +135,7 @@
                         ($cons ($car it) ($cons base ($cdr it))))
                       methods)))
     ($assert ($not ($eq? phase 'start)) "defsum expects ':variants' section")
-    ($assert ($not ($null? variants)) ($str "defsum " name " has no variants"))
-    ($let ((dupv ($first-dup ($map ($car it) variants))))
-      ($if ($null? dupv) nil ($error ($str "defsum " name ": duplicate variant '" dupv "'"))))
+    ($validate-defsum-variants name variants)
     ($do
       ; метадата типа + вариантов
       ($m-put base :kind 'sum :variants variants :tag-type tagty)
@@ -187,8 +185,7 @@
              (covered  ($map ($sum-armkey sty ($car it)) arms))
              (allkeys  ($map ($symcat sty "/" ($car it)) variants)))
         ($assert ($not ($null? variants)) "match: type is not a defsum")
-        ($let ((dupc ($first-dup covered)))
-          ($if ($null? dupc) nil ($error ($str "match: variant matched more than once: " dupc))))
+        ($validate-match-arms covered)
         ; exhaustiveness (если нет хвостового ...)
         ($if partial nil
           ($let ((missing ($sum-missing allkeys covered)))

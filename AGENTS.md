@@ -6,7 +6,7 @@
 
 - OCaml исходники лежат в `src/`.
 - Основной CLI: `src/sexc.ml`.
-- Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`, `std/ocaml-api.sexc`.
+- Макросная stdlib: `std/core.sexc`, `std/c-interop.sexc`, `std/meta.sexc`, `std/validate.sexc`, `std/ocaml-api.sexc`.
 - Примеры: `examples/`.
 - Регрессионные тесты: `tests/` (bash + golden snapshots, см. ниже).
 - Emacs mode plugin: `sexc.el` (major mode, font-lock, indent rules, compile command, eldoc через `show-doc`).
@@ -39,7 +39,8 @@
 
 - `std/core.sexc` — агрегатор prelude (`%import` цепочки), сюда не добавлять большую логику.
 - `std/c-interop.sexc` — **всё, что (в конечном счёте) разворачивается в `%`-IR**. От прямых C-mirror (`defn`/`decl`/`adecl`/`struct`/`union`/операторы) до высокоуровневого C-statement sugar (`when`/`unless`/`break`/`continue`/`++1`/`1++`/`--1`/`1--`/`incf-by`/`decf-by`/`dotimes`/`for-range`/`repeat`). Декларативные макросы (`defn`, `decl`, `adecl`, `struct`, `union`, `define`) дополнительно населяют compile-time metadata через `$m-put`.
-- `std/meta.sexc` — **то, что НЕ привязано к C**. Compile-time `$defun` библиотека (`$list`, `$append`, `$subst`, `$length`, `$reverse`, `$nth`, `$--reverse-aux`) и generic structural sugar (`|>`, `||>`, `|as>`).
+- `std/meta.sexc` — **то, что НЕ привязано к C**. Compile-time `$defun` библиотека (`$list`, `$append`, `$subst`, `$length`, `$reverse`, `$nth`, `$member?`, `$first-dup`, `$tree-has-head?`, `$--reverse-aux`) и generic structural sugar (`|>`, `||>`, `|as>`).
+- `std/validate.sexc` — **форм-валидации/линт, вынесенные из тел макросов**. `$validate-*` `$defun`'ы (по одному на форму: defn/struct/union/defsum/match/set/when/unless/if/`/`/`%`/not), каждый эмитит диагностику (`$error`/`$assert`/`$warn`/`$info`) на call-site и возвращает nil; макрос зовёт один валидатор. Глубоко вшитые в `$reduce`-парсеры `$assert`'ы секций ОСТАЮТСЯ inline (часть парсинга).
 - `std/ocaml-api.sexc` — docs-only `%doc` записи для OCaml-only символов (`%...`, `$...`) и для `$defun`-функций из meta.sexc.
 
 Правило для размещения нового макроса: *развернётся ли это (в итоге) в `%`-IR форму?* Да → `c-interop.sexc`. Нет (compile-time / form manipulation) → `meta.sexc`.

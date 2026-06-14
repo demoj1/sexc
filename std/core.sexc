@@ -8,5 +8,6 @@
 
 (%import "./c-interop.sexc")
 (%import "./meta.sexc")
+(%import "./validate.sexc")
 (%import "./derive.sexc")
 (%import "./sum.sexc")
