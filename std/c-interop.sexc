@@ -919,7 +919,13 @@
   :doc "Logical negation helper."
   :example "(not done)")
 (%defmacro not (x)
-  `(%raw "!(" ,x ")"))
+  ($do
+    ; (not (not X)) is the C `!!X` bool-normalization idiom — not always redundant,
+    ; so this is an INFO nudge, not a warning.
+    ($if ($if ($atom? x) nil ($eq? ($car x) 'not))
+      ($info "(not (not X)) normalizes to 0/1 (the !! idiom); if you only need truthiness, X alone works")
+      nil)
+    `(%raw "!(" ,x ")")))
 
 ; (+ a b c ...)
 ; n-ary arithmetic, at least 2 args

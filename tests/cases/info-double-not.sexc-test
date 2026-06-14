@@ -1,0 +1,10 @@
+; (not (not X)) is the !! bool-normalization idiom — an INFO nudge (not a warning,
+; since it is sometimes intentional). A single (not X) stays silent.
+(defn int f ((int x))
+  (decl (int b) (not (not x))
+        (int c) (not x))
+  (return (+ b c)))
+;==EXPECTED-WARNING==
+<stdin>:4:17: info[macro]: (not (not X)) normalizes to 0/1 (the !! idiom); if you only need truthiness, X alone works
+  (decl (int b) (not (not x))
+                ^
