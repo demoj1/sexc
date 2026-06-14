@@ -171,6 +171,43 @@ let fail_at ~phase (span : span option) (message : string) =
 let failf_at ~phase span fmt =
   Printf.ksprintf (fun s -> fail_at ~phase span s) fmt
 
+(* Levenshtein edit distance — для "did you mean?" подсказок при опечатках имён. *)
+let levenshtein a b =
+  let la = String.length a and lb = String.length b in
+  if la = 0 then lb
+  else if lb = 0 then la
+  else begin
+    let prev = Array.init (lb + 1) ~f:Fn.id in
+    let cur = Array.create ~len:(lb + 1) 0 in
+    for i = 1 to la do
+      cur.(0) <- i;
+      for j = 1 to lb do
+        let cost = if Char.equal a.[i - 1] b.[j - 1] then 0 else 1 in
+        cur.(j) <- Int.min (Int.min (cur.(j - 1) + 1) (prev.(j) + 1)) (prev.(j - 1) + cost)
+      done;
+      Array.blit ~src:cur ~src_pos:0 ~dst:prev ~dst_pos:0 ~len:(lb + 1)
+    done;
+    prev.(lb)
+  end
+
+(* Ближайшее к TARGET имя из CANDIDATES в пределах max_dist правок (None — нет
+   достаточно близкого). При равной дистанции берём первое. *)
+let closest ?(max_dist = 2) target candidates =
+  List.fold candidates ~init:None ~f:(fun best c ->
+      let d = levenshtein target c in
+      if d > max_dist then best
+      else
+        match best with
+        | Some (_, bd) when bd <= d -> best
+        | _ -> Some (c, d))
+  |> Option.map ~f:fst
+
+(* " — did you mean X?" или "" — удобный суффикс к сообщению об ошибке. *)
+let did_you_mean ?(max_dist = 2) target candidates =
+  match closest ~max_dist target candidates with
+  | Some s -> Printf.sprintf " — did you mean %s?" s
+  | None -> ""
+
 (* Span текущей top-level формы. Устанавливается компилятором перед per-form
    обработкой (macro expand → frontend → codegen) и используется, чтобы
    "promote" любую bare Sexc_error из глубоких фаз в Sexc_diagnostic с

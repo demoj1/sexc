@@ -7,6 +7,6 @@
                 `(printf "%s\n" ,($strrr name)))))
   (return 0))
 ;==EXPECTED-ERROR==
-<stdin>:7:35: error[macro-eval]: Unbound variable in macro eval: $strrr
+<stdin>:7:35: error[macro-eval]: Unbound variable in macro eval: $strrr — did you mean $str?
                 `(printf "%s\n" ,($strrr name)))))
                                   ^

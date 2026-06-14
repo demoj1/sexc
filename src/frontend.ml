@@ -139,6 +139,24 @@ let builtin_words =
   String.Set.of_list
     [ "void"; "char"; "short"; "int"; "long"; "float"; "double"; "signed"; "unsigned" ]
 
+(* Все %-интринсики (для "did you mean?" при опечатке). При добавлении нового
+   %-intrinsic — добавить и сюда (влияет только на качество подсказки). *)
+let pct_intrinsics =
+  [ "%!"; "%!="; "%%"; "%%="; "%&"; "%&&"; "%&="; "%*"; "%*="; "%+"; "%+="; "%-";
+    "%-="; "%/"; "%/="; "%<"; "%<<"; "%<<="; "%<="; "%="; "%=="; "%>"; "%>=";
+    "%>>"; "%>>="; "%^"; "%^="; "%|"; "%|="; "%||"; "%~"; "%addr"; "%aref";
+    "%array"; "%arrow"; "%auto"; "%block"; "%break"; "%call"; "%case"; "%cast";
+    "%comma"; "%comment"; "%const"; "%constructor"; "%continue"; "%cpp"; "%decl";
+    "%decl-fn"; "%decl-many"; "%default"; "%def-fn"; "%define"; "%define-macro";
+    "%deref"; "%dot"; "%do-while"; "%enum"; "%eval"; "%evals"; "%expr"; "%extern";
+    "%fn"; "%for"; "%goto"; "%if"; "%ifdef"; "%include"; "%inline"; "%label";
+    "%nop"; "%null"; "%post-dec"; "%post-inc"; "%pre-dec"; "%pre-inc"; "%ptr";
+    "%raw"; "%register"; "%restrict"; "%return"; "%set"; "%sizeof-expr";
+    "%sizeof-type"; "%static"; "%struct"; "%switch"; "%ternary"; "%top-level-splice";
+    "%typedef"; "%typeof"; "%union"; "%volatile"; "%while" ]
+
+let pct_hint h = if String.is_prefix h ~prefix:"%" then Common.did_you_mean h pct_intrinsics else ""
+
 let storage_of_atom = function
   | "%extern" -> Some Extern
   | "%static" -> Some Static
@@ -299,7 +317,7 @@ let c_binary_op = function
   | "%^=" -> "^="
   | "%<<=" -> "<<="
   | "%>>=" -> ">>="
-  | x -> failf "Unknown intrinsic operator: %s" x
+  | x -> failf "Unknown intrinsic operator: %s%s" x (pct_hint x)
 
 let rec parse_expr raw =
   match raw with
@@ -394,7 +412,7 @@ and parse_intrinsic_expr h args =
     | "%&=" | "%|=" | "%^=" | "%<<=" | "%>>=" ) as op ->
       ensure_arity op args 2;
       EAssign (c_binary_op op, parse_expr (List.nth_exn args 0), parse_expr (List.nth_exn args 1))
-  | _ -> failf "Unknown intrinsic expression: %s" h
+  | _ -> failf "Unknown intrinsic expression: %s%s" h (pct_hint h)
 
 (* Wire the forward reference now that parse_expr exists (see parse_expr_fwd). *)
 let () = parse_expr_fwd := parse_expr

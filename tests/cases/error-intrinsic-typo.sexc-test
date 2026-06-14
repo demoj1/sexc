@@ -1,0 +1,7 @@
+; A typo in a %-intrinsic suggests the closest real one (Levenshtein).
+(defn int f ((int x))
+  (return (%cst int x)))
+;==EXPECTED-ERROR==
+<stdin>:2:1: error[compile]: Unknown intrinsic expression: %cst — did you mean %cast?
+(defn int f ((int x))
+^

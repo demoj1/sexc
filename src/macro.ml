@@ -60,6 +60,19 @@ let evals_splice_tag = "__sexc_internal_evals_splice__"
    значениями». Живёт только внутри одного $loop-вычисления и им же поглощается. *)
 let loop_recur_tag = "__sexc_internal_loop_recur__"
 
+(* Имена $-builtins, реализованных в OCaml (eval_expr). Для "did you mean?" при
+   опечатке: кандидаты = этот список ∪ ключи ctx.ct_fns (stdlib/user $defun'ы).
+   При добавлении нового builtin сюда же (влияет только на качество подсказки). *)
+let dollar_builtins =
+  [ "$quote"; "$if"; "$cond"; "$case"; "$cons"; "$car"; "$cdr"; "$null?"; "$nil?";
+    "$not-nil?"; "$atom?"; "$eq?"; "$keyword?"; "$keyword-name"; "$let"; "$do";
+    "$not"; "$error"; "$warn"; "$info"; "$assert"; "$gensym"; "$symcat"; "$str";
+    "$namespace-of"; "$current-module"; "$qualify"; "$qualify-type"; "$+"; "$-";
+    "$*"; "$/"; "$zero?"; "$nonzero?"; "$pos?"; "$neg?"; "$ltz?"; "$letz?"; "$gtz?";
+    "$getz?"; "$even?"; "$odd?"; "$defun"; "$loop"; "$recur"; "$|>"; "$||>";
+    "$|as>"; "$map"; "$filter"; "$reduce"; "$dolist"; "$for"; "$m-put"; "$m-get";
+    "$m-append" ]
+
 let bool_raw b = if b then Raw.Atom ("t", None) else Raw.Atom ("nil", None)
 
 let is_falsey = function
@@ -134,7 +147,14 @@ and eval_expr_inner ctx env expr =
       match Map.find env a with
       | Some v -> v
       | None when is_self_evaluating_atom a -> expr
-      | None -> Common.failf_at ~phase:"macro-eval" sp "Unbound variable in macro eval: %s" a)
+      | None ->
+          (* для $-имени (опечатка builtin/$defun) — подсказка ближайшего *)
+          let hint =
+            if String.is_prefix a ~prefix:"$" then
+              Common.did_you_mean a (dollar_builtins @ Map.keys ctx.ct_fns)
+            else ""
+          in
+          Common.failf_at ~phase:"macro-eval" sp "Unbound variable in macro eval: %s%s" a hint)
   | Raw.Str (_, _) -> expr
   | Raw.List ([], _) -> Raw.List ([], None)
   | Raw.List ((Raw.Atom ("quote", _) :: [ body ]), _) -> body
