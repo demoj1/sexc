@@ -899,7 +899,39 @@ and expand_one ctx ~depth raw =
              ошибку (напр. Unbound variable на рантайм-переменной). *)
           let out = eval_expr ctx String.Map.empty raw in
           expand_one ctx ~depth:(depth + 1) out
-      | None -> Raw.List ((Raw.Atom (head, head_sp) :: expand_list_items ctx ~depth args), list_sp))
+      | None ->
+          let eargs = expand_list_items ctx ~depth args in
+          (* Арность-чек вызова известной defn-функции: метадата :kind 'fn + :params
+             (счёт по ИМЕНАМ во всех группах). Внешние/forward/variadic функции без
+             такой метадаты не проверяются (None → пропуск, без ложняка). *)
+          (match Map.find ctx.sym_meta head with
+           | Some meta -> (
+               match Map.find meta ":kind", Map.find meta ":params" with
+               | Some (Raw.Atom ("fn", _)), Some (Raw.List (params, _)) ->
+                   let is_vararg = function
+                     | Raw.Atom ("...", _) -> true
+                     | Raw.List (xs, _) ->
+                         List.exists xs ~f:(function Raw.Atom ("...", _) -> true | _ -> false)
+                     | _ -> false
+                   in
+                   if not (List.exists params ~f:is_vararg) then begin
+                     let pnames =
+                       List.concat_map params ~f:(function
+                         | Raw.List (_ :: names, _) ->
+                             List.filter_map names ~f:(function Raw.Atom (n, _) -> Some n | _ -> None)
+                         | _ -> [])
+                     in
+                     let nparams = List.length pnames in
+                     let nargs = List.length eargs in
+                     if nargs <> nparams then
+                       Common.failf_at ~phase:"macro"
+                         (match list_sp with Some _ -> list_sp | None -> head_sp)
+                         "call to %s: expected %d argument(s) (%s), got %d"
+                         head nparams (String.concat ~sep:" " pnames) nargs
+                   end
+               | _ -> ())
+           | None -> ());
+          Raw.List ((Raw.Atom (head, head_sp) :: eargs), list_sp))
   (* Список, голова которого не атом (напр. ((%ptr char) name) — поле struct).
      Сохраняем span — это форма из исходника, её локация нужна для #line. *)
   | Raw.List (xs, sp) -> Raw.List ((expand_list_items ctx ~depth xs), sp)

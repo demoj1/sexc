@@ -1,0 +1,10 @@
+; Calling a known defn function with the wrong number of arguments is an error that
+; names the expected parameters. External/forward/variadic calls are not checked.
+(defn int add ((int a) (int b))
+  (return (+ a b)))
+(defn int main ()
+  (return (add 1)))
+;==EXPECTED-ERROR==
+<stdin>:6:11: error[macro]: call to add: expected 2 argument(s) (a b), got 1
+  (return (add 1)))
+          ^
