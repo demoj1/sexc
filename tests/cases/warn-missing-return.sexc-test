@@ -1,0 +1,13 @@
+; A non-void function whose body contains no return anywhere likely falls off the
+; end returning garbage — warned (non-fatal). Functions that return inside branches,
+; void functions, main, and exit/abort/%raw bodies are NOT flagged.
+(defn int forgot ((int x))
+  (decl (int y) (+ x 1)))
+(defn int ok ((int x))
+  (if (> x 0) (return 1) (return 0)))
+(defn void noret ((int x))
+  (printf "%d" x))
+;==EXPECTED-WARNING==
+<stdin>:4:1: warning[macro]: defn forgot: non-void function with no return — it may fall off the end returning garbage
+(defn int forgot ((int x))
+^

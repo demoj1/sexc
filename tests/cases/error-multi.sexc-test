@@ -1,26 +1,26 @@
-(defn int f () (when))
-(defn int g () (dotimes 5))
-(defn int h () (incf-by))
+(defn void f () (when))
+(defn void g () (dotimes 5))
+(defn void h () (incf-by))
 ;==EXPECTED-ERROR==
-<stdin>:1:16: error[macro]: Macro when expects at least 1 arguments, got 0
-(defn int f () (when))
-               ^
+<stdin>:1:17: error[macro]: Macro when expects at least 1 arguments, got 0
+(defn void f () (when))
+                ^
 
 Signature: (when cond &rest body)
 Doc: Execute BODY when COND is truthy.
 Example: (when (> x 0) (set y x))
 
-<stdin>:2:16: error[macro]: Macro dotimes expects at least 2 arguments, got 1
-(defn int g () (dotimes 5))
-               ^
+<stdin>:2:17: error[macro]: Macro dotimes expects at least 2 arguments, got 1
+(defn void g () (dotimes 5))
+                ^
 
 Signature: (dotimes i n &rest body)
 Doc: Loop I from 0 to N-1.
 Example: (dotimes i 10 (1++ sum))
 
-<stdin>:3:16: error[macro]: Macro incf-by expects 2 arguments, got 0
-(defn int h () (incf-by))
-               ^
+<stdin>:3:17: error[macro]: Macro incf-by expects 2 arguments, got 0
+(defn void h () (incf-by))
+                ^
 
 Signature: (incf-by x n)
 Doc: Increment X by N.

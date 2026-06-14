@@ -46,6 +46,14 @@
     ($if ($member? ($car lst) ($cdr lst)) ($car lst)
       ($first-dup ($cdr lst)))))
 
+; True when any sub-form of FORM (at any depth) has its head in HEADS. Used to ask
+; "does this body contain a return / exit / ... anywhere?".
+($defun $tree-has-head? (heads form)
+  ($if ($atom? form) nil
+    ($if ($null? form) nil
+      ($if ($member? ($car form) heads) t
+        ($reduce ($if acc t ($tree-has-head? heads it)) nil form)))))
+
 ($defun $--reverse-aux (lst acc)
   ($if ($null? lst)
     acc

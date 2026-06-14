@@ -1,6 +1,6 @@
 ; recur must pass exactly one value per loop binding; the error points at the
 ; user's recur, not into std/c-interop.sexc.
-(defn int f ((int n))
+(defn void f ((int n))
   (loop ((int i n) (int acc 0))
     (recur (- i 1))))
 ;==EXPECTED-ERROR==

@@ -130,6 +130,16 @@
     ($do
       ($let ((d ($first-dup ($reduce ($if ($atom? it) acc ($append acc ($cdr it))) ($list) params))))
         ($if ($null? d) nil ($error ($str "defn " name ": duplicate parameter name '" d "'"))))
+      ; non-void function whose body has NO return anywhere → likely falls off the
+      ; end returning garbage. Conservative: skip void and main, and treat exit/
+      ; abort/__builtin_unreachable/%raw as escape hatches to avoid false positives.
+      ($if ($if ($eq? ret 'void) nil
+              ($if ($eq? name 'main) nil
+                ($not ($tree-has-head?
+                        ($list 'return '%return '%raw 'exit 'abort '__builtin_unreachable)
+                        body))))
+        ($warn ($str "defn " name ": non-void function with no return — it may fall off the end returning garbage"))
+        nil)
       ($m-put name :kind 'fn :return-type qret :params qparams)
       ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
       ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
