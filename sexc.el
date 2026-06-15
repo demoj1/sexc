@@ -92,9 +92,25 @@ merge into the output via `2>&1'."
   :group 'sexc)
 
 (defcustom sexc/type-keywords
-  '("void" "char" "short" "int" "long" "float" "double"
-    "signed" "unsigned" "const" "volatile" "restrict")
-  "Builtin C-like type keywords to highlight."
+  '(;; built-in C types
+    "void" "char" "short" "int" "long" "float" "double"
+    "signed" "unsigned" "const" "volatile" "restrict"
+    ;; <stdbool.h> / <stdint.h>-ish base
+    "bool" "_Bool"
+    ;; <stddef.h>
+    "size_t" "ptrdiff_t" "wchar_t" "max_align_t"
+    ;; <stdint.h> fixed-width
+    "int8_t" "int16_t" "int32_t" "int64_t"
+    "uint8_t" "uint16_t" "uint32_t" "uint64_t"
+    "int_least8_t" "int_least16_t" "int_least32_t" "int_least64_t"
+    "uint_least8_t" "uint_least16_t" "uint_least32_t" "uint_least64_t"
+    "int_fast8_t" "int_fast16_t" "int_fast32_t" "int_fast64_t"
+    "uint_fast8_t" "uint_fast16_t" "uint_fast32_t" "uint_fast64_t"
+    "intptr_t" "uintptr_t" "intmax_t" "uintmax_t"
+    ;; other common stdlib typedefs
+    "ssize_t" "FILE" "fpos_t" "time_t" "clock_t" "wint_t" "sig_atomic_t"
+    "va_list")
+  "Builtin C-like type keywords to highlight (incl. common stdlib typedefs)."
   :type '(repeat string)
   :group 'sexc)
 
