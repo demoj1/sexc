@@ -377,6 +377,47 @@ fresh arena as the ambient `*arena*`, `defer*` its teardown, and let
 callees allocate from it without taking it as a parameter (see
 `examples/with-alloca.sexc`).
 
+### Error handling: `throw` / `try` / `catch`
+
+Errors travel on a side channel — a `_Thread_local` slot holding a tag string
+(`0` = OK) — so values stay clean and `defer` keeps working: a `throw` is just a
+plain `return`, and the cleanup runner saves/restores the in-flight error around
+each deferred call. A function declares its error sentinel with `:on-error`, then
+`throw`s a tag; a caller either propagates with `try` or handles with `catch`.
+Fallibility is **inferred** from the body — there is no `:throws` annotation.
+
+```lisp
+(defn :on-error -1 int digit ((char c))
+  (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))   ; set tag, return -1
+  (return (- c ?0)))
+
+(defn :on-error -1 int sum-two ((char a) (char b))
+  (decl (int x) (try (digit a))                        ; on error: return -1 now
+        (int y) (try (digit b)))
+  (return (+ x y)))
+
+(defn int run ((char a) (char b))
+  (decl (int r) 0)
+  (catch (set r (sum-two a b))                         ; run; on error, dispatch
+    (:not_a_digit (printf "bad digit\n") (return 1))
+    (else (return 2)))
+  (printf "sum = %d\n" r)                               ; reached only on success
+  (return 0))
+```
+
+`(throw :tag)` returns the function's `:on-error` sentinel; `(throw :tag value)`
+returns an explicit value (and needs no `:on-error`). `(try expr)` yields `expr`'s
+value, or returns the **enclosing** function's sentinel the moment an error is
+raised (a GCC/Clang statement-expression, so it works mid-expression). `catch`
+runs its guarded expression, then on error consumes the tag and runs the first
+matching `(:tag …)` clause or `(else …)`; with no `else` and no match the error
+**re-throws** to the caller. On success control falls through past the `catch`, so
+the assignment in `(catch (set r …) …)` is visible afterward.
+
+Calling a fallible function **without** a `try`/`catch` silently drops the raised
+error, so the compiler **warns** at the call-site. (GCC/Clang only —
+statement-expressions, `_Thread_local`, `__typeof__`. See `examples/error-handling.sexc`.)
+
 ### Compile-time evaluation: `$defun`, `%eval`, `%evals`
 
 Beyond `%defmacro`, there's a small Lisp that runs *during* expansion —
@@ -920,6 +961,48 @@ dynamic slot *out* …`). `slot*` объявляет зависимость яв
 свежую арену как ambient `*arena*`, `defer*` её разрушение, а callee
 аллоцируют из неё, не принимая её параметром (см.
 `examples/with-alloca.sexc`).
+
+### Обработка ошибок: `throw` / `try` / `catch`
+
+Ошибки идут по боковому каналу — `_Thread_local`-слот с тегом-строкой (`0` =
+ОК) — поэтому значения остаются чистыми, а `defer` продолжает работать: `throw`
+это обычный `return`, а cleanup-раннер сохраняет/восстанавливает летящую ошибку
+вокруг каждого отложенного вызова. Функция объявляет свой sentinel через
+`:on-error`, затем кидает тег; вызывающий либо пробрасывает через `try`, либо
+обрабатывает через `catch`. Fallibility **выводится** из тела — аннотации
+`:throws` нет.
+
+```lisp
+(defn :on-error -1 int digit ((char c))
+  (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))   ; ставим тег, return -1
+  (return (- c ?0)))
+
+(defn :on-error -1 int sum-two ((char a) (char b))
+  (decl (int x) (try (digit a))                        ; при ошибке: return -1 сразу
+        (int y) (try (digit b)))
+  (return (+ x y)))
+
+(defn int run ((char a) (char b))
+  (decl (int r) 0)
+  (catch (set r (sum-two a b))                         ; выполнить; при ошибке — диспатч
+    (:not_a_digit (printf "bad digit\n") (return 1))
+    (else (return 2)))
+  (printf "sum = %d\n" r)                               ; достижимо только при успехе
+  (return 0))
+```
+
+`(throw :tag)` возвращает sentinel функции из `:on-error`; `(throw :tag value)`
+возвращает явное значение (и `:on-error` не требует). `(try expr)` даёт значение
+`expr` либо сразу возвращает sentinel **охватывающей** функции в момент ошибки
+(GCC/Clang statement-expression — работает прямо внутри выражения). `catch`
+выполняет своё выражение, затем при ошибке консумит тег и выполняет первую
+подходящую ветку `(:tag …)` или `(else …)`; без `else` и без совпадения ошибка
+**пробрасывается** дальше. При успехе управление проваливается мимо `catch`,
+поэтому присваивание в `(catch (set r …) …)` видно после него.
+
+Вызов fallible-функции **без** `try`/`catch` молча теряет ошибку — компилятор
+**предупреждает** на месте вызова. (Только GCC/Clang — statement-expressions,
+`_Thread_local`, `__typeof__`. См. `examples/error-handling.sexc`.)
 
 ### Compile-time вычисления: `$defun`, `%eval`, `%evals`
 

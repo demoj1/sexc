@@ -1,0 +1,73 @@
+; Error handling: throw sets the thread_local __sx_err slot and returns; try
+; propagates (statement-expr → goto the function's __sx_throw epilogue); catch
+; runs the guarded expr, then dispatches on the tag (strcmp) with an else fallback.
+; Fallibility is inferred from the body — no explicit :throws.
+(include <stdio.h>)
+
+(defn :on-error -1 int parse-digit ((char c))
+  (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))
+  (return (- c ?0)))
+
+(defn :on-error -1 int sum-two ((char a) (char b))
+  (decl (int x) (try (parse-digit a)))
+  (decl (int y) (try (parse-digit b)))
+  (return (+ x y)))
+
+(defn int run ((char a) (char b))
+  (decl (int r) 0)
+  (catch (set r (sum-two a b))
+    (:not_a_digit (printf "bad input\n") (return 1))
+    (else (return 2)))
+  (printf "sum = %d\n" r)
+  (return 0))
+;==EXPECTED==
+#include <stdio.h>
+
+_Thread_local const char *__sx_err;
+
+#include <string.h>
+
+int parse_u002D_digit(char c)
+{
+  if (c < '0' || c > '9')
+    {
+      {
+        __sx_err = "not_a_digit";
+        return -1;
+      }
+    }
+  return c - '0';
+}
+
+int sum_u002D_two(char a, char b)
+{
+  int x = ({ __sx_err = 0; __typeof__(parse_u002D_digit(a)) __sx_tv = (parse_u002D_digit(a)); if (__sx_err) goto __sx_throw; __sx_tv; });
+  int y = ({ __sx_err = 0; __typeof__(parse_u002D_digit(b)) __sx_tv = (parse_u002D_digit(b)); if (__sx_err) goto __sx_throw; __sx_tv; });
+  return x + y;
+  __sx_throw:
+  return -1;
+}
+
+int run(char a, char b)
+{
+  int r = 0;
+  {
+    __sx_err = 0;
+    r = sum_u002D_two(a, b);
+    if (__sx_err)
+      {
+        const char *__sx_e = __sx_err; __sx_err = 0;
+        if (0 == strcmp(__sx_e, "not_a_digit"))
+          {
+            printf("bad input\n");
+            return 1;
+          }
+        else
+          {
+            return 2;
+          }
+      }
+  }
+  printf("sum = %d\n", r);
+  return 0;
+}

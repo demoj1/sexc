@@ -1,0 +1,58 @@
+; A catch with no else and no matching clause re-throws to the caller. The
+; re-throw (restore tag + goto epilogue) MUST be a braced block: as two bare
+; statements after `else` the goto would run unconditionally (firing even when a
+; clause matched and did not return). The else branch here must read:
+;   else { __sx_err = __sx_e; goto __sx_throw; }
+(include <stdio.h>)
+
+(defn :on-error -1 int deep ((int x))
+  (when (= x 0) (throw :inner))
+  (return x))
+
+(defn :on-error -1 int mid ((int x))
+  (decl (int r) 0)
+  (catch (set r (deep x))
+    (:other (printf "other\n")))
+  (return r))
+;==EXPECTED==
+#include <stdio.h>
+
+_Thread_local const char *__sx_err;
+
+#include <string.h>
+
+int deep(int x)
+{
+  if (x == 0)
+    {
+      {
+        __sx_err = "inner";
+        return -1;
+      }
+    }
+  return x;
+}
+
+int mid(int x)
+{
+  int r = 0;
+  {
+    __sx_err = 0;
+    r = deep(x);
+    if (__sx_err)
+      {
+        const char *__sx_e = __sx_err; __sx_err = 0;
+        if (0 == strcmp(__sx_e, "other"))
+          {
+            printf("other\n");
+          }
+        else
+          {
+            __sx_err = __sx_e; goto __sx_throw;
+          }
+      }
+  }
+  return r;
+  __sx_throw:
+  return -1;
+}

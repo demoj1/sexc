@@ -1,0 +1,12 @@
+; throw/try/catch are only meaningful inside a defn body (they are rewritten
+; there). Used at top level (or anywhere a defn body-walk never sees them) the
+; placeholder macro fires a clear error.
+(throw :boom)
+;==EXPECTED-ERROR==
+<stdin>:4:1: error[macro]: throw is only valid inside a defn body
+(throw :boom)
+^
+
+Signature: (throw :tag [value])
+Doc: Raise an error: set the thread_local error slot to :tag (a string) and return. With no VALUE the enclosing function's :on-error sentinel is returned (required for a non-void function); a void function returns nothing. Only valid inside a defn body (rewritten there); a callee's error propagates to a caller only through (try ...) or (catch ...).
+Example: (defn (:* Data) :on-error nil load ((:* char p)) (when (nil? p) (throw :bad_path)) ...)

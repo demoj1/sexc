@@ -85,6 +85,7 @@ merge into the output via `2>&1'."
     "++1" "1++" "--1" "1--" "incf-by" "decf-by"
     "dotimes" "for-range" "repeat" "loop" "recur" "break-loop"
     "when!" "if!" "cond!" "with" "slot*" "defslot" "defer1" "defer*"
+    "throw" "try" "catch"
     "doto"
     "|>" "||>" "|as>")
   "Surface DSL keywords/macros (no %/$ prefix)."
@@ -138,6 +139,7 @@ merge into the output via `2>&1'."
     ("for-range" . (4 4 4 &body))
     ("loop" . (4 &body))
     ("with" . (4 4 &body))
+    ("catch" . (4 &body))
     ("doto" . (4 &body))
     ("%defmacro" . (4 4 &body))
     ("%eval" . (&body))
@@ -167,6 +169,9 @@ merge into the output via `2>&1'."
     ("%send" . "(%send OBJ METHOD ARG...) -> dispatch METHOD on OBJ by its compile-time type: Type/method(OBJ, ARG...). Usually via obj::method sugar")
     ("defer1" . "(defer1 FN ARG) | (defer1 obj::method) -> call FN(ARG) at block exit, LIFO (cleanup attr)")
     ("defer*" . "(defer* (FN ARG)...) -> batch of defer1; each clause runs at block exit, LIFO")
+    ("throw" . "(throw :tag [value]) -> set the thread_local error slot and return. No value -> the fn's :on-error sentinel (void fn returns nothing). Only inside a defn; declare (defn :on-error SENTINEL ...)")
+    ("try" . "(try EXPR) -> yield EXPR's value, or return the enclosing fn's :on-error sentinel the moment an error is raised. EXPR must be non-void. GCC/Clang stmt-expr")
+    ("catch" . "(catch EXPR (:tag BODY...)... (else BODY...)) -> run EXPR; on error consume the tag and run the matching clause (no else+no match -> re-throw). Success falls through past the catch")
     ("sizeof" . "(sizeof X) -> sizeof(X); auto-picks type vs expr (use sizeof-type/sizeof-expr to force)")
     ("nil" . "nil -> ((void*)0), the null pointer (alias of %null)")
     ("if-nil" . "(if-nil VALUE THEN [ELSE]) -> like `if`, tests whether VALUE is nil")

@@ -1,0 +1,59 @@
+; Error handling: throw / try / catch.
+;
+; A function marked :on-error <sentinel> may (throw :tag) — this sets a
+; thread_local error slot and returns the sentinel. A caller propagates an error
+; with (try expr) — on error it returns ITS OWN sentinel immediately — or handles
+; it with (catch expr (:tag ...) (else ...)). Fallibility is INFERRED from the
+; body, and defer/with keep working across a throw (the slot survives cleanup).
+;
+; This sketch parses a tiny "A op B" expression and evaluates it, throwing on a
+; non-digit or a division by zero, then handles the error at the top level.
+
+(include <stdio.h>)
+(include <stdlib.h>)
+(include <string.h>)
+
+; char digit → int, or throw. -1 is the error sentinel (never a valid digit).
+(defn :on-error -1 int digit ((char c))
+  (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))
+  (return (- c ?0)))
+
+; apply an operator, throwing on division by zero. INT_MIN-ish sentinel.
+(defn :on-error -999 int apply-op ((char op) (int a) (int b))
+  (cond
+    ((= op ?+) (return (+ a b)))
+    ((= op ?-) (return (- a b)))
+    ((= op ?*) (return (* a b)))
+    ((= op ?/) (do
+                 (when (= b 0) (throw :div_by_zero))
+                 (return (/ a b))))
+    (else (throw :bad_operator))))
+
+; Parse "A op B" (exactly 3 chars). Propagates any inner error via (try ...).
+(defn :on-error -999 int eval-expr (((:* :const char) s))
+  (when (not= (strlen s) 3) (throw :bad_format))
+  (decl (int a) (try (digit (aref s 0)))
+        (int b) (try (digit (aref s 2))))
+  (return (try (apply-op (aref s 1) a b))))
+
+; Evaluate one expression and report — handling every error tag here. On success
+; control falls through past the catch (the assignment to r is visible); each
+; error branch reports and returns early.
+(defn int run-one (((:* :const char) s))
+  (decl (int r) 0)
+  (catch (set r (eval-expr s))
+    (:not_a_digit  (printf "%s -> error: not a digit\n" s) (return 1))
+    (:div_by_zero  (printf "%s -> error: division by zero\n" s) (return 1))
+    (:bad_operator (printf "%s -> error: bad operator\n" s) (return 1))
+    (:bad_format   (printf "%s -> error: expected 'A op B'\n" s) (return 1))
+    (else          (printf "%s -> error: unknown\n" s) (return 1)))
+  (printf "%s = %d\n" s r)
+  (return 0))
+
+(defn int main ()
+  (run-one "7+5")
+  (run-one "9/3")
+  (run-one "8/0")
+  (run-one "4x2")
+  (run-one "1?9")
+  (return 0))

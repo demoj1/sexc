@@ -21,3 +21,4 @@ examples/method-calls.sexc
 examples/game-of-life/main.sexc
 examples/loop-recur.sexc
 examples/sequences.sexc
+examples/error-handling.sexc

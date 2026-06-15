@@ -11,6 +11,8 @@
 ;==EXPECTED==
 #include <stdlib.h>
 
+_Thread_local const char *__sx_err;
+
 #ifndef SX_DEFER_GUARD_
 
 #define SX_DEFER_GUARD_
@@ -22,7 +24,7 @@ typedef struct __sx_defer_guard {
 
 static inline void __sx_defer_run(const __sx_defer_guard *g)
 {
-  g->fn(g->arg);;
+  const char *__saved = __sx_err; g->fn(g->arg); __sx_err = __saved;;
 }
 
 #endif

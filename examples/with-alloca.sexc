@@ -1,10 +1,16 @@
-; with-alloca.sexc — a temporary bump allocator passed implicitly via `with`.
+; with-alloca.sexc — a temporary bump allocator passed implicitly via `with`,
+; with error handling on exhaustion.
 ;
-; main spins up a fresh arena, binds it as the ambient *arena*, then calls work()
-; — which allocates from it WITHOUT taking the allocator as a parameter — and
-; tears the arena down afterwards, all inside the `with`. Outside the block
+; demo() spins up a fresh arena, binds it as the ambient *arena*, then calls
+; work() — which allocates from it WITHOUT taking the allocator as a parameter —
+; and tears the arena down afterwards, all inside the `with`. Outside the block
 ; *arena* reverts to its previous value, so the temporary allocator is scoped to
 ; exactly this region.
+;
+; A bump allocator can run out of room: arena-alloc THROWS :arena_exhausted
+; instead of handing back a pointer past the end of the buffer. work() lets that
+; error propagate with (try ...); demo() handles it with (catch ...). Note the
+; thrown error survives the `with` teardown and the arena-free deferred cleanup.
 
 (include <stdio.h>)
 (include <stdlib.h>)
@@ -19,22 +25,25 @@
   (decl (Arena a) (Arena# :base (malloc cap) :cap cap :used 0))
   (return a))
 
-; bump-allocate N bytes from the arena, returning a raw pointer
-(defn (:* void) arena-alloc ((:* Arena a) (int n))
+; bump-allocate N bytes from the arena, returning a raw pointer — or throw
+; :arena_exhausted if the request would overrun the buffer. nil is the sentinel.
+(defn :on-error nil (:* void) arena-alloc ((:* Arena a) (int n))
+  (when (> (+ (-> a used) n) (-> a cap))
+    (throw :arena_exhausted))
   (decl (:* char p) (+ (-> a base) (-> a used)))
   (set (-> a used) (+ (-> a used) n))
-
   (return p))
 
 (defn void arena-free ((:* Arena a))
   (free (-> a base)))
 
 ; work() allocates from the AMBIENT *arena* — no allocator argument anywhere.
+; (try ...) propagates an exhausted-arena error to the caller (void → returns).
 (defn void work ()
   (slot* (:* Arena) *arena*)                          ; requires the ambient arena — a caller must `with` it
   (decl
     (:* int xs)
-    (arena-alloc *arena* (* 4 (sizeof int))))
+    (try (arena-alloc *arena* (* 4 (sizeof int)))))
 
   (dotimes i 4
     (set (aref xs i) (* i i)))
@@ -46,11 +55,16 @@
           (aref xs 3)
           (-> *arena* used)))
 
-(defn int main ()
-  (decl (Arena a) (arena-make 1024))
-
+; run work() against a fresh arena of CAP bytes, handling exhaustion.
+(defn void demo ((int cap))
+  (decl (Arena a) (arena-make cap))
   (with (:* Arena *arena*) (%addr a)       ; explicit type: the value is a local
-    (work)                                 ; allocates inside *arena*
-    (arena-free *arena*))                  ; tear it down after the call, still in scope
+    (defer1 arena-free *arena*)            ; tear it down on any exit — even a throw
+    (catch (work)                          ; allocate inside *arena*
+      (:arena_exhausted (printf "demo(cap=%d): arena exhausted\n" cap))
+      (else (printf "demo(cap=%d): unexpected error\n" cap)))))
 
+(defn int main ()
+  (demo 1024)                              ; plenty of room → work succeeds
+  (demo 8)                                 ; too small for 16 bytes → caught
   (return 0))

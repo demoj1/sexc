@@ -1,0 +1,5 @@
+7+5 = 12
+9/3 = 3
+8/0 -> error: division by zero
+4x2 -> error: bad operator
+1?9 -> error: bad operator

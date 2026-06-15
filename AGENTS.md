@@ -285,6 +285,29 @@ Example: (incf-by total 4)
   один раз через `%top-level-splice` (`$sx-with-runtime`/`$sx-defer-runtime`, флаг
   в метадате + `#ifndef`-гард). `defer1`/`defer*` НЕ создают scope (сплайс через
   `%evals` в текущий блок), иначе cleanup сработал бы сразу.
+- `throw`/`try`/`catch` — обработка ошибок через `_Thread_local`-слот
+  `__sx_err` (тег-строка, `0` = ОК), объявляемый в голову файла
+  (`$sx-err-slot`/`$sx-err-runtime`, `<string.h>` для `catch`). НЕ standalone-
+  макросы: переписываются **обходом тела `defn`** (`$err-walk`, как
+  `$loop-rewrite`), потому что только `defn` знает `:on-error`-sentinel и тип
+  возврата. Surface-макросы `throw`/`try`/`catch` сами по себе только бросают
+  `$error` «вне defn». `(throw :tag [value])` → `__sx_err = "tag"; return
+  <value | :on-error | (void для void-функции)>`. `(try EXPR)` → GCC
+  statement-expr, очищает слот, зовёт EXPR один раз (`__typeof__` не вычисляет),
+  при ошибке `goto __sx_throw` (общий эпилог функции `__sx_throw: return
+  <:on-error>`, эмитится если есть try / else-less catch). `(catch EXPR
+  (:tag body...)... (else body...))` → очистить, выполнить EXPR, при `__sx_err`
+  консумить тег и `strcmp`-ладдер по тегам; без `else` и без матча — re-throw
+  (`__sx_err = __sx_e; goto __sx_throw`). `:on-error <sentinel>` — ведущий флаг
+  `defn` (как `:static`/`:inline`, но со значением; `$defn-split`/`$defn-on-error`).
+  Fallibility ВЫВОДИТСЯ: `($m-put name :fallible t)` если в теле есть `throw`
+  или `try`/else-less-`catch` (НЕ обрабатывающий catch-with-else). Тело
+  обходится `$map`'ом ТОЛЬКО когда fallible (иначе пересборка дерева теряет
+  спаны под-форм → размывает диагностику). Линт `$err-lint-form` (read-only,
+  на каждом `defn`) warn'ит голый вызов `:fallible`-функции вне try/catch.
+  `defer` save/restore: `__sx_defer_run` сохраняет/восстанавливает `__sx_err`
+  вокруг cleanup'а (слот объявляется и при использовании только defer). errno —
+  TODO (см. backlog). GCC/Clang only. Пример `examples/error-handling.sexc`.
 - `adecl` в стиле `let*` для malloc-аллоцируемых указателей:
   - Формат: `(adecl (type name) size (type2 name2) size2 ...)`.
   - Пример: `(adecl (char name) 25 (int foo) 15)`.

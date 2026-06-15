@@ -35,7 +35,11 @@
     (set (aref (-> self data) (-> self len)) x)
     (1++ (-> self len)))
 
+  ; pop throws :stack_empty on underflow instead of reading out of bounds. The
+  ; sentinel 0 is explicit, so no :on-error is needed (and method defns take no
+  ; leading flags anyway).
   (defn int pop ((:* Stack self))
+    (when (zero? (-> self len)) (throw :stack_empty 0))
     (1-- (-> self len))
     (return (aref (-> self data) (-> self len))))
 
@@ -46,7 +50,10 @@
     (free (-> self data))
     (free self)))
 
-(defn int main ()
+; :on-error 1 — any error tag the catch below doesn't handle propagates out of
+; main as exit code 1 (conventional failure). :stack_empty is handled, so the
+; normal path still returns 0.
+(defn :on-error 1 int main ()
   (decl (:* Stack s) (Stack/make 2))
   (defer1 s::free)                        ; deferred cleanup via obj::method
 
@@ -55,7 +62,12 @@
 
   (printf "len=%d\n" s::len)              ; getter as an argument
 
-  (while (gtz? s::len)                    ; getter in a condition
-    (printf "pop=%d\n" s::pop))
+  ; drain the stack: pop until it throws :stack_empty, then break out — error as
+  ; control flow. Each pop is inside the catch, so nothing escapes unchecked.
+  (while 1
+    (decl (int v) 0)
+    (catch (set v s::pop)
+      (:stack_empty (break)))             ; empty → leave the loop
+    (printf "pop=%d\n" v))
 
   (return 0))

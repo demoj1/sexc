@@ -44,19 +44,37 @@
 ; bare C99 inline needs an external definition or it fails to link at -O0).
 
 ; collect leading :static/:inline flags → returns (flags-list . rest-args).
+; :on-error carries a VALUE (the error sentinel) — it is captured as the pair
+; (:on-error VALUE) inside the flag list and read back by $defn-on-error.
 ($defun $defn-flag? (a)
   ($if ($eq? a ':static) t ($if ($eq? a ':inline) t nil)))
 
 ($defun $defn-split (args acc)
   ($if ($null? args)
     ($cons ($reverse acc) args)
-    ($if ($defn-flag? ($car args))
-      ($defn-split ($cdr args) ($cons ($car args) acc))
-      ($cons ($reverse acc) args))))
+    ($cond
+      (($eq? ($car args) ':on-error)
+        ($do
+          ($assert ($not ($null? ($cdr args))) "defn: :on-error needs a sentinel value")
+          ($defn-split ($cdr ($cdr args))
+                       ($cons ($list ':on-error ($car ($cdr args))) acc))))
+      (($defn-flag? ($car args))
+        ($defn-split ($cdr args) ($cons ($car args) acc)))
+      (else ($cons ($reverse acc) args)))))
 
+; flag membership — guarded so the (:on-error VALUE) pair never reaches $eq?.
 ($defun $defn-has? (flags kw)
   ($if ($null? flags) nil
-    ($if ($eq? ($car flags) kw) t ($defn-has? ($cdr flags) kw))))
+    ($if ($if ($atom? ($car flags)) ($eq? ($car flags) kw) nil) t
+      ($defn-has? ($cdr flags) kw))))
+
+; read the :on-error sentinel from collected flags; '$$no-on-error if absent
+; (nil is a legitimate sentinel value, so a distinct marker is required).
+($defun $defn-on-error (flags)
+  ($if ($null? flags) '$$no-on-error
+    ($if ($if ($atom? ($car flags)) nil ($eq? ($car ($car flags)) ':on-error))
+      ($car ($cdr ($car flags)))
+      ($defn-on-error ($cdr flags)))))
 
 ; wrap %def-fn form per collected flags. :inline innermost, :static outermost
 ; → emits `static inline ...` (canonical order).
@@ -126,10 +144,27 @@
          ; для МЕТАДАТЫ (эмит ниже идёт с bare-типами, их квалифицирует %-IR проход).
          (qret    ($qualify-type ret))
          (qparams ($map ($if ($atom? it) it ($cons ($qualify-type ($car it)) ($cdr it))) params))
-         (body   ($cdr ($cdr ($cdr rest)))))
+         (body   ($cdr ($cdr ($cdr rest))))
+         ; ─ error handling: rewrite throw/try/catch by walking the body ─
+         (on-err ($defn-on-error flags))         ; :on-error sentinel or '$$no-on-error
+         (void?  ($eq? ret 'void))
+         (nerr   ($reduce ($+ acc ($err-count it)) 0 body))   ; any throw/try/catch?
+         ; Walk only fallible bodies — rebuilding the form tree would drop sub-form
+         ; spans and blur diagnostics in the 99% of functions with no error handling.
+         (walked ($if ($nonzero? nerr) ($map ($err-walk it on-err void?) body) body))
+         (nrt    ($if ($nonzero? nerr) ($reduce ($+ acc ($err-rethrow-count it)) 0 body) 0))
+         ; :fallible = may return with the slot set = has a throw, OR a try /
+         ; else-less catch (which re-propagate). A catch WITH else absorbs and is
+         ; NOT a fallibility source on its own.
+         (nthrow ($if ($nonzero? nerr) ($reduce ($+ acc ($err-throw-count it)) 0 body) 0)))
     ($do
       ($validate-defn name ret params body)
+      ; warn on bare calls to fallible functions (error silently dropped)
+      ($dolist (f body) ($err-lint-form f nil))
       ($m-put name :kind 'fn :return-type qret :params qparams)
+      ; A function that throws/propagates is :fallible — read at call sites by the
+      ; bare-fallible-call lint (and by callers wiring up their own try/catch).
+      ($if ($nonzero? ($+ nthrow nrt)) ($m-put name :fallible t) nil)
       ; Записываем тип каждого параметра в мету (:kind 'var :c-type) — чтобы вывод
       ; типа (напр. (print-as self)) работал внутри тела по сигнатуре. Группа
       ; параметров — (type name...); глобально по имени (последний выигрывает, но
@@ -140,7 +175,18 @@
             ($m-put n :kind 'var :c-type ($car g)))))
       ($let ((ns ($namespace-of name)))
         ($if ($null? ns) nil ($m-append ns :fns name)))
-      ($defn-wrap flags `(%def-fn ,ret ,name ,params (%block ,@body))))))
+      ; runtime: thread_local error slot at file head (once); epilogue: the shared
+      ; __sx_throw: return <on-error> that try / else-less-catch jump to.
+      ($let ((runtime  ($if ($nonzero? nerr) ($sx-err-runtime) ($list)))
+             (epilogue ($if ($nonzero? nrt)
+                         ($if void?
+                           ($list '(%label __sx_throw) '(%return))   ; void: no sentinel needed
+                           ($do
+                             ($assert ($not ($eq? on-err '$$no-on-error))
+                               "this function propagates an error (try / catch without else) but has no :on-error sentinel — add :on-error to defn")
+                             ($list '(%label __sx_throw) `(return ,on-err))))
+                         ($list))))
+        ($defn-wrap flags `(%def-fn ,ret ,name ,params (%block ,@runtime ,@walked ,@epilogue)))))))
 
 ; decl
 ; (decl (type name) init ...)
@@ -1127,17 +1173,22 @@
     ($list)
     ($do
       ($m-put 'sx-cleanup :defer 't)
-      ($list
-        `(%top-level-splice
-           (%cpp "ifndef SX_DEFER_GUARD_")
-           (%cpp "define SX_DEFER_GUARD_")
-           (%typedef
-             (%struct __sx_defer_guard
-               ((%ptr (%fn void ((%ptr void)))) fn) ((%ptr void) arg))
-             __sx_defer_guard)
-           (%static (%inline (%def-fn void __sx_defer_run (((%ptr (%const __sx_defer_guard)) g))
-             (%block (%raw "g->fn(g->arg);")))))
-           (%cpp "endif"))))))
+      ; The cleanup runner saves/restores __sx_err around the deferred call so an
+      ; in-flight thrown error survives cleanup (and a fallible cleanup's own error
+      ; is swallowed — the correct semantics). Needs the slot declared.
+      ($append
+        ($sx-err-slot)
+        ($list
+          `(%top-level-splice
+             (%cpp "ifndef SX_DEFER_GUARD_")
+             (%cpp "define SX_DEFER_GUARD_")
+             (%typedef
+               (%struct __sx_defer_guard
+                 ((%ptr (%fn void ((%ptr void)))) fn) ((%ptr void) arg))
+               __sx_defer_guard)
+             (%static (%inline (%def-fn void __sx_defer_run (((%ptr (%const __sx_defer_guard)) g))
+               (%block (%raw "const char *__saved = __sx_err; g->fn(g->arg); __sx_err = __saved;")))))
+             (%cpp "endif")))))))
 
 (%doc with
   :sig (with binding value body...)
@@ -1311,3 +1362,189 @@
               ($sx-defer-decl ($car it) ($|> it $cdr $car)))
             clauses)))
     `(%evals (quote ,($append ($sx-defer-runtime) decls)))))
+
+; ─── Error handling: throw / try / catch ─────────────────────────────────────
+;
+; A thread_local slot `__sx_err` carries the error tag (a string, 0 = OK) on a
+; side channel, so values stay clean and `defer` keeps working (a throw is just a
+; plain `return`). throw/try/catch are NOT standalone macros: only `defn` knows
+; the function's :on-error sentinel and return type, so it rewrites them in one
+; pass over its body ($err-walk), exactly like loop/recur. GCC/Clang only
+; (statement-expressions, _Thread_local, __typeof__). See the macros below for
+; the surface forms; the heavy lifting is here.
+
+; Emit the thread_local error slot at file head, once per compilation. Shared by
+; the error runtime AND defer (its cleanup runner saves/restores __sx_err, so the
+; slot must exist whenever defer is used, even without throw/try/catch).
+($defun $sx-err-slot ()
+  ($if ($m-get 'sx-cleanup :err-slot)
+    ($list)
+    ($do
+      ($m-put 'sx-cleanup :err-slot 't)
+      ($list `(%file-head-splice (%decl (:thread_local (%ptr (%const char))) __sx_err))))))
+
+; Full error runtime: the slot + <string.h> for catch's strcmp tag matching.
+($defun $sx-err-runtime ()
+  ($append ($sx-err-slot)
+    ($if ($m-get 'sx-cleanup :err-str)
+      ($list)
+      ($do
+        ($m-put 'sx-cleanup :err-str 't)
+        ($list `(%top-level-splice (%cpp "include <string.h>")))))))
+
+; (throw :tag) / (throw :tag VALUE) → set the slot and return. Without VALUE the
+; function's :on-error sentinel is used (required for non-void); a void function
+; returns nothing.
+($defun $err-build-throw (args on-err void?)
+  ($do
+    ($assert ($not ($null? args)) "throw: needs a :tag, e.g. (throw :open_file)")
+    ($let ((tag ($car args)))
+      ($do
+        ($assert ($keyword? tag) "throw: tag must be a :keyword, e.g. (throw :open_file)")
+        ($let ((tagstr  ($str ($keyword-name tag)))
+               (has-val ($not ($null? ($cdr args)))))
+          ($if void?
+            `(%block (%set __sx_err ,tagstr) (%return))
+            ($let ((val ($if has-val ($car ($cdr args))
+                          ($if ($eq? on-err '$$no-on-error)
+                            ($error "throw without a value needs the function's :on-error sentinel, or write (throw :tag VALUE)")
+                            on-err))))
+              `(%block (%set __sx_err ,tagstr) (return ,val)))))))))
+
+; (try EXPR) → a GCC statement-expression that clears the slot, runs EXPR once,
+; and on error jumps to the function's __sx_throw epilogue; otherwise yields the
+; value. __typeof__ does not evaluate EXPR, so the duplicated EXPR runs only once.
+($defun $err-build-try (args)
+  ($do
+    ($assert ($eq? ($length args) 1) "try: expects one expression — (try EXPR)")
+    ($let ((e ($car args)))
+      `(%raw "({ __sx_err = 0; __typeof__(" ,e ") __sx_tv = (" ,e
+             "); if (__sx_err) goto __sx_throw; __sx_tv; })"))))
+
+; clause ladder for catch: (:tag body...) → if-strcmp branch; (else body...) →
+; final block; no else and no match → re-throw (restore tag, goto epilogue).
+($defun $catch-ladder (clauses on-err void?)
+  ($if ($null? clauses)
+    '(%block (%raw "__sx_err = __sx_e; goto __sx_throw"))
+    ($let ((c    ($car clauses))
+           (rest ($cdr clauses)))
+      ($if ($eq? ($car c) 'else)
+        `(%block ,@($map ($err-walk it on-err void?) ($cdr c)))
+        ($do
+          ($assert ($keyword? ($car c)) "catch: each clause is (:tag body...) or (else body...)")
+          ($let ((tagstr ($str ($keyword-name ($car c)))))
+            `(%if (= 0 (strcmp __sx_e ,tagstr))
+               (%block ,@($map ($err-walk it on-err void?) ($cdr c)))
+               ,($catch-ladder rest on-err void?))))))))
+
+; (catch EXPR (:tag body...)... (else body...)?) → run EXPR; on error consume the
+; tag and dispatch. Success falls through (any side effect of EXPR is visible).
+($defun $err-build-catch (parts on-err void?)
+  ($do
+    ($assert ($not ($null? parts)) "catch: expects (catch EXPR clause...)")
+    ($let ((e       ($car parts))
+           (clauses ($cdr parts)))
+      `(%block
+         (%raw "__sx_err = 0")
+         ,($err-walk e on-err void?)
+         (%if __sx_err
+           (%block
+             (%raw "const char *__sx_e = __sx_err; __sx_err = 0")
+             ,($catch-ladder clauses on-err void?)))))))
+
+; Walk a defn body form, rewriting throw/try/catch. Atoms/strings pass through;
+; does NOT descend into a nested defn (it rewrites its own body).
+($defun $err-walk (form on-err void?)
+  ($if ($atom? form) form
+    ($if ($null? form) form
+      ($cond
+        (($eq? ($car form) 'throw) ($err-build-throw ($cdr form) on-err void?))
+        (($eq? ($car form) 'try)   ($err-build-try ($cdr form)))
+        (($eq? ($car form) 'catch) ($err-build-catch ($cdr form) on-err void?))
+        (($eq? ($car form) 'defn)  form)
+        (else ($map ($err-walk it on-err void?) form))))))
+
+; count throw/try/catch occurrences (>0 → function is :fallible). Counts the head
+; then descends (a catch branch may itself throw); stops at a nested defn.
+($defun $err-count (form)
+  ($if ($atom? form) 0
+    ($if ($null? form) 0
+      ($let ((self ($if ($if ($eq? ($car form) 'throw) t
+                          ($if ($eq? ($car form) 'try) t ($eq? ($car form) 'catch))) 1 0)))
+        ($if ($eq? ($car form) 'defn) self
+          ($+ self ($reduce ($+ acc ($err-count it)) 0 form)))))))
+
+; count throw occurrences (a throw is an immediate return — never caught by an
+; enclosing catch in the same function — so any throw can leave the slot set).
+($defun $err-throw-count (form)
+  ($if ($atom? form) 0
+    ($if ($null? form) 0
+      ($let ((self ($if ($eq? ($car form) 'throw) 1 0)))
+        ($if ($eq? ($car form) 'defn) self
+          ($+ self ($reduce ($+ acc ($err-throw-count it)) 0 form)))))))
+
+; does a catch have an (else ...) clause? (else suppresses re-throw)
+($defun $catch-has-else? (clauses)
+  ($if ($null? clauses) nil
+    ($if ($if ($atom? ($car clauses)) nil ($eq? ($car ($car clauses)) 'else)) t
+      ($catch-has-else? ($cdr clauses)))))
+
+; count sites that jump to the __sx_throw epilogue: every try, and every catch
+; without an else (which re-throws). >0 → defn must emit the epilogue + :on-error.
+($defun $err-rethrow-count (form)
+  ($if ($atom? form) 0
+    ($if ($null? form) 0
+      ($let ((self ($cond
+                     (($eq? ($car form) 'try) 1)
+                     (($eq? ($car form) 'catch)
+                       ($if ($catch-has-else? ($cdr ($cdr form))) 0 1))
+                     (else 0))))
+        ($if ($eq? ($car form) 'defn) self
+          ($+ self ($reduce ($+ acc ($err-rethrow-count it)) 0 form)))))))
+
+; Lint: a call to a known :fallible function that is NOT the guarded expr of a
+; try/catch silently drops the raised error (the value is whatever the function
+; returned on the error path). Read-only walk (no tree rebuild → spans intact);
+; warns at the defn call-site. Conservative: only fires for callees already known
+; :fallible at this point (a forward-declared fallible callee is not yet flagged).
+($defun $err-lint-form (form checked?)
+  ($if ($atom? form) nil
+    ($if ($null? form) nil
+      ($let ((h ($car form)))
+        ($cond
+          (($eq? h 'try) ($dolist (x ($cdr form)) ($err-lint-form x 't)))
+          (($eq? h 'catch)
+            ($do
+              ($err-lint-form ($car ($cdr form)) 't)            ; guarded expr is checked
+              ($dolist (cl ($cdr ($cdr form)))                  ; clause bodies are not
+                ($if ($atom? cl) nil ($dolist (b ($cdr cl)) ($err-lint-form b nil))))))
+          (($eq? h 'defn) nil)                                  ; nested defn lints itself
+          (else
+            ($do
+              ($if ($if checked? nil ($if ($atom? h) ($m-get h :fallible) nil))
+                ($warn ($str "call to fallible function ‘" h "’ outside try/catch — its raised error is ignored (wrap it in try or catch)"))
+                nil)
+              ; propagate checked? downward: every call inside a try/catch guarded
+              ; expression is covered by that handler (e.g. (catch (set r (f x)) …)).
+              ($dolist (x ($cdr form)) ($err-lint-form x checked?)))))))))
+
+(%doc throw
+  :sig (throw :tag [value])
+  :doc "Raise an error: set the thread_local error slot to :tag (a string) and return. With no VALUE the enclosing function's :on-error sentinel is returned (required for a non-void function); a void function returns nothing. Only valid inside a defn body (rewritten there); a callee's error propagates to a caller only through (try ...) or (catch ...)."
+  :example "(defn (:* Data) :on-error nil load ((:* char p)) (when (nil? p) (throw :bad_path)) ...)")
+(%defmacro throw (&rest _)
+  ($error "throw is only valid inside a defn body"))
+
+(%doc try
+  :sig (try expr)
+  :doc "Evaluate EXPR (a call to a fallible function); if it raises an error, propagate it to the caller immediately (return the enclosing function's :on-error sentinel), otherwise yield EXPR's value. The enclosing defn must declare :on-error. EXPR must be non-void. Only valid inside a defn body. GCC/Clang only (statement-expression)."
+  :example "(defn int :on-error -1 run ((:* char p)) (decl (:* Data) d (try (load p))) (use d) (return 0))")
+(%defmacro try (&rest _)
+  ($error "try is only valid inside a defn body"))
+
+(%doc catch
+  :sig (catch expr (:tag body...)... (else body...))
+  :doc "Run EXPR; if it raises an error, consume the tag and run the first matching (:tag body...) clause (or (else body...)). With no else and no match the error re-throws to the caller. On success control falls through past the catch (EXPR's side effects, e.g. an assignment, are visible). Clause bodies typically do control-flow (return/break) or set a variable. Only valid inside a defn body. GCC/Clang only."
+  :example "(catch (set d (load p)) (:bad_path (return -1)) (else (perror \"load\") (return -2)))")
+(%defmacro catch (&rest _)
+  ($error "catch is only valid inside a defn body"))

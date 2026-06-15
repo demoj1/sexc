@@ -1,0 +1,14 @@
+; Calling a :fallible function (one that throws) without wrapping it in try or
+; catch silently drops the raised error — the caller keeps the function's error
+; sentinel as if it were a real value. The compiler WARNS at the call-site defn.
+(defn :on-error -1 int risky ((int x))
+  (when (< x 0) (throw :neg))
+  (return x))
+
+(defn int caller ((int x))
+  (decl (int y) (risky x))
+  (return y))
+;==EXPECTED-WARNING==
+<stdin>:8:1: warning[macro]: call to fallible function ‘risky’ outside try/catch — its raised error is ignored (wrap it in try or catch)
+(defn int caller ((int x))
+^

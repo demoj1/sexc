@@ -572,6 +572,17 @@ let rec is_fn_def_form = function
       is_fn_def_form inner
   | _ -> false
 
+(* A struct/union/enum/defsum carrying a :methods section expands to function
+   definitions. Type-independent file-head decls (the __sx_err error slot) must be
+   injected before such a form too — not only before a bare defn — else a fallible
+   METHOD would use the slot ahead of its declaration. (with/slot decls, which may
+   be typed as that very struct, still go before the first plain defn — after the
+   typedef — so they are never affected.) *)
+let is_methods_aggregate = function
+  | Raw.List ((Raw.Atom (("struct" | "union" | "enum" | "defsum"), _) :: rest), _) ->
+      List.exists rest ~f:(function Raw.Atom (":methods", _) -> true | _ -> false)
+  | _ -> false
+
 (* Name of a (%decl TYPE NAME [INIT]) head-splice declaration, for deduping a
    dynamic variable declared at several `with` sites. *)
 let decl_var_name = function
@@ -717,21 +728,35 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
   (* Render file-head declarations (deduped) and splice them in just before the
      first function definition — after includes/type defs, before any reader. *)
   let chunks =
-    match dedup_file_head !file_head with
-    | [] -> chunks
-    | decls ->
-        let head =
-          List.map decls ~f:Frontend.parse_top
-          |> List.map ~f:Codegen_c.emit_top
-          |> String.concat ~sep:"\n\n"
-        in
-        let idx =
-          List.findi non_macro_tops ~f:(fun _ t -> is_fn_def_form t.form)
-          |> Option.map ~f:fst
-        in
-        (match idx with
-         | Some i -> List.concat [ List.take chunks i; [ head ]; List.drop chunks i ]
-         | None -> chunks @ [ head ])
+    let render decls =
+      List.map decls ~f:Frontend.parse_top
+      |> List.map ~f:Codegen_c.emit_top
+      |> String.concat ~sep:"\n\n"
+    in
+    (* Inject [decls] (rendered as one chunk) right before the first top-form
+       satisfying [site]; append at the end if none qualifies. *)
+    let inject decls site chunks =
+      match decls with
+      | [] -> chunks
+      | _ ->
+          let head = render decls in
+          (match
+             List.findi non_macro_tops ~f:(fun _ t -> site t.form) |> Option.map ~f:fst
+           with
+           | Some i -> List.concat [ List.take chunks i; [ head ]; List.drop chunks i ]
+           | None -> chunks @ [ head ])
+    in
+    (* The __sx_err error slot is type-independent and must precede fallible
+       methods too, so it goes before the first defn OR methods-bearing aggregate.
+       Every other file-head decl (with/slot dynamic vars) keeps its place before
+       the first plain defn. Insert the later index first to keep the earlier one
+       valid (err's site set ⊇ the plain-defn set, so err's index ≤ the rest's). *)
+    let err_decls, other_decls =
+      List.partition_tf (dedup_file_head !file_head) ~f:(fun f ->
+          match decl_var_name f with Some "__sx_err" -> true | _ -> false)
+    in
+    let chunks = inject other_decls is_fn_def_form chunks in
+    inject err_decls (fun f -> is_fn_def_form f || is_methods_aggregate f) chunks
   in
   let c = String.concat ~sep:"\n\n" (List.filter chunks ~f:(fun s -> not (String.is_empty s))) in
   logf "compile per-form (%d tops) — %s" (List.length non_macro_tops) (since t);
