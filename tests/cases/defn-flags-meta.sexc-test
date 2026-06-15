@@ -1,0 +1,39 @@
+; defn records its modifier flags under the :flags metadata key, so tooling and
+; macros can introspect them: bare :static/:inline and the (:on-error V) pair.
+(defn int sq ((int x)) :inline :static
+  (return (* x x)))
+
+(defn :on-error -1 int half ((int x))
+  (return (/ x 2)))
+
+(%m-dump)
+;==EXPECTED==
+static inline int sq(int x)
+{
+  return x * x;
+}
+
+int half(int x)
+{
+  return x / 2;
+}
+
+/*
+ * SexC Symbol Metadata Dump
+ *
+ *   half:
+ *     :flags = ((:on-error -1))
+ *     :kind = fn
+ *     :params = ((int x))
+ *     :return-type = int
+ *
+ *   sq:
+ *     :flags = (:inline :static)
+ *     :kind = fn
+ *     :params = ((int x))
+ *     :return-type = int
+ *
+ *   x:
+ *     :c-type = int
+ *     :kind = var
+ */

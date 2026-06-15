@@ -298,8 +298,12 @@ Example: (incf-by total 4)
   <:on-error>`, эмитится если есть try / else-less catch). `(catch EXPR
   (:tag body...)... (else body...))` → очистить, выполнить EXPR, при `__sx_err`
   консумить тег и `strcmp`-ладдер по тегам; без `else` и без матча — re-throw
-  (`__sx_err = __sx_e; goto __sx_throw`). `:on-error <sentinel>` — ведущий флаг
-  `defn` (как `:static`/`:inline`, но со значением; `$defn-split`/`$defn-on-error`).
+  (`__sx_err = __sx_e; goto __sx_throw`). `:on-error <sentinel>` — флаг `defn`
+  (как `:static`/`:inline`, но со значением). Флаги принимаются в ДВУХ позициях:
+  перед типом возврата ИЛИ сразу после списка параметров (trailing — держит
+  `ret name params` выровненными; `$defn-split` применяется и к голове, и к телу,
+  merge → `aflags`). Все флаги пишутся в мету `($m-put name :flags aflags)`;
+  `$defn-on-error` читает из них `(:on-error V)`.
   Fallibility ВЫВОДИТСЯ: `($m-put name :fallible t)` если в теле есть `throw`
   или `try`/else-less-`catch` (НЕ обрабатывающий catch-with-else). Тело
   обходится `$map`'ом ТОЛЬКО когда fallible (иначе пересборка дерева теряет

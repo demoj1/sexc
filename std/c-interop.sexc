@@ -128,8 +128,8 @@
     ($cons ($unpack-type ($car group)) ($cdr group))))
 
 (%doc defn
-  :doc "Define a C function. Optional leading flags :static and/or :inline emit the corresponding C specifiers (e.g. `static inline`). For an inline function in a single translation unit prefer :inline :static so it links at -O0."
-  :example "(defn :inline :static int sq ((int x)) (return (* x x)))")
+  :doc "Define a C function. Optional flags :static / :inline (emit the C specifiers, e.g. `static inline`) and :on-error <sentinel> (error-handling sentinel; see throw/try) may sit BEFORE the return type or right AFTER the parameter list — the trailing position keeps `ret name params` column-aligned across defns. For an inline function in a single translation unit prefer :inline :static so it links at -O0."
+  :example "(defn int sq ((int x)) :inline :static (return (* x x)))")
 (%defmacro defn (&rest args)
   ($let ((split  ($defn-split args ($list)))
          (flags  ($car split))
@@ -144,9 +144,15 @@
          ; для МЕТАДАТЫ (эмит ниже идёт с bare-типами, их квалифицирует %-IR проход).
          (qret    ($qualify-type ret))
          (qparams ($map ($if ($atom? it) it ($cons ($qualify-type ($car it)) ($cdr it))) params))
-         (body   ($cdr ($cdr ($cdr rest))))
+         ; Flags (:static/:inline/:on-error V) may sit BEFORE the return type OR
+         ; right AFTER the parameter list — the latter keeps `ret name params`
+         ; column-aligned across defns. $defn-split peels leading flags off the
+         ; body just as it did off the head; merge both sides.
+         (tsplit ($defn-split ($cdr ($cdr ($cdr rest))) ($list)))
+         (aflags ($append flags ($car tsplit)))
+         (body   ($cdr tsplit))
          ; ─ error handling: rewrite throw/try/catch by walking the body ─
-         (on-err ($defn-on-error flags))         ; :on-error sentinel or '$$no-on-error
+         (on-err ($defn-on-error aflags))        ; :on-error sentinel or '$$no-on-error
          (void?  ($eq? ret 'void))
          (nerr   ($reduce ($+ acc ($err-count it)) 0 body))   ; any throw/try/catch?
          ; Walk only fallible bodies — rebuilding the form tree would drop sub-form
@@ -161,7 +167,9 @@
       ($validate-defn name ret params body)
       ; warn on bare calls to fallible functions (error silently dropped)
       ($dolist (f body) ($err-lint-form f nil))
-      ($m-put name :kind 'fn :return-type qret :params qparams)
+      ; :flags records the function's modifiers (:static / :inline and the
+      ; (:on-error V) pair) under one key, for tooling/macros to introspect.
+      ($m-put name :kind 'fn :return-type qret :params qparams :flags aflags)
       ; A function that throws/propagates is :fallible — read at call sites by the
       ; bare-fallible-call lint (and by callers wiring up their own try/catch).
       ($if ($nonzero? ($+ nthrow nrt)) ($m-put name :fallible t) nil)
@@ -186,7 +194,7 @@
                                "this function propagates an error (try / catch without else) but has no :on-error sentinel — add :on-error to defn")
                              ($list '(%label __sx_throw) `(return ,on-err))))
                          ($list))))
-        ($defn-wrap flags `(%def-fn ,ret ,name ,params (%block ,@runtime ,@walked ,@epilogue)))))))
+        ($defn-wrap aflags `(%def-fn ,ret ,name ,params (%block ,@runtime ,@walked ,@epilogue)))))))
 
 ; decl
 ; (decl (type name) init ...)
@@ -1444,13 +1452,20 @@
     ($assert ($not ($null? parts)) "catch: expects (catch EXPR clause...)")
     ($let ((e       ($car parts))
            (clauses ($cdr parts)))
-      `(%block
-         (%raw "__sx_err = 0")
-         ,($err-walk e on-err void?)
-         (%if __sx_err
-           (%block
-             (%raw "const char *__sx_e = __sx_err; __sx_err = 0")
-             ,($catch-ladder clauses on-err void?)))))))
+      ; __sx_e (the saved tag) is read by a :tag clause's strcmp or by a re-throw
+      ; (no else). An else-only catch needs neither — just clear and run else, or
+      ; gcc -Wextra warns the variable is unused.
+      ($let ((needs-e ($if ($catch-has-tag? clauses) t ($not ($catch-has-else? clauses))))
+             (consume ($if needs-e
+                        '(%raw "const char *__sx_e = __sx_err; __sx_err = 0")
+                        '(%raw "__sx_err = 0"))))
+        `(%block
+           (%raw "__sx_err = 0")
+           ,($err-walk e on-err void?)
+           (%if __sx_err
+             (%block
+               ,consume
+               ,($catch-ladder clauses on-err void?))))))))
 
 ; Walk a defn body form, rewriting throw/try/catch. Atoms/strings pass through;
 ; does NOT descend into a nested defn (it rewrites its own body).
@@ -1488,6 +1503,12 @@
   ($if ($null? clauses) nil
     ($if ($if ($atom? ($car clauses)) nil ($eq? ($car ($car clauses)) 'else)) t
       ($catch-has-else? ($cdr clauses)))))
+
+; does a catch have at least one (:tag ...) clause? (those strcmp __sx_e)
+($defun $catch-has-tag? (clauses)
+  ($if ($null? clauses) nil
+    ($if ($if ($atom? ($car clauses)) nil ($keyword? ($car ($car clauses)))) t
+      ($catch-has-tag? ($cdr clauses)))))
 
 ; count sites that jump to the __sx_throw epilogue: every try, and every catch
 ; without an else (which re-throws). >0 → defn must emit the epilogue + :on-error.

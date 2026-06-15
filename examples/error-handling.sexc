@@ -14,12 +14,13 @@
 (include <string.h>)
 
 ; char digit → int, or throw. -1 is the error sentinel (never a valid digit).
-(defn :on-error -1 int digit ((char c))
+; Flags like :on-error go after the parameter list, keeping the signatures aligned.
+(defn int digit ((char c)) :on-error -1
   (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))
   (return (- c ?0)))
 
 ; apply an operator, throwing on division by zero. INT_MIN-ish sentinel.
-(defn :on-error -999 int apply-op ((char op) (int a) (int b))
+(defn int apply-op ((char op) (int a) (int b)) :on-error -999
   (cond
     ((= op ?+) (return (+ a b)))
     ((= op ?-) (return (- a b)))
@@ -30,7 +31,7 @@
     (else (throw :bad_operator))))
 
 ; Parse "A op B" (exactly 3 chars). Propagates any inner error via (try ...).
-(defn :on-error -999 int eval-expr (((:* :const char) s))
+(defn int eval-expr (((:* :const char) s)) :on-error -999
   (when (not= (strlen s) 3) (throw :bad_format))
   (decl (int a) (try (digit (aref s 0)))
         (int b) (try (digit (aref s 2))))

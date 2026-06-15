@@ -1,0 +1,45 @@
+; A catch whose only clause is (else ...) needs neither the tag strcmp nor a
+; re-throw, so __sx_e is NOT declared — otherwise gcc -Wextra warns it is unused.
+; The block just clears the slot and runs the else body.
+(defn :on-error -1 int risky ((int x))
+  (when (< x 0) (throw :neg))
+  (return x))
+
+(defn int run ((int x))
+  (decl (int r) 0)
+  (catch (set r (risky x))
+    (else (return -1)))
+  (return r))
+;==EXPECTED==
+_Thread_local const char *__sx_err;
+
+#include <string.h>
+
+int risky(int x)
+{
+  if (x < 0)
+    {
+      {
+        __sx_err = "neg";
+        return -1;
+      }
+    }
+  return x;
+}
+
+int run(int x)
+{
+  int r = 0;
+  {
+    __sx_err = 0;
+    r = risky(x);
+    if (__sx_err)
+      {
+        __sx_err = 0;
+        {
+          return -1;
+        }
+      }
+  }
+  return r;
+}

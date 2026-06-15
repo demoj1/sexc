@@ -1,0 +1,59 @@
+; defn flags (:static / :inline / :on-error) may sit AFTER the parameter list
+; instead of before the return type, so `ret name params` stay column-aligned.
+; Both spellings are equivalent; here every function uses the trailing form.
+(defn int sq ((int x)) :inline :static
+  (return (* x x)))
+
+(defn int digit ((char c)) :on-error -1
+  (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))
+  (return (- c ?0)))
+
+(defn int run ((char c))
+  (decl (int d) 0)
+  (catch (set d (digit c))
+    (:not_a_digit (return -1))
+    (else (return -2)))
+  (return (sq d)))
+;==EXPECTED==
+_Thread_local const char *__sx_err;
+
+static inline int sq(int x)
+{
+  return x * x;
+}
+
+#include <string.h>
+
+int digit(char c)
+{
+  if (c < '0' || c > '9')
+    {
+      {
+        __sx_err = "not_a_digit";
+        return -1;
+      }
+    }
+  return c - '0';
+}
+
+int run(char c)
+{
+  int d = 0;
+  {
+    __sx_err = 0;
+    d = digit(c);
+    if (__sx_err)
+      {
+        const char *__sx_e = __sx_err; __sx_err = 0;
+        if (0 == strcmp(__sx_e, "not_a_digit"))
+          {
+            return -1;
+          }
+        else
+          {
+            return -2;
+          }
+      }
+  }
+  return sq(d);
+}

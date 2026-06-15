@@ -10,5 +10,5 @@
 ^
 
 Signature: (defn &rest args)
-Doc: Define a C function. Optional leading flags :static and/or :inline emit the corresponding C specifiers (e.g. `static inline`). For an inline function in a single translation unit prefer :inline :static so it links at -O0.
-Example: (defn :inline :static int sq ((int x)) (return (* x x)))
+Doc: Define a C function. Optional flags :static / :inline (emit the C specifiers, e.g. `static inline`) and :on-error <sentinel> (error-handling sentinel; see throw/try) may sit BEFORE the return type or right AFTER the parameter list — the trailing position keeps `ret name params` column-aligned across defns. For an inline function in a single translation unit prefer :inline :static so it links at -O0.
+Example: (defn int sq ((int x)) :inline :static (return (* x x)))

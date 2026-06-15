@@ -27,7 +27,7 @@
 
 ; bump-allocate N bytes from the arena, returning a raw pointer — or throw
 ; :arena_exhausted if the request would overrun the buffer. nil is the sentinel.
-(defn :on-error nil (:* void) arena-alloc ((:* Arena a) (int n))
+(defn (:* void) arena-alloc ((:* Arena a) (int n)) :on-error nil
   (when (> (+ (-> a used) n) (-> a cap))
     (throw :arena_exhausted))
   (decl (:* char p) (+ (-> a base) (-> a used)))

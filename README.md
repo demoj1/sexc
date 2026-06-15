@@ -387,11 +387,11 @@ each deferred call. A function declares its error sentinel with `:on-error`, the
 Fallibility is **inferred** from the body — there is no `:throws` annotation.
 
 ```lisp
-(defn :on-error -1 int digit ((char c))
+(defn int digit ((char c)) :on-error -1               ; flags go after the params
   (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))   ; set tag, return -1
   (return (- c ?0)))
 
-(defn :on-error -1 int sum-two ((char a) (char b))
+(defn int sum-two ((char a) (char b)) :on-error -1
   (decl (int x) (try (digit a))                        ; on error: return -1 now
         (int y) (try (digit b)))
   (return (+ x y)))
@@ -404,6 +404,11 @@ Fallibility is **inferred** from the body — there is no `:throws` annotation.
   (printf "sum = %d\n" r)                               ; reached only on success
   (return 0))
 ```
+
+The `:on-error`, `:static` and `:inline` flags may sit before the return type or,
+as above, right after the parameter list — the trailing position keeps the
+`ret name params` columns aligned across definitions, and each is recorded under
+the function's `:flags` metadata key.
 
 `(throw :tag)` returns the function's `:on-error` sentinel; `(throw :tag value)`
 returns an explicit value (and needs no `:on-error`). `(try expr)` yields `expr`'s
@@ -973,11 +978,11 @@ dynamic slot *out* …`). `slot*` объявляет зависимость яв
 `:throws` нет.
 
 ```lisp
-(defn :on-error -1 int digit ((char c))
+(defn int digit ((char c)) :on-error -1               ; флаги — после параметров
   (when (or (< c ?0) (> c ?9)) (throw :not_a_digit))   ; ставим тег, return -1
   (return (- c ?0)))
 
-(defn :on-error -1 int sum-two ((char a) (char b))
+(defn int sum-two ((char a) (char b)) :on-error -1
   (decl (int x) (try (digit a))                        ; при ошибке: return -1 сразу
         (int y) (try (digit b)))
   (return (+ x y)))
@@ -990,6 +995,11 @@ dynamic slot *out* …`). `slot*` объявляет зависимость яв
   (printf "sum = %d\n" r)                               ; достижимо только при успехе
   (return 0))
 ```
+
+Флаги `:on-error`, `:static`, `:inline` можно ставить до типа возврата ИЛИ, как
+выше, сразу после списка параметров — так колонки `ret name params` остаются
+выровненными по всем функциям; каждый флаг также пишется в метадату функции под
+ключ `:flags`.
 
 `(throw :tag)` возвращает sentinel функции из `:on-error`; `(throw :tag value)`
 возвращает явное значение (и `:on-error` не требует). `(try expr)` даёт значение
