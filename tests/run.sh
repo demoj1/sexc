@@ -106,6 +106,19 @@ if [[ -z "${FILTER}" ]]; then
         printf '\033[32mPASS\033[0m smoke check-ok-silent\n'
         touch "${results_dir}/smoke-check-ok-silent.pass"
     fi
+
+    # A piped buffer (editor/flymake) has no path, but its relative %import must
+    # still resolve against the working directory the editor runs the compiler in.
+    mkdir -p "${results_dir}/imp"
+    printf '(%%module m)\n(defn int helper () (return 7))\n' > "${results_dir}/imp/m.sexc"
+    printf '(%%import "./m")\n(defn int main () (return (m/helper)))\n' > "${results_dir}/imp/main.sexc"
+    if ( cd "${results_dir}/imp" && "${SEXC}" --quiet - < main.sexc >/dev/null 2>&1 ); then
+        printf '\033[32mPASS\033[0m smoke stdin-import\n'
+        touch "${results_dir}/smoke-stdin-import.pass"
+    else
+        printf '\033[31mFAIL\033[0m smoke stdin-import (relative %%import not resolved from cwd)\n' \
+            | tee "${results_dir}/smoke-stdin-import.fail"
+    fi
 fi
 
 end_ns=$(date +%s%N)

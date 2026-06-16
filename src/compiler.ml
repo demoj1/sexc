@@ -416,6 +416,14 @@ let rec load_forms_from_file ~visited ~module_names ~use_prelude path
     let forms = Reader.parse_many ~file:abs source in
     let tops = top_forms_of_raws forms in
     logf "load %s (%d forms) — %s" abs (List.length tops) (since t);
+    process_loaded ~visited ~module_names ~use_prelude ~abs ~tops
+
+(* Resolve the %import graph of already-parsed [tops] whose imports are relative
+   to [abs] (a real file path, or a CWD-anchored pseudo-path for stdin). Shared by
+   load_forms_from_file and compile_source so a piped buffer resolves imports the
+   same way the on-disk file would. *)
+and process_loaded ~visited ~module_names ~use_prelude ~abs ~tops
+    : String.Set.t * string option Map.M(String).t * top_form list =
     let module_name, tops = strip_module_decl_top tops in
     let module_names = Map.set module_names ~key:abs ~data:module_name in
 
@@ -766,6 +774,20 @@ let compile_forms ?(use_prelude = true) (tops : top_form list) : string =
 let compile_source ?(use_prelude = true) source =
   let forms = Reader.parse_many ~file:"<stdin>" source in
   let tops = top_forms_of_raws forms in
+  (* A piped buffer (editor/flymake) has no file path, but its relative %import
+     targets still need resolving — do it against the current working directory,
+     which the editor sets to the buffer's directory. Only kicks in when the
+     buffer actually imports something, so import-free stdin stays on the fast path. *)
+  let tops =
+    if not (List.exists tops ~f:(fun t -> Option.is_some (extract_import t.form))) then tops
+    else
+      let abs = Filename.concat (Stdlib.Sys.getcwd ()) "<stdin>" in
+      let _, _, tops =
+        process_loaded ~visited:(String.Set.singleton abs)
+          ~module_names:String.Map.empty ~use_prelude ~abs ~tops
+      in
+      tops
+  in
   compile_forms ~use_prelude tops
 
 let compile_file ?(use_prelude = true) path =

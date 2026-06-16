@@ -1,0 +1,22 @@
+; (return) with no argument returns from a void function (emits a bare `return;`),
+; while (return EXPR) still returns a value. No need to drop to the %return intrinsic.
+(defn void early ((int x))
+  (when (< x 0) (return))
+  (set x (+ x 1)))
+
+(defn int twice ((int x))
+  (return (* 2 x)))
+;==EXPECTED==
+void early(int x)
+{
+  if (x < 0)
+    {
+      return;
+    }
+  x = x + 1;
+}
+
+int twice(int x)
+{
+  return 2 * x;
+}

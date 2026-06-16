@@ -576,10 +576,12 @@
 ; (return expr)
 ; => (%return expr)
 (%doc return
-  :doc "Return expression from current function."
-  :example "(return (+ a b))")
-(%defmacro return (expr)
-  `(%return ,expr))
+  :doc "Return from the current function. With an expression returns its value; with no argument returns void — (return) in a void function."
+  :example "(return (+ a b))  ; or bare (return) in a void function")
+(%defmacro return (&rest expr)
+  ($do
+    ($assert ($if ($null? expr) t ($null? ($cdr expr))) "return: takes at most one expression")
+    ($if ($null? expr) '(%return) `(%return ,($car expr)))))
 
 ; set
 ; (set lhs value [lhs2 value2 ...])
