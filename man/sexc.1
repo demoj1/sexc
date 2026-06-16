@@ -1,0 +1,256 @@
+.TH SEXC 1 "2026-06-16" "sexc" "SexC Manual"
+.SH NAME
+sexc \- an S-expression to C transpiler
+.SH SYNOPSIS
+.B sexc
+.RI [ flags ]
+.IR input.sexc
+.br
+.B sexc
+.RI [ flags ]
+.B \-
+.br
+.B sexc
+.RI [ flags ]
+.IR input.sexc
+.B \-C
+.IR cmd ...
+.br
+.B sexc
+.RI [ flags ]
+.IR command " [" args ...]
+.br
+.B sexc \-h " | " sexc \-\-help
+.SH DESCRIPTION
+.B sexc
+transpiles a Lisp-syntax (.sexc) program into C, written to standard output.
+Beyond compilation it exposes tooling commands used by editor integrations:
+on-the-fly checking, documentation lookup, completion, cross-reference, and
+metadata dumps.
+.PP
+By default an implicit prelude (std/core.sexc and the stdlib macros) is loaded
+from the resolved stdlib directory. Generated C carries
+.B #line
+directives so a C compiler's errors point back at the .sexc source.
+.SH GLOBAL FLAGS
+These are placed before the input file or command.
+.TP
+.B \-\-no\-prelude
+Do not auto-load the implicit prelude (std/core.sexc and the stdlib macros).
+Use for self-contained low-level files or tests.
+.TP
+.BR \-\-quiet ", " \-q
+Suppress the per-stage progress logs printed to stderr (parsing, macro
+expansion, codegen timings). Same as setting
+.BR SEXC_QUIET=1 .
+Editor integrations should pass this so only diagnostics reach stderr.
+.TP
+.B \-\-no\-line
+Omit
+.RB ` "#line N \(dqfile\(dq" '
+directives from the generated C. They are emitted by default so a C compiler's
+errors map back to the .sexc source; snapshot tests disable them for stable
+output.
+.TP
+.BR \-h ", " \-\-help
+Show the brief built-in help and exit 0.
+.SH COMPILATION
+With no subcommand,
+.B sexc
+transpiles its input to C on stdout.
+.TP
+.I input.sexc
+Transpile the named file.
+.TP
+.B \-
+Read source from standard input. Relative
+.B %import
+targets resolve against the current working directory, so an editor can pipe an
+unsaved buffer and still find its imports.
+.TP
+.IB input.sexc " \-C " cmd ...
+Transpile to a temporary .c file, then run
+.I cmd
+with the token
+.RB ` % '
+replaced by that file's path \(em a one-step "compile and build". The command
+must contain a
+.RB ` % '.
+.PP
+Examples:
+.PP
+.RS
+.EX
+sexc prog.sexc > prog.c
+sexc prog.sexc \-C gcc % \-o prog
+sexc examples/raylib_std.sexc \-C gcc % \-lraylib \-lm \-o demo
+printf '(defn int main () (return 0))' | sexc \-
+.EE
+.RE
+.SH COMMANDS
+.SS check
+.B sexc
+.RB [ \-\-no\-prelude ]
+.B check
+.IR input.sexc | \-
+.PP
+Expand and type the program, report diagnostics, and emit no C. Exit 0 and
+silent on success; exit 1 with diagnostics on failure. Editors run this for
+on-the-fly checking, piping the buffer via
+.BR \- .
+.PP
+.RS
+.EX
+sexc check prog.sexc
+sexc \-\-quiet check \-
+.EE
+.RE
+.SS show-doc
+.B sexc
+.RB [ \-\-no\-prelude ]
+.B show-doc
+.RB [ \-\-at
+.IR L:C ]
+.I name
+.RI [ input.sexc ]
+.PP
+Print a symbol's documentation: name, kind, signature, doc, example, and source
+location. Without a file the symbol is looked up in the stdlib; with a file the
+file's own symbols are included too. The
+.B \-\-at
+.I L:C
+flag passes the cursor position so an
+.I obj::method
+name resolves through the object's type at that point.
+.PP
+.RS
+.EX
+sexc show-doc defn
+sexc show-doc Stack/push prog.sexc
+sexc show-doc \-\-at 61:5 s::push prog.sexc
+.EE
+.RE
+.SS complete
+.B sexc
+.RB [ \-\-no\-prelude ]
+.B complete
+.RB [ \-\-json ]
+.I prefix
+.RI [ input.sexc | \- ]
+.PP
+List completion candidates whose name starts with
+.IR prefix .
+Prints one name per line, or full symbol records with
+.BR \-\-json .
+Function-local variables are intentionally excluded (they are scope-specific
+noise).
+.PP
+.RS
+.EX
+sexc complete with
+sexc complete \-\-json Stack prog.sexc
+.EE
+.RE
+.SS xref
+.B sexc
+.RB [ \-\-no\-prelude ]
+.B xref
+.RB [ \-\-json ]
+.RB [ \-\-at
+.IR L:C ]
+.I symbol
+.I input.sexc
+.PP
+Print a symbol's definition site(s) as
+.IR file:line:col " " name .
+The
+.B \-\-at
+.I L:C
+flag resolves an
+.I obj::method
+symbol to
+.I Type/method
+via the type of the variable named
+.I obj
+declared nearest above that line, so goto-definition works on method calls.
+.B \-\-json
+prints full records.
+.PP
+.RS
+.EX
+sexc xref WindowShouldClose prog.sexc
+sexc xref \-\-at 59:30 s::pop prog.sexc
+.EE
+.RE
+.SS m-dump
+.B sexc
+.RB [ \-\-no\-prelude ]
+.B m-dump
+.RB [ \-\-json ]
+.I input.sexc
+.PP
+Dump the compile-time symbol metadata collected during macro expansion (each
+symbol's
+.BR :kind ", " :flags ", " :return-type ,
+and so on). Does not accept stdin.
+.PP
+.RS
+.EX
+sexc m-dump prog.sexc
+sexc m-dump \-\-json prog.sexc
+.EE
+.RE
+.SS dump-docs, dump-stdlib-docs
+.B sexc
+.RB [ \-\-no\-prelude ]
+.B dump-docs
+.I input.sexc out-dir
+.br
+.B sexc
+.B dump-stdlib-docs
+.I out-dir
+.PP
+Write per-symbol Markdown documentation to a directory.
+.PP
+.RS
+.EX
+sexc dump-stdlib-docs ./docs
+.EE
+.RE
+.SS print-cache-dump
+.B sexc
+.B print-cache-dump
+.PP
+Print the on-disk index cache (for debugging).
+.SH ENVIRONMENT
+.TP
+.B SEXC_STDLIB_DIR
+Override the stdlib lookup directory (the one holding core.sexc). The default
+search order is: next to the binary, PREFIX/include/sexc/std, ./std.
+.TP
+.B SEXC_QUIET
+When set to a non-empty, non-zero value, suppress stage logs (same as
+.BR \-\-quiet ).
+.SH NOTES
+The implicit prelude auto-loads core.sexc and the stdlib macros from the
+resolved stdlib directory. Use
+.B \-\-no\-prelude
+to disable it.
+.PP
+Relative
+.B %import
+resolves against the importing file's directory, or, for stdin, the current
+working directory.
+.SH EXAMPLES
+.EX
+# Transpile and run via gcc in one step
+sexc prog.sexc \-C gcc % \-o prog && ./prog
+
+# Check a buffer piped from an editor
+sexc \-\-quiet check \-
+
+# Jump to the definition of a method call
+sexc xref \-\-at 59:30 s::pop prog.sexc
+.EE
+.SH SEE ALSO
+The project README and AGENTS.md for language reference and stdlib conventions.

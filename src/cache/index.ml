@@ -96,6 +96,51 @@ let symbol_kind_of_name name =
   else if String.is_prefix name ~prefix:"$" then "macro"
   else "surface"
 
+(* Base type name of a type form: the last atom that is not a :keyword modifier
+   nor a %intrinsic. (:* Stack) -> "Stack", (:* :const char) -> "char",
+   int -> "int". Used to map a variable's type to its method namespace. *)
+let rec base_type_of_raw acc = function
+  | Raw.Atom (a, _) ->
+      if String.is_prefix a ~prefix:":" || String.is_prefix a ~prefix:"%" then acc else Some a
+  | Raw.List (xs, _) -> List.fold xs ~init:acc ~f:base_type_of_raw
+  | Raw.Str _ -> acc
+
+(* Base type name parsed back out of a rendered type string (e.g. "(:* Stack)"). *)
+let base_type_of_string ty =
+  match (try Reader.parse_many ~file:"<ty>" ty with _ -> []) with
+  | [] -> None
+  | forms -> base_type_of_raw None (Raw.List (forms, None))
+
+(* A binding group in a decl / parameter list. The LAST atom is the name, the
+   rest is the type — covering classic (int x) / ((:* int) x) and the bundled
+   flat form (:* Stack s). Returns (name, name_offset, type_string). *)
+let binding_of_group elems =
+  match List.rev elems with
+  | Reader.LAtom (name, noff) :: (_ :: _ as rev_ty) ->
+      let ty_forms = List.rev_map rev_ty ~f:Reader.to_raw in
+      let ty_str =
+        match ty_forms with
+        | [ single ] -> render_raw single
+        | many -> "(" ^ String.concat ~sep:" " (List.map many ~f:render_raw) ^ ")"
+      in
+      Some (name, noff, ty_str)
+  | _ -> None
+
+(* Peel leading defn flags (:static / :inline / :on-error VALUE) off an argument
+   list; returns (on_error_string_option, rest). Flags may appear before the
+   return type or right after the parameter list, so this runs on both ends. *)
+let rec peel_defn_flags on_err = function
+  | Reader.LAtom (":on-error", _) :: v :: tl -> peel_defn_flags (Some (render_raw (Reader.to_raw v))) tl
+  | Reader.LAtom ((":static" | ":inline"), _) :: tl -> peel_defn_flags on_err tl
+  | rest -> (on_err, rest)
+
+(* Split "obj::method" → (obj, method); None if there is no infix ::. *)
+let split_method name =
+  match String.substr_index name ~pattern:"::" with
+  | Some i when i > 0 && i + 2 < String.length name ->
+      Some (String.sub name ~pos:0 ~len:i, String.sub name ~pos:(i + 2) ~len:(String.length name - i - 2))
+  | _ -> None
+
 let make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind ~name ?signature ?doc ?example ?(internal = false)
     ?scope ?ty () =
   let line, col = line_col source off in
@@ -119,12 +164,14 @@ let make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind ~name ?signature
 
 let rec parse_decl_bindings module_name current_scope = function
   | [] -> []
-  | Reader.LList ([ ty; Reader.LAtom (name, noff) ], boff) :: _ :: tl ->
-      let fq = qualify module_name name in
-      let ty_s = render_raw (Reader.to_raw ty) in
-      let line_off = (if noff >= 0 then noff else boff) in
-      let one = (`Decl (fq, ty_s, line_off, current_scope)) in
-      one :: parse_decl_bindings module_name current_scope tl
+  | Reader.LList (elems, boff) :: _init :: tl ->
+      let here =
+        match binding_of_group elems with
+        | Some (name, noff, ty_s) ->
+            [ `Decl (qualify module_name name, ty_s, (if noff >= 0 then noff else boff), current_scope) ]
+        | None -> []
+      in
+      here @ parse_decl_bindings module_name current_scope tl
   | _ :: tl -> parse_decl_bindings module_name current_scope tl
 
 let index_file file =
@@ -147,17 +194,41 @@ let index_file file =
             let fq = qualify module_name name in
             let d = parse_doc_meta (List.map props ~f:Reader.to_raw) in
             add_doc fq d
-        | Reader.LAtom ("defn", _) :: ret :: Reader.LAtom (name, _) :: params :: body ->
-            let fq =
-              match owner_type with
-              | Some t -> qualify module_name (t ^ "/" ^ name)
-              | None -> qualify module_name name
-            in
-            let ret_s = render_raw (Reader.to_raw ret) in
-            let params_s = render_raw (Reader.to_raw params) in
-            let sig_s = with_required_slots (Printf.sprintf "(%s %s) -> %s" fq params_s ret_s) body in
-            add_symbol
-              (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind:"function" ~name:fq ~signature:sig_s ?scope:current_scope ())
+        | Reader.LAtom ("defn", _) :: rest0 -> (
+            (* flags may precede the return type or follow the params; peel both *)
+            let lead_on_err, after_lead = peel_defn_flags None rest0 in
+            match after_lead with
+            | ret :: Reader.LAtom (name, _) :: params :: body0 ->
+                let trail_on_err, body = peel_defn_flags None body0 in
+                let on_err = Option.first_some lead_on_err trail_on_err in
+                let fq =
+                  match owner_type with
+                  | Some t -> qualify module_name (t ^ "/" ^ name)
+                  | None -> qualify module_name name
+                in
+                let ret_s = render_raw (Reader.to_raw ret) in
+                let params_s = render_raw (Reader.to_raw params) in
+                let on_err_s = match on_err with Some v -> Printf.sprintf "  [:on-error %s]" v | None -> "" in
+                let sig_s = with_required_slots (Printf.sprintf "(%s %s) -> %s%s" fq params_s ret_s on_err_s) body in
+                add_symbol
+                  (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind:"function" ~name:fq ~signature:sig_s ?scope:current_scope ());
+                (* index each parameter as a function-local var, so obj::method on
+                   a parameter resolves; scoped to this function. *)
+                (match params with
+                 | Reader.LList (groups, _) ->
+                     List.iter groups ~f:(function
+                       | Reader.LList (gelems, _) -> (
+                           match binding_of_group gelems with
+                           | Some (pname, pnoff, pty) ->
+                               add_symbol
+                                 (make_symbol ~file_md5 ~file ~source ~off:pnoff ~module_name
+                                    ~kind:"var.local" ~name:(qualify module_name pname) ~scope:fq ~ty:pty ())
+                           | None -> ())
+                       | _ -> ())
+                 | _ -> ());
+                (* walk the body so local decls get indexed, scoped to this fn *)
+                List.iter body ~f:(walk ~current_scope:fq ?owner_type)
+            | _ -> ())
         | Reader.LAtom ("%def-fn", _) :: ret :: Reader.LAtom (name, _) :: params :: _ ->
             let fq = qualify module_name name in
             let ret_s = render_raw (Reader.to_raw ret) in
@@ -204,6 +275,10 @@ let index_file file =
             in
             add_symbol (make_symbol ~file_md5 ~file ~source ~off ~module_name ~kind ~name:fq ())
         | Reader.LAtom ("decl", _) :: rest ->
+            (* A top-level decl is a global (kept in completion); a decl inside a
+               function body is a local (used only for obj::method resolution, and
+               filtered out of completion to avoid cross-function noise). *)
+            let kind = if Option.is_none current_scope then "var.global" else "var.local" in
             let scope =
               Option.value current_scope ~default:(
                   match owner_type with
@@ -214,7 +289,7 @@ let index_file file =
             |> List.iter ~f:(function
                  | `Decl (name, ty, noff, sc) ->
                      add_symbol
-                       (make_symbol ~file_md5 ~file ~source ~off:noff ~module_name ~kind:"var.local" ~name ~scope:sc ~ty ()));
+                       (make_symbol ~file_md5 ~file ~source ~off:noff ~module_name ~kind ~name ~scope:sc ~ty ()));
             List.iter items ~f:(walk ?current_scope ?owner_type)
         | _ -> List.iter items ~f:(walk ?current_scope ?owner_type))
   in
@@ -277,11 +352,36 @@ let name_variants name =
   | Some (_, tail) -> String.Set.of_list [ name; tail ]
   | None -> String.Set.of_list [ name ]
 
-let find_by_name ~use_prelude ?input_path name =
+(* Resolve obj::method to its Type/method name. The object's type comes from the
+   nearest in-scope variable named `obj` — the one declared closest above the
+   cursor line `at` (so shadowing / same-name vars in other functions resolve to
+   the right one). Returns None if no such variable or its base type is unknown. *)
+let resolve_obj_method ~symbols ~at obj meth =
+  let cursor = match at with Some (l, _) -> l | None -> Int.max_value in
+  let is_var (s : symbol) =
+    String.equal s.short_name obj
+    && (String.equal s.kind "var.local" || String.equal s.kind "var.global")
+    && Option.is_some s.ty
+    && s.line <= cursor
+  in
+  match
+    List.filter symbols ~f:is_var
+    |> List.max_elt ~compare:(fun (a : symbol) b -> Int.compare a.line b.line)
+  with
+  | None -> None
+  | Some v -> Option.bind v.ty ~f:base_type_of_string |> Option.map ~f:(fun base -> base ^ "/" ^ meth)
+
+let find_by_name ~use_prelude ?input_path ?at name =
   let symbols =
     match input_path with
     | Some input -> symbols_for_input ~use_prelude input
     | None -> symbols_for_stdlib ()
+  in
+  (* obj::method — rewrite to Type/method via the object's type before matching *)
+  let name =
+    match split_method name with
+    | Some (obj, meth) -> Option.value (resolve_obj_method ~symbols ~at obj meth) ~default:name
+    | None -> name
   in
   let variants = name_variants name in
   symbols
@@ -294,7 +394,9 @@ let find_by_name ~use_prelude ?input_path name =
 let complete ~use_prelude ~input_path ~prefix =
   let symbols = symbols_for_input ~use_prelude input_path in
   symbols
-  |> List.filter ~f:(fun (s : symbol) -> not s.internal)
+  (* function-locals (var.local) are scope-specific and only exist for
+     obj::method resolution — they would be cross-function noise in completion *)
+  |> List.filter ~f:(fun (s : symbol) -> (not s.internal) && not (String.equal s.kind "var.local"))
   |> List.concat_map ~f:(fun (s : symbol) ->
          let direct = if String.is_prefix s.name ~prefix then [ s ] else [] in
          let hash_variant =

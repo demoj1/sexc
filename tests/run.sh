@@ -119,6 +119,47 @@ if [[ -z "${FILTER}" ]]; then
         printf '\033[31mFAIL\033[0m smoke stdin-import (relative %%import not resolved from cwd)\n' \
             | tee "${results_dir}/smoke-stdin-import.fail"
     fi
+
+    # obj::method resolution (xref/eldoc) via the object's type, and :on-error in
+    # the defn signature.
+    methods_file="${results_dir}/methods.sexc"
+    {
+        printf '(struct Box\n'
+        printf '  :fields (int v)\n'
+        printf '  :methods\n'
+        printf '  (defn int get ((:* Box self)) :on-error -1\n'
+        printf '    (return (-> self v))))\n'
+        printf '(defn int main ()\n'
+        printf '  (decl (:* Box b) NULL)\n'
+        printf '  (decl (int x) b::get)\n'
+        printf '  (return x))\n'
+    } > "${methods_file}"
+    # b is declared on line 7, used as b::get on line 8 → resolves to Box/get
+    if "${SEXC}" xref --at 8:18 "b::get" "${methods_file}" 2>/dev/null | grep -q 'Box/get'; then
+        printf '\033[32mPASS\033[0m smoke method-xref\n'
+        touch "${results_dir}/smoke-method-xref.pass"
+    else
+        printf '\033[31mFAIL\033[0m smoke method-xref (b::get did not resolve to Box/get)\n' \
+            | tee "${results_dir}/smoke-method-xref.fail"
+    fi
+    if "${SEXC}" show-doc "Box/get" "${methods_file}" 2>/dev/null | grep -q ':on-error -1'; then
+        printf '\033[32mPASS\033[0m smoke onerror-sig\n'
+        touch "${results_dir}/smoke-onerror-sig.pass"
+    else
+        printf '\033[31mFAIL\033[0m smoke onerror-sig (:on-error missing from signature)\n' \
+            | tee "${results_dir}/smoke-onerror-sig.fail"
+    fi
+
+    # --help is ASCII-only (no em-dash / arrow), exits 0, and lists Commands.
+    help_out="$("${SEXC}" --help 2>&1)"; help_rc=$?
+    if [[ ${help_rc} -eq 0 ]] && printf '%s' "${help_out}" | grep -q '^Commands:' \
+        && ! printf '%s' "${help_out}" | grep -qP '[\x{2014}\x{2192}]'; then
+        printf '\033[32mPASS\033[0m smoke help\n'
+        touch "${results_dir}/smoke-help.pass"
+    else
+        printf '\033[31mFAIL\033[0m smoke help (exit %s / missing Commands / non-ASCII)\n' "${help_rc}" \
+            | tee "${results_dir}/smoke-help.fail"
+    fi
 fi
 
 end_ns=$(date +%s%N)

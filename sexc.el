@@ -656,7 +656,7 @@ Results are cached per symbol and current buffer file path."
 FILE is optional source path for project-aware lookup."
   (condition-case nil
       (let* ((bin (sexc--resolve-binary))
-             (args (append (list "show-doc" sym)
+             (args (append (list "show-doc") (sexc--at-args) (list sym)
                            (if (and file (not (string-empty-p file))) (list file) nil)))
              (lines (and bin (apply #'process-lines bin args))))
         (sexc--format-show-doc-lines lines sym))
@@ -679,6 +679,10 @@ FILE is optional source path for project-aware lookup."
         (setq kind (substring line 6)))
        ((string-prefix-p "Signature: " line)
         (setq sig (sexc--display-signature sym (substring line 11))))
+       ;; `requires: …' is a continuation of the signature (the dynamic slots the
+       ;; function needs from its caller) — show it as a second eldoc line.
+       ((and sig (string-prefix-p "requires:" line))
+        (setq sig (concat sig "\n" line)))
        ((string-prefix-p "Doc:" line)
         (setq in-doc t)
         (setq in-examples nil))
@@ -919,11 +923,16 @@ sits *inside* the parens) are captured whole instead of being cut short."
           (read-only-mode 1))
         (pop-to-buffer buf)))))
 
+(defun sexc--at-args ()
+  "Cursor position as (\"--at\" \"LINE:COL\"), for resolving obj::method by the
+object's nearest in-scope declaration."
+  (list "--at" (format "%d:%d" (line-number-at-pos) (1+ (current-column)))))
+
 (defun sexc--fetch-xref-json (identifier)
   "Fetch xref definitions for IDENTIFIER from compiler JSON endpoint."
   (let* ((bin (sexc--resolve-binary))
          (file (or buffer-file-name ""))
-         (args (append (list "xref" "--json" identifier)
+         (args (append (list "xref" "--json") (sexc--at-args) (list identifier)
                        (if (and file (not (string-empty-p file))) (list file) nil))))
     (condition-case nil
         (when (and bin (fboundp 'json-parse-string))

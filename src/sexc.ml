@@ -47,7 +47,62 @@ let usage () =
   prerr_endline "";
   prerr_endline "When -C is used, token '%' is replaced with a temporary generated C file.";
   prerr_endline "Example:";
-  prerr_endline "  sexc examples/raylib_std.sexc -C gcc % -lraylib -o raylib-example"
+  prerr_endline "  sexc examples/raylib_std.sexc -C gcc % -lraylib -o raylib-example";
+  prerr_endline "";
+  prerr_endline "Run 'sexc --help' for detailed help on every command and flag."
+
+(* Detailed, example-driven help printed to stdout for -h / --help. Keep in sync
+   with the parser and usage() above. *)
+let help () =
+  print_string
+    {|sexc - an S-expression to C transpiler
+
+Usage:
+  sexc [flags] <input.sexc>             transpile a file to C on stdout
+  sexc [flags] -                        transpile source from stdin to stdout
+  sexc [flags] <input.sexc> -C <cmd>    transpile, then run a C build command
+  sexc [flags] <command> [args]         run a tooling command (see below)
+  sexc -h | --help                      show this help
+
+Global flags (before the input file or command):
+  --no-prelude    do not auto-load the stdlib prelude (core.sexc + macros)
+  --quiet, -q     silence per-stage progress logs on stderr (= SEXC_QUIET=1)
+  --no-line       do not emit '#line' directives in the generated C
+  -h, --help      show this help and exit
+
+Compile (default action, no subcommand):
+  <input.sexc>            transpile to C on stdout
+  -                       read source from stdin (relative %import uses the cwd)
+  <input.sexc> -C <cmd>   transpile to a temp .c, then run <cmd> with '%' as its path
+
+Commands:
+  check <input.sexc|->
+      check only: report diagnostics, do not emit C
+  show-doc [--at L:C] <name> [input.sexc]
+      print a symbol's documentation and signature
+  complete [--json] <prefix> [input.sexc|-]
+      list completion candidates for a prefix
+  xref [--json] [--at L:C] <symbol> <input.sexc>
+      print a symbol's definition site(s): file:line:col name
+  m-dump [--json] <input.sexc>
+      dump compile-time symbol metadata (:kind, :flags, :return-type, ...)
+  dump-docs <input.sexc> <out-dir>
+      write per-symbol Markdown docs to a directory
+  dump-stdlib-docs <out-dir>
+      write stdlib Markdown docs to a directory
+  print-cache-dump
+      print the on-disk index cache (debugging)
+
+Shared tooling flags:
+  --at L:C    cursor position; resolves obj::method via the object's type
+  --json      machine-readable output
+
+Environment:
+  SEXC_STDLIB_DIR    override the stdlib directory (the one holding core.sexc)
+  SEXC_QUIET=1       silence stage logs (same as --quiet)
+
+See the sexc(1) man page (man/sexc.1) for full descriptions and examples.
+|}
 
 type command =
   | Compile of {
@@ -69,6 +124,7 @@ type command =
       use_prelude : bool;
       name : string;
       input_path : string option;
+      at : (int * int) option;
     }
   | Complete of {
       use_prelude : bool;
@@ -81,6 +137,7 @@ type command =
       json : bool;
       symbol : string;
       input_path : string;
+      at : (int * int) option;
     }
   | Print_cache_dump
   | M_dump of {
@@ -88,6 +145,7 @@ type command =
       input_path : string;
       json : bool;
     }
+  | Help
 
 let parse_complete_args use_prelude args =
   let json, rest =
@@ -100,15 +158,36 @@ let parse_complete_args use_prelude args =
   | prefix :: input :: [] -> Complete { use_prelude; json; prefix; input_path = input }
   | _ -> cli_fail "complete expects: sexc [--no-prelude] complete [--json] <prefix> [input.sexc|-]"
 
+(* Optional cursor position: --at LINE:COL. Used to resolve obj::method by the
+   object's nearest in-scope declaration. *)
+let parse_at_flag args =
+  match args with
+  | "--at" :: pos :: tl -> (
+      match String.lsplit2 pos ~on:':' with
+      | Some (l, c) -> (
+          match (Int.of_string_opt l, Int.of_string_opt c) with
+          | Some l, Some c -> (Some (l, c), tl)
+          | _ -> cli_fail "--at expects LINE:COL (integers)")
+      | None -> cli_fail "--at expects LINE:COL")
+  | tl -> (None, tl)
+
 let parse_xref_args use_prelude args =
   let json, rest =
     match args with
     | "--json" :: tl -> (true, tl)
     | tl -> (false, tl)
   in
+  let at, rest = parse_at_flag rest in
   match rest with
-  | symbol :: input :: [] -> Xref { use_prelude; json; symbol; input_path = input }
-  | _ -> cli_fail "xref expects: sexc [--no-prelude] xref --json <symbol> <input.sexc>"
+  | symbol :: input :: [] -> Xref { use_prelude; json; symbol; input_path = input; at }
+  | _ -> cli_fail "xref expects: sexc [--no-prelude] xref [--json] [--at L:C] <symbol> <input.sexc>"
+
+let parse_show_doc_args use_prelude args =
+  let at, rest = parse_at_flag args in
+  match rest with
+  | name :: [] -> Show_doc { use_prelude; name; input_path = None; at }
+  | name :: input :: [] -> Show_doc { use_prelude; name; input_path = Some input; at }
+  | _ -> cli_fail "show-doc expects: sexc [--no-prelude] show-doc [--at L:C] <name> [input.sexc]"
 
 let parse_command args =
   let rec parse_flags use_prelude = function
@@ -128,13 +207,12 @@ let parse_command args =
    | _ -> ());
   let use_prelude, rest = parse_flags true args in
   match rest with
+  | ("-h" | "--help") :: _ -> Help
   | "dump-docs" :: input :: out_dir :: [] -> Dump_docs { use_prelude; input_path = input; out_dir }
   | "dump-docs" :: _ -> cli_fail "dump-docs expects: sexc [--no-prelude] dump-docs <input.sexc> <out-dir>"
   | "dump-stdlib-docs" :: out_dir :: [] -> Dump_stdlib_docs { out_dir }
   | "dump-stdlib-docs" :: _ -> cli_fail "dump-stdlib-docs expects: sexc dump-stdlib-docs <out-dir>"
-  | "show-doc" :: name :: [] -> Show_doc { use_prelude; name; input_path = None }
-  | "show-doc" :: name :: input :: [] -> Show_doc { use_prelude; name; input_path = Some input }
-  | "show-doc" :: _ -> cli_fail "show-doc expects: sexc [--no-prelude] show-doc <name> [input.sexc]"
+  | "show-doc" :: tl -> parse_show_doc_args use_prelude tl
   | "complete" :: tl -> parse_complete_args use_prelude tl
   | "xref" :: tl -> parse_xref_args use_prelude tl
   | "print-cache-dump" :: [] -> Print_cache_dump
@@ -256,8 +334,8 @@ let () =
         if String.equal input_path "-" then cli_fail "dump-docs does not support stdin input ('-')";
         Docs.dump_docs_for_input ~use_prelude ~input_path ~out_dir
     | Dump_stdlib_docs { out_dir } -> Docs.dump_stdlib_docs ~out_dir
-    | Show_doc { use_prelude; name; input_path } ->
-        let entries = Index.find_by_name ~use_prelude ?input_path name in
+    | Show_doc { use_prelude; name; input_path; at } ->
+        let entries = Index.find_by_name ~use_prelude ?input_path ?at name in
         if List.is_empty entries then failf "No documentation found for symbol: %s" name;
         Out_channel.output_string stdout (Index.render_show_doc entries);
         Out_channel.newline stdout
@@ -265,8 +343,8 @@ let () =
         let items = Index.complete ~use_prelude ~input_path ~prefix in
         if json then Out_channel.output_string stdout (Index.symbols_to_json items ^ "\n")
         else List.iter items ~f:(fun item -> Out_channel.output_string stdout (item.name ^ "\n"))
-    | Xref { use_prelude; json; symbol; input_path } ->
-        let defs = Index.find_by_name ~use_prelude ?input_path:(Some input_path) symbol in
+    | Xref { use_prelude; json; symbol; input_path; at } ->
+        let defs = Index.find_by_name ~use_prelude ?input_path:(Some input_path) ?at symbol in
         if json then Out_channel.output_string stdout (Index.symbols_to_json defs ^ "\n")
         else
           List.iter defs ~f:(fun d ->
@@ -284,6 +362,7 @@ let () =
         Out_channel.output_string stdout out;
         if not json then ()
         else Out_channel.newline stdout
+    | Help -> help ()
   with
   | Sexc_errors items ->
       (* Multi-error: печатаем все накопленные диагностики, разделяя пустой
