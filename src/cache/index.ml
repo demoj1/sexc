@@ -43,23 +43,26 @@ let rec render_raw = function
   | Raw.Str (s, _) -> "\"" ^ String.escaped s ^ "\""
   | Raw.List (xs, _) -> "(" ^ String.concat ~sep:" " (List.map xs ~f:render_raw) ^ ")"
 
-(* The dynamic slots a function declares it requires, scanned from any (slot*
-   TYPE NAME …) statements in its body (name = every other arg). Direct only —
-   the index does no macro/analysis phase. Used to enrich a function's eldoc. *)
+(* The dynamic slots a function requires, as "TYPE NAME" strings. slot* declares
+   them as (type name) pairs in the body, so eldoc can show the type each slot
+   wants. Direct scan only — the index runs no macro/analysis phase. *)
 let required_slots body =
   List.concat_map body ~f:(fun f ->
       match Reader.to_raw f with
       | Raw.List ((Raw.Atom ("slot*", _) :: pairs), _) ->
-          List.filteri pairs ~f:(fun i _ -> i % 2 = 1)
-          |> List.filter_map ~f:(function Raw.Atom (n, _) -> Some n | _ -> None)
+          let rec pair_up = function
+            | ty :: Raw.Atom (n, _) :: rest -> (render_raw ty ^ " " ^ n) :: pair_up rest
+            | _ -> []
+          in
+          pair_up pairs
       | _ -> [])
 
 (* Append a "requires: …" second line to a function signature when it declares
-   dynamic slots, so eldoc shows them under the signature. *)
+   dynamic slots, so eldoc shows them (with their types) under the signature. *)
 let with_required_slots sig_s body =
   match required_slots body with
   | [] -> sig_s
-  | slots -> sig_s ^ "\nrequires: " ^ String.concat ~sep:" " slots
+  | slots -> sig_s ^ "\nrequires: " ^ String.concat ~sep:", " slots
 
 type doc_meta = {
   signature : string option;

@@ -150,6 +150,22 @@ if [[ -z "${FILTER}" ]]; then
             | tee "${results_dir}/smoke-onerror-sig.fail"
     fi
 
+    # eldoc 'requires:' line names each required slot WITH its type.
+    slots_file="${results_dir}/slots.sexc"
+    {
+        printf '(include <stdio.h>)\n'
+        printf '(defn void log-line ((:* :const char m))\n'
+        printf '  (slot* (:* FILE) *out*)\n'
+        printf '  (fprintf *out* "%%s" m))\n'
+    } > "${slots_file}"
+    if "${SEXC}" show-doc "log-line" "${slots_file}" 2>/dev/null | grep -qF 'requires: (:* FILE) *out*'; then
+        printf '\033[32mPASS\033[0m smoke slot-type\n'
+        touch "${results_dir}/smoke-slot-type.pass"
+    else
+        printf '\033[31mFAIL\033[0m smoke slot-type (required slot type missing from requires line)\n' \
+            | tee "${results_dir}/smoke-slot-type.fail"
+    fi
+
     # --help is ASCII-only (no em-dash / arrow), exits 0, and lists Commands.
     help_out="$("${SEXC}" --help 2>&1)"; help_rc=$?
     if [[ ${help_rc} -eq 0 ]] && printf '%s' "${help_out}" | grep -q '^Commands:' \
