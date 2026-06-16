@@ -619,48 +619,97 @@ verbatim as a second line; only the first line is reformatted."
                 :annotation-function #'sexc--completion-annotation
                 :exclusive 'no))))))
 
-(defun sexc/eldoc-function (&rest _ignored)
-  "Return Eldoc string for symbol at point in SexC buffers.
+;; Caches defined later in the file (m-dump section); declare them here so the
+;; async Eldoc helpers above their definition compile without a free-var warning.
+(defvar sexc/man-eldoc-cache)
+(defvar sexc/m-dump-cache)
 
-Chain of fallbacks (first hit wins):
-  1. `sexc show-doc` for %doc-documented SexC symbols
-  2. completion metadata cache
-  3. compile-time $m-put metadata (via `sexc m-dump`)
-  4. static eldoc dictionary `sexc/eldoc-docs`
-  5. C-library fallback via `man 3 SYM` / `man 2 SYM`"
+(defvar sexc--eldoc-proc nil
+  "In-flight async Eldoc process for the current buffer, if any.")
+
+(defun sexc/eldoc-function (callback &rest _ignored)
+  "Eldoc for the symbol at point. Never blocks the command loop: answers
+instantly from caches, otherwise spawns `sexc show-doc' in the background
+and replies through CALLBACK (the async Eldoc protocol).
+
+Fallbacks, in order: cached `sexc show-doc'; the static `sexc/eldoc-docs'
+dictionary; cached `man' synopsis; then (in the background) compile-time
+metadata via `sexc m-dump' and a fresh `man 3/2 SYM' lookup."
   (let ((sym (sexc--atom-at-point)))
     (when sym
-      (or (sexc--eldoc-via-show-doc sym)
-          (sexc--eldoc-via-completion-meta sym)
-          (sexc--eldoc-via-m-dump sym)
+      (let ((cached (sexc--eldoc-cached sym)))
+        (if (eq cached :pending)
+            (progn (sexc--eldoc-async sym (or buffer-file-name "") callback) t)
+          cached)))))
+
+(defun sexc--eldoc-cached (sym)
+  "Return a known Eldoc string for SYM WITHOUT spawning a process, or the
+marker `:pending' when a background lookup is needed. nil means \"known to
+have no doc\"."
+  (let* ((file (or buffer-file-name ""))
+         (sd (and sexc/eldoc-use-show-doc
+                  (gethash (cons sym file) sexc/eldoc-cache :__missing__)))
+         (man (gethash sym sexc/man-eldoc-cache 'unknown)))
+    (cond
+     ;; show-doc disabled → use only the synchronous-but-cached sources
+     ((not sexc/eldoc-use-show-doc)
+      (or (sexc--eldoc-via-m-dump sym)
           (cdr (assoc sym sexc/eldoc-docs))
-          (sexc--c-eldoc-fallback sym)))))
+          (sexc--c-eldoc-fallback sym)))
+     ((and (not (eq sd :__missing__)) sd) sd)        ; cached show-doc hit
+     ((cdr (assoc sym sexc/eldoc-docs)))             ; static dictionary
+     ((stringp man) man)                             ; cached man synopsis
+     ((not (eq sd :__missing__)) nil)                ; cached "no doc" → nothing
+     (t :pending))))
 
-(defun sexc--eldoc-via-show-doc (sym)
-  "Return Eldoc for SYM via `sexc show-doc`, or nil.
-
-Results are cached per symbol and current buffer file path."
-  (when (and sexc/eldoc-use-show-doc sym)
-    (let* ((file (or buffer-file-name ""))
-           (cache-key (cons sym file))
-           (cached (gethash cache-key sexc/eldoc-cache :__missing__)))
-      (if (not (eq cached :__missing__))
-          cached
-        (let ((doc (sexc--fetch-eldoc-from-compiler sym file)))
-          (puthash cache-key doc sexc/eldoc-cache)
-          doc)))))
-
-(defun sexc--fetch-eldoc-from-compiler (sym file)
-  "Fetch and format Eldoc string for SYM using `sexc show-doc`.
-
-FILE is optional source path for project-aware lookup."
-  (condition-case nil
-      (let* ((bin (sexc--resolve-binary))
+(defun sexc--eldoc-async (sym file callback)
+  "Run `sexc show-doc' for SYM in the background and reply to CALLBACK with the
+formatted doc, falling back (off the command loop) to m-dump / man / the
+static dictionary. Cancels any previous in-flight lookup."
+  (let ((bin (sexc--resolve-binary)))
+    (if (not bin)
+        (funcall callback (cdr (assoc sym sexc/eldoc-docs)))
+      (when (process-live-p sexc--eldoc-proc)
+        (ignore-errors (kill-process sexc--eldoc-proc)))
+      (let* ((key (cons sym file))
+             (src (current-buffer))
              (args (append (list "show-doc") (sexc--at-args) (list sym)
-                           (if (and file (not (string-empty-p file))) (list file) nil)))
-             (lines (and bin (apply #'process-lines bin args))))
-        (sexc--format-show-doc-lines lines sym))
-    (error nil)))
+                           (and (not (string-empty-p file)) (list file))))
+             (buf (generate-new-buffer " *sexc-eldoc*")))
+        (condition-case nil
+            (setq sexc--eldoc-proc
+                  (make-process
+                   :name "sexc-eldoc" :noquery t :connection-type 'pipe
+                   :buffer buf :command (cons bin args)
+                   :sentinel
+                   (lambda (proc _ev)
+                     (when (memq (process-status proc) '(exit signal))
+                       (unwind-protect
+                           ;; A killed process (signal) was superseded by a newer
+                           ;; query, which will reply instead — only a clean exit
+                           ;; answers. The buffer is freed either way.
+                           (when (eq (process-status proc) 'exit)
+                             (let* ((out (with-current-buffer (process-buffer proc)
+                                           (buffer-string)))
+                                    (lines (split-string out "\n" t))
+                                    (doc (sexc--format-show-doc-lines lines sym)))
+                               (puthash key doc sexc/eldoc-cache)
+                               (unless doc
+                                 (setq doc (when (buffer-live-p src)
+                                             (with-current-buffer src
+                                               (or (sexc--eldoc-via-m-dump sym)
+                                                   (cdr (assoc sym sexc/eldoc-docs))
+                                                   (sexc--c-eldoc-fallback sym))))))
+                               ;; only answer if the symbol under point is still SYM
+                               (when (and (buffer-live-p src)
+                                          (equal sym (with-current-buffer src
+                                                       (sexc--atom-at-point))))
+                                 (funcall callback doc))))
+                         (when (buffer-live-p (process-buffer proc))
+                           (kill-buffer (process-buffer proc))))))))
+          (error
+           (kill-buffer buf)
+           (funcall callback (cdr (assoc sym sexc/eldoc-docs)))))))))
 
 (defun sexc--format-show-doc-lines (lines sym)
   "Build a one-line Eldoc summary from `show-doc` LINES for SYM."
