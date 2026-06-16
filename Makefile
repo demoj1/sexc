@@ -5,6 +5,7 @@ DESTDIR ?=
 BINDIR := $(DESTDIR)$(PREFIX)/bin
 STDLIBDIR := $(DESTDIR)$(PREFIX)/include/sexc/std
 DOCDIR := $(DESTDIR)$(PREFIX)/share/sexc/docs
+MANDIR := $(DESTDIR)$(PREFIX)/share/man/man1
 
 all: build
 
@@ -42,12 +43,15 @@ install:
 	@mkdir -p "$(BINDIR)"
 	@mkdir -p "$(STDLIBDIR)"
 	@mkdir -p "$(DOCDIR)"
+	@mkdir -p "$(MANDIR)"
 	cp ./sexc "$(BINDIR)/sexc"
 	@chmod 755 "$(BINDIR)/sexc"
 	cp ./std/*.sexc "$(STDLIBDIR)/"
+	cp ./man/sexc.1 "$(MANDIR)/sexc.1"
 	SEXC_STDLIB_DIR="$(PWD)/std" ./sexc dump-stdlib-docs "$(DOCDIR)"
 	@echo "Installed sexc to $(BINDIR)/sexc"
 	@echo "Installed stdlib to $(STDLIBDIR)"
+	@echo "Installed man page to $(MANDIR)/sexc.1"
 	@echo "Installed docs to $(DOCDIR)"
 
 clean:

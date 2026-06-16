@@ -114,6 +114,9 @@
 - `./sexc complete --json <prefix> [input.sexc|-]` — выдать completion в JSON (единый symbol-формат: `name`, `kind`, `file`, `line`, optional `module`/`signature`/`doc`/`example`/`type`, `internal`, `file_md5`).
 - `./sexc xref --json <symbol> <input.sexc>` — выдать определения символа (локации + метаданные) из того же индекс-кэша.
 - `./sexc print-cache-dump` — вывести весь disk-cache индекса символов в human-readable виде.
+- `-h`/`--help` — краткий ASCII-list команд/флагов/аргументов (`help ()` в `sexc.ml`); подробности и примеры — в man-странице `man/sexc.1` (ставится `make install` в `share/man/man1`). Em-dash/стрелки в help нельзя.
+- **`obj::method` резолв (goto-def + сигнатура):** `xref`/`show-doc` принимают `--at LINE:COL`. `Index.find_by_name ~?at` при имени с `::` зовёт `resolve_obj_method`: берёт ближайшую НАД курсором переменную `obj` (по `s.line <= line`, max line), её тип → `base_type_of_string` (последний не-`:keyword`/`%` атом) → `Type/method`. Чтобы это работало, индексатор (`index.ml`) теперь ОБХОДИТ тело `defn` (раньше нет): пишет параметры и локальные `decl` как `var.local` со scope=fq и типом (`binding_of_group` понимает и bundled `(:* T x)`). Top-level `decl` → `var.global` (остаётся в `complete`); `var.local` из `complete` ИСКЛЮЧЕНЫ (scope-шум). Эмакс (`sexc.el`) шлёт `--at` через `sexc--at-args`.
+- **eldoc-обогащение defn:** индексная сигнатура несёт `:on-error` (`[:on-error V]`) и вторую строку `requires: <slots>` (`with_required_slots`); `sexc--format-show-doc-lines` подклеивает `requires:` к сигнатуре (иначе терялась). `defn`-индексатор пропускает флаги в ОБЕИХ позициях (`peel_defn_flags`).
 
 ## `%doc` metadata
 
