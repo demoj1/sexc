@@ -90,6 +90,28 @@ let resolve_import ~from_file rel =
   if String.is_suffix full ~suffix:".sexc" then full
   else full ^ ".sexc"
 
+(* Лексически канонизируем путь: схлопываем "." / ".." / "//". Нужно, чтобы один и тот же файл,
+   импортированный по разным относительным написаниям (core/../x.sexc vs ecs/../x.sexc — из файлов
+   в РАЗНЫХ подпапках), давал ОДИН visited-ключ и сплайсился ровно раз. Чисто лексически, без
+   обращения к ФС / резолва симлинков (файл может ещё не читаться в момент ключевания). *)
+let normalize_path p =
+  let is_abs = String.is_prefix p ~prefix:"/" in
+  let out =
+    List.fold (String.split p ~on:'/') ~init:[] ~f:(fun acc seg ->
+        match seg with
+        | "" | "." -> acc
+        | ".." -> (
+            match acc with
+            | top :: rest when not (String.equal top "..") -> rest
+            | _ -> seg :: acc (* ведущие ".." у относительного пути сохраняем *))
+        | _ -> seg :: acc)
+    |> List.rev
+  in
+  let joined = String.concat ~sep:"/" out in
+  if is_abs then "/" ^ joined
+  else if String.is_empty joined then "."
+  else joined
+
 (* Возвращает (path, alias-option). Поддерживается:
      (%import "./path")
      (%import "./path" :as alias)
@@ -407,7 +429,7 @@ let flatten_top_splice (tops : top_form list) : top_form list =
    того, кого импортирует, даже если файл уже загружен другой веткой. *)
 let rec load_forms_from_file ~visited ~module_names ~use_prelude path
     : String.Set.t * string option Map.M(String).t * top_form list =
-  let abs = path in
+  let abs = normalize_path path in
   if Set.mem visited abs then (visited, module_names, [])
   else
     let visited = Set.add visited abs in
